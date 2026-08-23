@@ -38,7 +38,9 @@ export async function syncProfile(user: User) {
       display_name:
         (meta["full_name"] as string) ||
         (meta["name"] as string) ||
-        (user.email ? user.email.split("@")[0] : "Névtelen"),
+        (user.email ? user.email.split("@")[0] : "Névtelen") ||
+        "Névtelen",
+
       avatar_url: (meta["avatar_url"] as string) || (meta["picture"] as string) || null,
       updated_at: new Date().toISOString(),
     },
