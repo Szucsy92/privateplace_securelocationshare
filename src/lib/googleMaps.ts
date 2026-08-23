@@ -53,7 +53,7 @@ export const darkMapStyle: google.maps.MapTypeStyle[] = [
   { featureType: "transit", stylers: [{ visibility: "off" }] },
   { featureType: "road", elementType: "geometry", stylers: [{ color: "#2a3244" }] },
   { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#9aa7bf" }] },
-  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#3a4considered" }] },
+  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#3a4560" }] },
   { featureType: "water", elementType: "geometry", stylers: [{ color: "#131a26" }] },
   { featureType: "administrative", elementType: "geometry.stroke", stylers: [{ color: "#39435a" }] },
 ];
