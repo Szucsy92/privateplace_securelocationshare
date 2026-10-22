@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ClientOnly } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { Bell, Crosshair, LogOut, Plus, Route as RouteIcon, Settings2, Trash2, X } from "lucide-react";
+import { Bell, Crosshair, LogOut, Plus, Settings2, Trash2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { TRAIL_MS, appendTrackPoint, clearTrackHistory, shouldPublishLocation, shouldTrackOwnPosition } from "@/lib/tracking";
 import { supabase } from "@/integrations/supabase/client";
@@ -10,6 +10,7 @@ import { useAuth, syncProfile } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import type { MapPerson, TrackPoint } from "@/components/LiveMap";
 
 const LiveMap = lazy(() => import("@/components/LiveMap"));
@@ -62,7 +63,7 @@ function MapPage() {
   const [tracks, setTracks] = useState<Record<string, TrackPoint[]>>({});
   const [meta, setMeta] = useState<Record<string, { speed: number | null; accuracy: number | null; at: number }>>({});
   const [sharing, setSharing] = useState(false);
-  const [showTrails, setShowTrails] = useState(true);
+  const [showTrails, setShowTrails] = useState(false);
   const [focus, setFocus] = useState<{ id: string; request: number } | null>(null);
   const [gpsStatus, setGpsStatus] = useState<"waiting" | "live" | "denied" | "error">("waiting");
   const [gpsRequest, setGpsRequest] = useState(0);
@@ -402,7 +403,6 @@ function MapPage() {
         </div>
         <div className="absolute bottom-5 left-3 flex flex-col gap-2">
           <Button size="icon" variant="secondary" className="border shadow-panel" aria-label="Saját pozíció" title="Saját pozíció" onClick={() => user && jumpTo(user.id)}><Crosshair className="h-5 w-5" /></Button>
-          <Button size="icon" variant={showTrails ? "default" : "secondary"} aria-label="Nyomvonal" title="Nyomvonal" aria-pressed={showTrails} onClick={() => setShowTrails(!showTrails)}><RouteIcon className="h-5 w-5" /></Button>
         </div>
       </main>
       <section className="shrink-0 border-t bg-surface" aria-label="Saját magam és akiket követek">
@@ -435,7 +435,7 @@ function MapPage() {
           <DialogHeader><DialogTitle>{dialog === "add" ? "Személy követése" : dialog === "requests" ? "Engedélykérések" : "Beállítások"}</DialogTitle><DialogDescription>{dialog === "add" ? "A követéshez a másik személy jóváhagyása szükséges." : dialog === "requests" ? "Te döntöd el, ki láthatja a megosztott helyzetedet." : "Saját követésed csak a megosztás bekapcsolásakor látható másoknak."}</DialogDescription></DialogHeader>
           {dialog === "add" && <form onSubmit={addPerson} className="space-y-3"><Input type="email" aria-label="Követett személy e-mail címe" placeholder="email@pelda.hu" value={emailInput} onChange={(e) => setEmailInput(e.target.value)} required /><Button className="w-full" type="submit">Kérelem küldése</Button></form>}
           {dialog === "requests" && <div className="space-y-4">{incoming.length === 0 && <p className="text-sm text-muted-foreground">Nincs új engedélykérés.</p>}{incoming.map((f) => <div key={f.id} className="space-y-2"><p className="break-words text-sm">{profiles[f.follower_id]?.display_name ?? profiles[f.follower_id]?.email ?? "Valaki"}</p><div className="flex gap-2"><Button size="sm" onClick={() => respond(f.id, "accepted")}>Engedem</Button><Button size="sm" variant="outline" onClick={() => respond(f.id, "rejected")}>Elutasítom</Button></div></div>)}</div>}
-          {dialog === "settings" && <div className="space-y-5"><div className="flex items-center justify-between gap-3"><label htmlFor="share" className="text-sm">Helyzetem megosztása</label><Switch id="share" aria-label="Megosztás" checked={sharing} disabled={deleting || gpsStatus !== "live"} onCheckedChange={(value) => { sharingRef.current = value; setSharing(value); }} /></div><div className="flex items-center justify-between gap-3"><label htmlFor="trails" className="text-sm">Nyomvonal</label><Switch id="trails" checked={showTrails} onCheckedChange={setShowTrails} /></div><div className="space-y-3 border-t pt-4"><p className="text-xs text-muted-foreground">A megosztott helyadatokat 7 napig őrizzük. A régebbi pontokat óránként töröljük.</p>{confirmDelete ? <div className="space-y-3"><p className="text-sm">Törlöd az összes korábbi saját helyadatodat? Ez nem vonható vissza, és a megosztás is kikapcsol.</p><div className="flex gap-2"><Button variant="destructive" disabled={deleting} onClick={deleteLocations}>{deleting ? "Törlés…" : "Igen, törlöm"}</Button><Button variant="outline" disabled={deleting} onClick={() => setConfirmDelete(false)}>Mégsem</Button></div></div> : <Button variant="outline" className="w-full" onClick={() => setConfirmDelete(true)}><Trash2 className="mr-2 h-4 w-4" />Saját helyadataim törlése</Button>}</div><Button variant="outline" className="w-full" disabled={deleting} onClick={signOut}><LogOut className="mr-2 h-4 w-4" />Kilépés</Button></div>}
+          {dialog === "settings" && <div className="space-y-5"><div className="flex items-center justify-between gap-3"><label htmlFor="share" className="text-sm">Helyzetem megosztása</label><Switch id="share" aria-label="Megosztás" checked={sharing} disabled={deleting || gpsStatus !== "live"} onCheckedChange={(value) => { sharingRef.current = value; setSharing(value); }} /></div><div className="flex items-center gap-3"><Checkbox id="trails" checked={showTrails} onCheckedChange={(value) => setShowTrails(value === true)} /><label htmlFor="trails" className="text-sm">Útvonalak kirajzolása a térképen</label></div><div className="space-y-3 border-t pt-4"><p className="text-xs text-muted-foreground">A megosztott helyadatokat 7 napig őrizzük. A régebbi pontokat óránként töröljük.</p>{confirmDelete ? <div className="space-y-3"><p className="text-sm">Törlöd az összes korábbi saját helyadatodat? Ez nem vonható vissza, és a megosztás is kikapcsol.</p><div className="flex gap-2"><Button variant="destructive" disabled={deleting} onClick={deleteLocations}>{deleting ? "Törlés…" : "Igen, törlöm"}</Button><Button variant="outline" disabled={deleting} onClick={() => setConfirmDelete(false)}>Mégsem</Button></div></div> : <Button variant="outline" className="w-full" onClick={() => setConfirmDelete(true)}><Trash2 className="mr-2 h-4 w-4" />Saját helyadataim törlése</Button>}</div><Button variant="outline" className="w-full" disabled={deleting} onClick={signOut}><LogOut className="mr-2 h-4 w-4" />Kilépés</Button></div>}
         </DialogContent>
       </Dialog>
     </div>
