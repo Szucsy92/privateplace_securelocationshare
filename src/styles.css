@@ -72,6 +72,7 @@
   --ring: oklch(0.82 0.19 165);
   --live: oklch(0.82 0.19 165);
   --warn: oklch(0.8 0.15 78);
+  --dialog-backdrop: oklch(0.05 0.01 258 / 0.8);
 }
 
 .dark {
@@ -156,6 +157,15 @@
 
 .person-avatar {
   border-color: var(--person-color, var(--primary));
+}
+
+[role="dialog"].dialog-surface {
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+.dialog-backdrop {
+  background-color: var(--dialog-backdrop);
 }
 
 @media (prefers-reduced-motion: reduce) {

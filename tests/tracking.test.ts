@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { shouldPublishLocation, appendTrackPoint } from "../src/lib/tracking";
+import { shouldPublishLocation, appendTrackPoint, shouldTrackOwnPosition } from "../src/lib/tracking";
 
 describe("saját követés és megosztás", () => {
+  test("belépve a saját pozíció automatikusan követhető külön kapcsoló nélkül", () => {
+    expect(shouldTrackOwnPosition("signed-in-user")).toBe(true);
+    expect(shouldTrackOwnPosition(undefined)).toBe(false);
+  });
   test("a saját követés megosztás nélkül nem küld helyadatot", () => {
     expect(shouldPublishLocation(false, 5000, 0)).toBe(false);
   });

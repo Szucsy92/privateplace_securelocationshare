@@ -4,7 +4,7 @@ import { ClientOnly } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { Bell, Crosshair, LogOut, Plus, Route as RouteIcon, Settings2, Trash2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { TRAIL_MS, appendTrackPoint, shouldPublishLocation } from "@/lib/tracking";
+import { TRAIL_MS, appendTrackPoint, shouldPublishLocation, shouldTrackOwnPosition } from "@/lib/tracking";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, syncProfile } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -212,7 +212,7 @@ function MapPage() {
 
   // A saját GPS mindig fut; csak az explicit megosztás publikálhat.
   useEffect(() => {
-    if (!user) return;
+    if (!shouldTrackOwnPosition(user?.id) || !user) return;
     setGpsStatus("waiting");
     if (!("geolocation" in navigator)) {
       toast.error("Ez az eszköz nem támogatja a helymeghatározást");
