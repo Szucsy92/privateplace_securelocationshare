@@ -153,9 +153,12 @@ function MapPage() {
         next[user.id] = privateTracksRef.current;
       }
       setTracks(next);
-      setMeta((previous) => user && privateTracksRef.current.length
-        ? { ...nextMeta, [user.id]: previous[user.id] ?? nextMeta[user.id] }
-        : nextMeta);
+      setMeta((previous) => {
+        const own = user ? previous[user.id] : undefined;
+        return user && privateTracksRef.current.length && own
+          ? { ...nextMeta, [user.id]: own }
+          : nextMeta;
+      });
     })();
     return () => {
       cancelled = true;
