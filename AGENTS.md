@@ -11,4 +11,6 @@
 
 - Keep the map workspace in a viewport-sized shell with modal controls and a horizontal people rail so the page never needs vertical scrolling.
 - Keep private self-tracking in browser memory, separate from shared location writes; only the explicit sharing toggle may publish coordinates.
+- Start private GPS observation automatically for signed-in map users, and never merge shared self-history into the private track so the own marker represents this device.
+- Delete own location history through the authenticated invoker RPC after draining pending writes and disabling sharing, so deletion cannot race with queued publication.
 - Use a numbered focus request for map centering so repeated taps on the same person always recenter the map.

@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ClientOnly } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { Bell, Crosshair, LogOut, Plus, Route as RouteIcon, Settings2, X } from "lucide-react";
+import { Bell, Crosshair, LogOut, Plus, Route as RouteIcon, Settings2, Trash2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { TRAIL_MS, appendTrackPoint, shouldPublishLocation } from "@/lib/tracking";
 import { supabase } from "@/integrations/supabase/client";
@@ -64,7 +64,12 @@ function MapPage() {
   const [sharing, setSharing] = useState(false);
   const [showTrails, setShowTrails] = useState(true);
   const [focus, setFocus] = useState<{ id: string; request: number } | null>(null);
-  const [selfTracking, setSelfTracking] = useState(false);
+  const [gpsStatus, setGpsStatus] = useState<"waiting" | "live" | "denied" | "error">("waiting");
+  const [gpsRequest, setGpsRequest] = useState(0);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const publishingPausedRef = useRef(false);
+  const pendingWritesRef = useRef(new Set<Promise<unknown>>());
   const [dialog, setDialog] = useState<"add" | "requests" | "settings" | null>(null);
   const [clock, setClock] = useState(Date.now());
   const privateTracksRef = useRef<TrackPoint[]>([]);
@@ -78,7 +83,7 @@ function MapPage() {
 
   const jumpTo = (id: string) => {
     if (!tracks[id]?.length) {
-      toast.info(id === user?.id ? "Kapcsold be a saját követést a helyzetedhez." : "Még nem érkezett helyzet ettől a személytől.");
+      toast.info(id === user?.id ? "A saját helyzethez engedélyezd a helyhozzáférést az eszközödön." : "Még nem érkezett helyzet ettől a személytől.");
       return;
     }
     setFocus((previous) => ({ id, request: (previous?.request ?? 0) + 1 }));
@@ -137,7 +142,7 @@ function MapPage() {
       const { data } = await supabase
         .from("locations")
         .select("user_id, lat, lng, accuracy, speed, recorded_at")
-        .in("user_id", trackedIds)
+        .in("user_id", trackedIds.filter((id) => id !== user?.id))
         .gte("recorded_at", since)
         .order("recorded_at", { ascending: true })
         .limit(3000);
@@ -175,7 +180,7 @@ function MapPage() {
         { event: "INSERT", schema: "public", table: "locations" },
         (payload) => {
           const row = payload.new as LocRow;
-          if (!trackedIds.includes(row.user_id)) return;
+          if (!trackedIds.includes(row.user_id) || row.user_id === user.id) return;
           const t = new Date(row.recorded_at).getTime();
           setTracks((prev) => {
             const cutoff = Date.now() - TRAIL_MS;
@@ -205,24 +210,22 @@ function MapPage() {
     };
   }, [user, loadRelations, trackedIds.join(",")]);
 
-  // Saját helyzet megosztása – másodpercenként
+  // A saját GPS mindig fut; csak az explicit megosztás publikálhat.
   useEffect(() => {
-    if ((!selfTracking && !sharing) || !user) {
-      if (watchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(watchIdRef.current);
-        watchIdRef.current = null;
-      }
-      return;
-    }
+    if (!user) return;
+    setGpsStatus("waiting");
     if (!("geolocation" in navigator)) {
       toast.error("Ez az eszköz nem támogatja a helymeghatározást");
       setSharing(false);
-      setSelfTracking(false);
+      setGpsStatus("error");
       return;
     }
 
+    let cancelled = false;
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
+        if (cancelled) return;
+        setGpsStatus("live");
         const now = Date.now();
         const point = { lat: pos.coords.latitude, lng: pos.coords.longitude, t: now };
         privateTracksRef.current = appendTrackPoint(privateTracksRef.current, point, now);
@@ -230,9 +233,9 @@ function MapPage() {
         setMeta((previous) => ({ ...previous, [user.id]: {
           speed: pos.coords.speed, accuracy: pos.coords.accuracy, at: now,
         } }));
-        if (!shouldPublishLocation(sharingRef.current, now, lastSentRef.current)) return;
+        if (publishingPausedRef.current || !shouldPublishLocation(sharingRef.current, now, lastSentRef.current)) return;
         lastSentRef.current = now;
-        void supabase.from("locations").insert({
+        const write = Promise.resolve(supabase.from("locations").insert({
           user_id: user.id,
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
@@ -240,28 +243,34 @@ function MapPage() {
           speed: pos.coords.speed ?? null,
           heading: pos.coords.heading ?? null,
           recorded_at: new Date(now).toISOString(),
-        }).then(({ error }) => {
+        })).then(({ error }) => {
           if (error) {
             toast.error("A helyzet megosztása nem sikerült. A saját követés folytatódik.");
+            sharingRef.current = false;
             setSharing(false);
           }
         });
+        pendingWritesRef.current.add(write);
+        void write.finally(() => pendingWritesRef.current.delete(write));
       },
       (err) => {
-        toast.error(`Helymeghatározás hiba: ${err.message}`);
+        if (cancelled) return;
+        setGpsStatus(err.code === 1 ? "denied" : "error");
+        toast.error(err.code === 1 ? "Engedélyezd a helyhozzáférést, hogy lásd a saját pozíciódat." : "Nem érkezik GPS-jel. Ellenőrizd az eszköz helymeghatározását.");
+        sharingRef.current = false;
         setSharing(false);
-        setSelfTracking(false);
       },
       { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 },
     );
 
     return () => {
+      cancelled = true;
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
         watchIdRef.current = null;
       }
     };
-  }, [selfTracking || sharing, user]);
+  }, [gpsRequest, user]);
 
   const people: MapPerson[] = useMemo(() => {
     return trackedIds
@@ -325,9 +334,37 @@ function MapPage() {
   };
 
   const signOut = async () => {
+    sharingRef.current = false;
     setSharing(false);
     await supabase.auth.signOut();
     void navigate({ to: "/" });
+  };
+
+  const deleteLocations = async () => {
+    if (!user || deleting) return;
+    setDeleting(true);
+    publishingPausedRef.current = true;
+    sharingRef.current = false;
+    setSharing(false);
+    try {
+      await Promise.allSettled([...pendingWritesRef.current]);
+      const { error } = await supabase.rpc("delete_my_location_data");
+      if (error) throw error;
+      privateTracksRef.current = [];
+      setTracks((previous) => ({ ...previous, [user.id]: [] }));
+      setMeta((previous) => {
+        const next = { ...previous };
+        delete next[user.id];
+        return next;
+      });
+      setConfirmDelete(false);
+      toast.success("A korábbi saját helyadataid törölve. A megosztás kikapcsolva.");
+    } catch {
+      toast.error("A törlés nem sikerült. Próbáld újra.");
+    } finally {
+      publishingPausedRef.current = false;
+      setDeleting(false);
+    }
   };
 
   if (loading) {
@@ -365,8 +402,8 @@ function MapPage() {
           </Suspense>
         </ClientOnly>
         <div className="absolute left-3 top-3 flex items-center gap-2 rounded-md border bg-surface px-3 py-2 text-xs shadow-panel">
-          <span className={selfTracking || sharing ? "live-dot" : "h-2 w-2 rounded-full bg-muted-foreground"} />
-          {sharing ? `Megosztás · ${watchers.length} néző` : selfTracking ? "Saját követés" : "Követés kikapcsolva"}
+          <span className={gpsStatus === "live" ? "live-dot" : "h-2 w-2 rounded-full bg-muted-foreground"} />
+          {gpsStatus === "denied" ? "Helyhozzáférés szükséges" : gpsStatus === "error" ? "Nincs GPS-jel" : gpsStatus === "waiting" ? "Helyzet keresése…" : sharing ? `Megosztás · ${watchers.length} néző` : "Saját helyzet · privát"}
         </div>
         <div className="absolute bottom-5 left-3 flex flex-col gap-2">
           <Button size="icon" variant="secondary" className="border shadow-panel" aria-label="Saját pozíció" title="Saját pozíció" onClick={() => user && jumpTo(user.id)}><Crosshair className="h-5 w-5" /></Button>
@@ -381,7 +418,7 @@ function MapPage() {
               <div className="min-w-0 flex-1"><h2 className="text-sm font-semibold">Saját magam</h2><p className="truncate text-xs text-muted-foreground">{ownMeta ? `${ownFresh ? "élő" : "utoljára " + relTime(ownMeta.at)} · ${kmh(ownMeta.speed)}` : "Még nincs helyzet"}</p></div>
               <Button variant="ghost" size="icon" aria-label="Ugrás saját magamhoz" title="Ugrás saját magamhoz" onClick={() => user && jumpTo(user.id)}><Crosshair className="h-5 w-5" /></Button>
             </div>
-            <div className="mt-3 flex items-center justify-between gap-2"><label htmlFor="self-track" className="text-xs font-medium">Saját követés</label><Switch id="self-track" aria-label="Saját követés" checked={selfTracking} onCheckedChange={setSelfTracking} /></div>
+            <div className="mt-3 flex h-6 items-center justify-between gap-2"><span className="text-xs text-muted-foreground">{ownMeta?.accuracy != null ? `Pontosság ±${Math.round(ownMeta.accuracy)} m` : "Helyzet keresése…"}</span>{(gpsStatus === "denied" || gpsStatus === "error") && <Button variant="outline" size="sm" className="h-6" onClick={() => setGpsRequest((n) => n + 1)}>Újrapróbálás</Button>}</div>
           </article>
           {outgoing.map((f) => {
             const p = profiles[f.followed_id];
@@ -398,12 +435,12 @@ function MapPage() {
           {outgoing.length === 0 && <div className="flex w-44 shrink-0 flex-col items-start justify-center gap-2 px-2"><p className="text-xs text-muted-foreground">Még senkit nem követsz.</p><Button variant="outline" size="sm" onClick={() => setDialog("add")}><Plus className="mr-1 h-4 w-4" />Személy</Button></div>}
         </div>
       </section>
-      <Dialog open={dialog !== null} onOpenChange={(open) => !open && setDialog(null)}>
+      <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open && !deleting) { setDialog(null); setConfirmDelete(false); } }}>
         <DialogContent className="max-h-[85dvh] w-[calc(100%-2rem)] max-w-sm overflow-y-auto rounded-lg">
           <DialogHeader><DialogTitle>{dialog === "add" ? "Személy követése" : dialog === "requests" ? "Engedélykérések" : "Beállítások"}</DialogTitle><DialogDescription>{dialog === "add" ? "A követéshez a másik személy jóváhagyása szükséges." : dialog === "requests" ? "Te döntöd el, ki láthatja a megosztott helyzetedet." : "Saját követésed csak a megosztás bekapcsolásakor látható másoknak."}</DialogDescription></DialogHeader>
           {dialog === "add" && <form onSubmit={addPerson} className="space-y-3"><Input type="email" aria-label="Követett személy e-mail címe" placeholder="email@pelda.hu" value={emailInput} onChange={(e) => setEmailInput(e.target.value)} required /><Button className="w-full" type="submit">Kérelem küldése</Button></form>}
           {dialog === "requests" && <div className="space-y-4">{incoming.length === 0 && <p className="text-sm text-muted-foreground">Nincs új engedélykérés.</p>}{incoming.map((f) => <div key={f.id} className="space-y-2"><p className="break-words text-sm">{profiles[f.follower_id]?.display_name ?? profiles[f.follower_id]?.email ?? "Valaki"}</p><div className="flex gap-2"><Button size="sm" onClick={() => respond(f.id, "accepted")}>Engedem</Button><Button size="sm" variant="outline" onClick={() => respond(f.id, "rejected")}>Elutasítom</Button></div></div>)}</div>}
-          {dialog === "settings" && <div className="space-y-5"><div className="flex items-center justify-between gap-3"><label htmlFor="share" className="text-sm">Helyzetem megosztása</label><Switch id="share" aria-label="Megosztás" checked={sharing} onCheckedChange={setSharing} /></div><div className="flex items-center justify-between gap-3"><label htmlFor="trails" className="text-sm">Nyomvonal</label><Switch id="trails" checked={showTrails} onCheckedChange={setShowTrails} /></div><Button variant="outline" className="w-full" onClick={signOut}><LogOut className="mr-2 h-4 w-4" />Kilépés</Button></div>}
+          {dialog === "settings" && <div className="space-y-5"><div className="flex items-center justify-between gap-3"><label htmlFor="share" className="text-sm">Helyzetem megosztása</label><Switch id="share" aria-label="Megosztás" checked={sharing} disabled={deleting || gpsStatus !== "live"} onCheckedChange={(value) => { sharingRef.current = value; setSharing(value); }} /></div><div className="flex items-center justify-between gap-3"><label htmlFor="trails" className="text-sm">Nyomvonal</label><Switch id="trails" checked={showTrails} onCheckedChange={setShowTrails} /></div><div className="space-y-3 border-t pt-4"><p className="text-xs text-muted-foreground">A megosztott helyadatokat 7 napig őrizzük. A régebbi pontokat óránként töröljük.</p>{confirmDelete ? <div className="space-y-3"><p className="text-sm">Törlöd az összes korábbi saját helyadatodat? Ez nem vonható vissza, és a megosztás is kikapcsol.</p><div className="flex gap-2"><Button variant="destructive" disabled={deleting} onClick={deleteLocations}>{deleting ? "Törlés…" : "Igen, törlöm"}</Button><Button variant="outline" disabled={deleting} onClick={() => setConfirmDelete(false)}>Mégsem</Button></div></div> : <Button variant="outline" className="w-full" onClick={() => setConfirmDelete(true)}><Trash2 className="mr-2 h-4 w-4" />Saját helyadataim törlése</Button>}</div><Button variant="outline" className="w-full" disabled={deleting} onClick={signOut}><LogOut className="mr-2 h-4 w-4" />Kilépés</Button></div>}
         </DialogContent>
       </Dialog>
     </div>
