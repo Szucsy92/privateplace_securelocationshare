@@ -168,6 +168,79 @@
   background-color: var(--dialog-backdrop);
 }
 
+.glass-shell {
+  background:
+    radial-gradient(120% 60% at 0% 0%, oklch(0.82 0.19 165 / 0.12), transparent 60%),
+    radial-gradient(100% 60% at 100% 100%, oklch(0.6 0.12 250 / 0.18), transparent 60%),
+    var(--background);
+  gap: 0.5rem;
+  padding: max(0.5rem, env(safe-area-inset-top)) 0.5rem 0;
+}
+
+.glass {
+  background: oklch(0.3 0.03 258 / 0.42);
+  backdrop-filter: blur(22px) saturate(140%);
+  border: 1px solid oklch(1 0 0 / 0.1);
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08), 0 10px 30px oklch(0.05 0.01 258 / 0.45);
+  border-radius: 1.25rem;
+}
+
+.map-panel {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1.5rem;
+  border: 1px solid oklch(1 0 0 / 0.1);
+  isolation: isolate;
+}
+
+.map-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  border-radius: inherit;
+  backdrop-filter: blur(10px);
+  mask-image: radial-gradient(ellipse 75% 75% at center, transparent 72%, black 100%);
+  box-shadow: inset 0 0 40px 10px oklch(0.17 0.03 258 / 0.75);
+}
+
+.map-panel > .map-overlay { z-index: 10; }
+
+.indicator {
+  transition: box-shadow 0.25s, background-color 0.25s, color 0.25s, opacity 0.25s;
+}
+
+.indicator[data-state="on"] {
+  color: var(--primary);
+  background-color: oklch(0.82 0.19 165 / 0.16);
+  box-shadow: 0 0 0 1px oklch(0.82 0.19 165 / 0.55), 0 0 16px oklch(0.82 0.19 165 / 0.45);
+}
+
+.indicator[data-state="off"] {
+  opacity: 0.6;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 9999px;
+  background-color: var(--muted-foreground);
+  opacity: 0.6;
+}
+
+.status-dot[data-state="on"] {
+  background-color: var(--live);
+  opacity: 1;
+  animation: var(--animate-pulse-ring);
+}
+
+.status-dot[data-state="warn"] {
+  background-color: var(--destructive);
+  opacity: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .live-dot { animation: none; }
+  .live-dot, .status-dot { animation: none; }
 }
