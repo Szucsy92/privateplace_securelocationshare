@@ -15,11 +15,11 @@ export type MapPerson = {
 
 type Props = {
   people: MapPerson[];
-  focusId: string | null;
+  focus: { id: string; request: number } | null;
   showTrails: boolean;
 };
 
-export default function LiveMap({ people, focusId, showTrails }: Props) {
+export default function LiveMap({ people, focus, showTrails }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<Map<string, google.maps.Marker>>(new Map());
@@ -134,13 +134,13 @@ export default function LiveMap({ people, focusId, showTrails }: Props) {
   // Kiválasztott személy középre
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !focusId) return;
-    const person = people.find((p) => p.id === focusId);
+    if (!map || !ready || !focus) return;
+    const person = people.find((p) => p.id === focus.id);
     const last = person?.points[person.points.length - 1];
     if (!last) return;
     map.panTo({ lat: last.lat, lng: last.lng });
     if ((map.getZoom() ?? 0) < 15) map.setZoom(16);
-  }, [focusId, people]);
+  }, [focus, ready]);
 
   if (error) {
     return (

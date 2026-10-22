@@ -124,6 +124,40 @@
   h3,
   .font-display {
     font-family: var(--font-display);
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
   }
+}
+
+.map-workspace {
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding-top: env(safe-area-inset-top);
+}
+
+.people-rail {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: thin;
+  padding: 0.75rem 0.75rem max(0.75rem, env(safe-area-inset-bottom));
+}
+
+.person-tile {
+  flex: 0 0 272px;
+  width: 272px;
+  scroll-snap-align: start;
+}
+
+.person-avatar {
+  border-color: var(--person-color, var(--primary));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot { animation: none; }
 }

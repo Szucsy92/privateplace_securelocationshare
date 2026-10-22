@@ -2,6 +2,9 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ClientOnly } from "@tanstack/react-router";
 import { toast } from "sonner";
+import { Bell, Crosshair, LogOut, Plus, Route as RouteIcon, Settings2, X } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { TRAIL_MS, appendTrackPoint, shouldPublishLocation } from "@/lib/tracking";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, syncProfile } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -50,7 +53,6 @@ type LocRow = {
   recorded_at: string;
 };
 
-const TRAIL_MS = 30 * 60 * 1000;
 
 function MapPage() {
   const navigate = useNavigate();
@@ -61,7 +63,26 @@ function MapPage() {
   const [meta, setMeta] = useState<Record<string, { speed: number | null; accuracy: number | null; at: number }>>({});
   const [sharing, setSharing] = useState(false);
   const [showTrails, setShowTrails] = useState(true);
-  const [focusId, setFocusId] = useState<string | null>(null);
+  const [focus, setFocus] = useState<{ id: string; request: number } | null>(null);
+  const [selfTracking, setSelfTracking] = useState(false);
+  const [dialog, setDialog] = useState<"add" | "requests" | "settings" | null>(null);
+  const [clock, setClock] = useState(Date.now());
+  const privateTracksRef = useRef<TrackPoint[]>([]);
+  const sharingRef = useRef(sharing);
+  sharingRef.current = sharing;
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const jumpTo = (id: string) => {
+    if (!tracks[id]?.length) {
+      toast.info(id === user?.id ? "Kapcsold be a saját követést a helyzetedhez." : "Még nem érkezett helyzet ettől a személytől.");
+      return;
+    }
+    setFocus((previous) => ({ id, request: (previous?.request ?? 0) + 1 }));
+  };
   const [emailInput, setEmailInput] = useState("");
   const watchIdRef = useRef<number | null>(null);
   const lastSentRef = useRef(0);
@@ -128,8 +149,16 @@ function MapPage() {
         (next[row.user_id] ??= []).push({ lat: row.lat, lng: row.lng, t });
         nextMeta[row.user_id] = { speed: row.speed, accuracy: row.accuracy, at: t };
       });
+      if (user && privateTracksRef.current.length) {
+        next[user.id] = privateTracksRef.current;
+      }
       setTracks(next);
-      setMeta(nextMeta);
+      setMeta((previous) => {
+        const own = user ? previous[user.id] : undefined;
+        return user && privateTracksRef.current.length && own
+          ? { ...nextMeta, [user.id]: own }
+          : nextMeta;
+      });
     })();
     return () => {
       cancelled = true;
@@ -146,6 +175,7 @@ function MapPage() {
         { event: "INSERT", schema: "public", table: "locations" },
         (payload) => {
           const row = payload.new as LocRow;
+          if (!trackedIds.includes(row.user_id)) return;
           const t = new Date(row.recorded_at).getTime();
           setTracks((prev) => {
             const cutoff = Date.now() - TRAIL_MS;
@@ -173,11 +203,11 @@ function MapPage() {
       supabase.removeChannel(channel);
       supabase.removeChannel(followChannel);
     };
-  }, [user, loadRelations]);
+  }, [user, loadRelations, trackedIds.join(",")]);
 
   // Saját helyzet megosztása – másodpercenként
   useEffect(() => {
-    if (!sharing || !user) {
+    if ((!selfTracking && !sharing) || !user) {
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
         watchIdRef.current = null;
@@ -187,13 +217,20 @@ function MapPage() {
     if (!("geolocation" in navigator)) {
       toast.error("Ez az eszköz nem támogatja a helymeghatározást");
       setSharing(false);
+      setSelfTracking(false);
       return;
     }
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         const now = Date.now();
-        if (now - lastSentRef.current < 1000) return;
+        const point = { lat: pos.coords.latitude, lng: pos.coords.longitude, t: now };
+        privateTracksRef.current = appendTrackPoint(privateTracksRef.current, point, now);
+        setTracks((previous) => ({ ...previous, [user.id]: privateTracksRef.current }));
+        setMeta((previous) => ({ ...previous, [user.id]: {
+          speed: pos.coords.speed, accuracy: pos.coords.accuracy, at: now,
+        } }));
+        if (!shouldPublishLocation(sharingRef.current, now, lastSentRef.current)) return;
         lastSentRef.current = now;
         void supabase.from("locations").insert({
           user_id: user.id,
@@ -203,11 +240,17 @@ function MapPage() {
           speed: pos.coords.speed ?? null,
           heading: pos.coords.heading ?? null,
           recorded_at: new Date(now).toISOString(),
+        }).then(({ error }) => {
+          if (error) {
+            toast.error("A helyzet megosztása nem sikerült. A saját követés folytatódik.");
+            setSharing(false);
+          }
         });
       },
       (err) => {
         toast.error(`Helymeghatározás hiba: ${err.message}`);
         setSharing(false);
+        setSelfTracking(false);
       },
       { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 },
     );
@@ -218,7 +261,7 @@ function MapPage() {
         watchIdRef.current = null;
       }
     };
-  }, [sharing, user]);
+  }, [selfTracking || sharing, user]);
 
   const people: MapPerson[] = useMemo(() => {
     return trackedIds
@@ -228,7 +271,7 @@ function MapPage() {
           id,
           name: id === user?.id ? "Te" : (profile?.display_name ?? profile?.email ?? "Ismeretlen"),
           avatarUrl: profile?.avatar_url ?? null,
-          color: COLORS[i % COLORS.length]!,
+          color: COLORS[i % COLORS.length] ?? "#3ddc97",
           points: tracks[id] ?? [],
         };
       })
@@ -266,6 +309,7 @@ function MapPage() {
       return;
     }
     setEmailInput("");
+    setDialog(null);
     toast.success("Kérelem elküldve. Amint elfogadja, élőben látod.");
     void loadRelations();
   };
@@ -290,151 +334,81 @@ function MapPage() {
     return <div className="flex min-h-screen items-center justify-center text-muted-foreground">Betöltés…</div>;
   }
 
+  const self = profiles[user?.id ?? ""];
+  const ownMeta = meta[user?.id ?? ""];
+  const ownFresh = ownMeta ? clock - ownMeta.at < 15000 : false;
+  const avatar = (profile: Profile | undefined, color: string) => (
+    <span className="person-avatar flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 bg-surface-strong text-sm font-semibold" style={{ "--person-color": color } as React.CSSProperties}>
+      {profile?.avatar_url ? <img src={profile.avatar_url} alt="" className="h-full w-full object-cover" /> : (profile?.display_name ?? profile?.email ?? "?").charAt(0).toUpperCase()}
+    </span>
+  );
+
   return (
-    <div className="flex min-h-screen flex-col lg:h-screen lg:flex-row">
-      <aside className="order-2 flex w-full flex-col gap-5 border-border bg-surface p-5 lg:order-1 lg:w-[360px] lg:overflow-y-auto lg:border-r">
-        <header className="flex items-center justify-between">
-          <div>
-            <p className="font-display text-lg font-bold">Élő térkép</p>
-            <p className="text-xs text-muted-foreground">
-              {profiles[user?.id ?? ""]?.display_name ?? user?.email}
-            </p>
-          </div>
-          <Button variant="ghost" size="sm" onClick={signOut}>
-            Kilépés
+    <div className="map-workspace bg-background">
+      <header className="z-10 flex shrink-0 items-center justify-between gap-2 border-b bg-surface px-3 py-2">
+        <div className="min-w-0 flex-1">
+          <h1 className="font-display text-base font-bold">Élő térkép</h1>
+          <p className="truncate text-xs text-muted-foreground">{self?.display_name ?? user?.email}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button variant="ghost" size="icon" aria-label="Személy hozzáadása" title="Személy hozzáadása" onClick={() => setDialog("add")}><Plus className="h-5 w-5" /></Button>
+          <Button variant="ghost" size="icon" className="relative" aria-label="Engedélykérések" title="Engedélykérések" onClick={() => setDialog("requests")}>
+            <Bell className="h-5 w-5" />{incoming.length > 0 && <span className="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground">{incoming.length}</span>}
           </Button>
-        </header>
-
-        <section className="panel space-y-3 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold">Saját helyzetem megosztása</p>
-              <p className="text-xs text-muted-foreground">
-                Másodpercenként küldi a pozíciódat a jóváhagyott követőidnek.
-              </p>
+          <Button variant="ghost" size="icon" aria-label="Beállítások" title="Beállítások" onClick={() => setDialog("settings")}><Settings2 className="h-5 w-5" /></Button>
+        </div>
+      </header>
+      <main className="relative min-h-0 flex-1" aria-label="Térkép">
+        <ClientOnly fallback={<div className="h-full bg-muted" />}>
+          <Suspense fallback={<div className="h-full bg-muted" />}>
+            <LiveMap people={people} focus={focus} showTrails={showTrails} />
+          </Suspense>
+        </ClientOnly>
+        <div className="absolute left-3 top-3 flex items-center gap-2 rounded-md border bg-surface px-3 py-2 text-xs shadow-panel">
+          <span className={selfTracking || sharing ? "live-dot" : "h-2 w-2 rounded-full bg-muted-foreground"} />
+          {sharing ? `Megosztás · ${watchers.length} néző` : selfTracking ? "Saját követés" : "Követés kikapcsolva"}
+        </div>
+        <div className="absolute bottom-5 left-3 flex flex-col gap-2">
+          <Button size="icon" variant="secondary" className="border shadow-panel" aria-label="Saját pozíció" title="Saját pozíció" onClick={() => user && jumpTo(user.id)}><Crosshair className="h-5 w-5" /></Button>
+          <Button size="icon" variant={showTrails ? "default" : "secondary"} aria-label="Nyomvonal" title="Nyomvonal" aria-pressed={showTrails} onClick={() => setShowTrails(!showTrails)}><RouteIcon className="h-5 w-5" /></Button>
+        </div>
+      </main>
+      <section className="shrink-0 border-t bg-surface" aria-label="Saját magam és akiket követek">
+        <div className="people-rail">
+          <article className="person-tile rounded-lg border border-primary/50 bg-background p-3">
+            <div className="flex items-center gap-2">
+              {avatar(self, COLORS[0] ?? "")}
+              <div className="min-w-0 flex-1"><h2 className="text-sm font-semibold">Saját magam</h2><p className="truncate text-xs text-muted-foreground">{ownMeta ? `${ownFresh ? "élő" : "utoljára " + relTime(ownMeta.at)} · ${kmh(ownMeta.speed)}` : "Még nincs helyzet"}</p></div>
+              <Button variant="ghost" size="icon" aria-label="Ugrás saját magamhoz" title="Ugrás saját magamhoz" onClick={() => user && jumpTo(user.id)}><Crosshair className="h-5 w-5" /></Button>
             </div>
-            <Switch checked={sharing} onCheckedChange={setSharing} aria-label="Megosztás" />
-          </div>
-          {sharing && (
-            <p className="flex items-center gap-2 text-xs text-primary">
-              <span className="live-dot" /> Élő adás fut – {watchers.length} néző
-            </p>
-          )}
-        </section>
-
-        <section className="panel space-y-3 p-4">
-          <p className="text-sm font-semibold">Személy követése</p>
-          <form onSubmit={addPerson} className="flex gap-2">
-            <Input
-              type="email"
-              placeholder="email@pelda.hu"
-              value={emailInput}
-              onChange={(e) => setEmailInput(e.target.value)}
-            />
-            <Button type="submit">Kérés</Button>
-          </form>
-          <p className="text-xs text-muted-foreground">
-            A követés csak akkor indul, ha az illető jóváhagyja.
-          </p>
-        </section>
-
-        {incoming.length > 0 && (
-          <section className="panel space-y-3 p-4">
-            <p className="text-sm font-semibold">Engedélykérések</p>
-            {incoming.map((f) => (
-              <div key={f.id} className="flex items-center justify-between gap-2">
-                <span className="truncate text-sm">
-                  {profiles[f.follower_id]?.display_name ?? profiles[f.follower_id]?.email ?? "Valaki"}
-                </span>
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={() => respond(f.id, "accepted")}>
-                    Engedem
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => respond(f.id, "rejected")}>
-                    Elutasít
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </section>
-        )}
-
-        <section className="panel space-y-3 p-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold">Akiket követek</p>
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              Nyomvonal
-              <Switch checked={showTrails} onCheckedChange={setShowTrails} aria-label="Nyomvonal" />
-            </label>
-          </div>
-          {outgoing.length === 0 && (
-            <p className="text-xs text-muted-foreground">Még senkit nem követsz.</p>
-          )}
+            <div className="mt-3 flex items-center justify-between gap-2"><label htmlFor="self-track" className="text-xs font-medium">Saját követés</label><Switch id="self-track" aria-label="Saját követés" checked={selfTracking} onCheckedChange={setSelfTracking} /></div>
+          </article>
           {outgoing.map((f) => {
             const p = profiles[f.followed_id];
             const m = meta[f.followed_id];
             const idx = trackedIds.indexOf(f.followed_id);
-            const color = COLORS[(idx < 0 ? 0 : idx) % COLORS.length];
-            const fresh = m ? Date.now() - m.at < 15000 : false;
-            return (
-              <div
-                key={f.id}
-                className="flex items-center gap-3 rounded-lg bg-surface-strong p-3"
-                role="button"
-                tabIndex={0}
-                onClick={() => setFocusId(f.followed_id)}
-                onKeyDown={(e) => e.key === "Enter" && setFocusId(f.followed_id)}
-              >
-                <span
-                  className="h-9 w-9 shrink-0 overflow-hidden rounded-full border-2"
-                  style={{ borderColor: color }}
-                >
-                  {p?.avatar_url ? (
-                    <img src={p.avatar_url} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <span className="flex h-full w-full items-center justify-center text-xs">
-                      {(p?.display_name ?? p?.email ?? "?").charAt(0).toUpperCase()}
-                    </span>
-                  )}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">
-                    {p?.display_name ?? p?.email ?? "Ismeretlen"}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {f.status === "pending" && "Jóváhagyásra vár"}
-                    {f.status === "rejected" && "Elutasítva"}
-                    {f.status === "accepted" &&
-                      (m
-                        ? `${fresh ? "élő" : "utoljára " + relTime(m.at)} · ${kmh(m.speed)} · ±${Math.round(m.accuracy ?? 0)} m`
-                        : "Még nem oszt meg helyzetet")}
-                  </p>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void removeFollow(f.id);
-                  }}
-                >
-                  ✕
-                </Button>
-              </div>
-            );
+            const color = COLORS[(idx < 0 ? 1 : idx) % COLORS.length] ?? "";
+            const fresh = m ? clock - m.at < 15000 : false;
+            const name = p?.display_name ?? p?.email ?? "Ismeretlen";
+            return <article key={f.id} className="person-tile rounded-lg border bg-background p-3">
+              <div className="flex items-center gap-2">{avatar(p, color)}<div className="min-w-0 flex-1"><h2 className="truncate text-sm font-semibold">{name}</h2><p className="truncate text-xs text-muted-foreground">{f.status === "pending" ? "Jóváhagyásra vár" : f.status === "rejected" ? "Elutasítva" : m ? `${fresh ? "élő" : relTime(m.at)} · ${kmh(m.speed)}` : "Még nincs helyzet"}</p></div><Button variant="ghost" size="icon" disabled={f.status !== "accepted" || !tracks[f.followed_id]?.length} aria-label={`Ugrás: ${name}`} title={`Ugrás: ${name}`} onClick={() => jumpTo(f.followed_id)}><Crosshair className="h-5 w-5" /></Button></div>
+              <div className="mt-3 flex h-6 items-center justify-between"><span className="text-xs text-muted-foreground">{m?.accuracy != null ? `Pontosság ±${Math.round(m.accuracy)} m` : "Nincs GPS-adat"}</span><Button variant="ghost" className="h-6 w-6" size="icon" aria-label={`Követés törlése: ${name}`} title="Követés törlése" onClick={() => removeFollow(f.id)}><X className="h-3 w-3" /></Button></div>
+            </article>;
           })}
-        </section>
-      </aside>
-
-      <main className="order-1 h-[55vh] w-full lg:order-2 lg:h-full lg:flex-1">
-        <ClientOnly fallback={<div className="h-full w-full bg-muted" />}>
-          <Suspense fallback={<div className="h-full w-full bg-muted" />}>
-            <LiveMap people={people} focusId={focusId} showTrails={showTrails} />
-          </Suspense>
-        </ClientOnly>
-      </main>
+          {outgoing.length === 0 && <div className="flex w-44 shrink-0 flex-col items-start justify-center gap-2 px-2"><p className="text-xs text-muted-foreground">Még senkit nem követsz.</p><Button variant="outline" size="sm" onClick={() => setDialog("add")}><Plus className="mr-1 h-4 w-4" />Személy</Button></div>}
+        </div>
+      </section>
+      <Dialog open={dialog !== null} onOpenChange={(open) => !open && setDialog(null)}>
+        <DialogContent className="max-h-[85dvh] w-[calc(100%-2rem)] max-w-sm overflow-y-auto rounded-lg">
+          <DialogHeader><DialogTitle>{dialog === "add" ? "Személy követése" : dialog === "requests" ? "Engedélykérések" : "Beállítások"}</DialogTitle><DialogDescription>{dialog === "add" ? "A követéshez a másik személy jóváhagyása szükséges." : dialog === "requests" ? "Te döntöd el, ki láthatja a megosztott helyzetedet." : "Saját követésed csak a megosztás bekapcsolásakor látható másoknak."}</DialogDescription></DialogHeader>
+          {dialog === "add" && <form onSubmit={addPerson} className="space-y-3"><Input type="email" aria-label="Követett személy e-mail címe" placeholder="email@pelda.hu" value={emailInput} onChange={(e) => setEmailInput(e.target.value)} required /><Button className="w-full" type="submit">Kérelem küldése</Button></form>}
+          {dialog === "requests" && <div className="space-y-4">{incoming.length === 0 && <p className="text-sm text-muted-foreground">Nincs új engedélykérés.</p>}{incoming.map((f) => <div key={f.id} className="space-y-2"><p className="break-words text-sm">{profiles[f.follower_id]?.display_name ?? profiles[f.follower_id]?.email ?? "Valaki"}</p><div className="flex gap-2"><Button size="sm" onClick={() => respond(f.id, "accepted")}>Engedem</Button><Button size="sm" variant="outline" onClick={() => respond(f.id, "rejected")}>Elutasítom</Button></div></div>)}</div>}
+          {dialog === "settings" && <div className="space-y-5"><div className="flex items-center justify-between gap-3"><label htmlFor="share" className="text-sm">Helyzetem megosztása</label><Switch id="share" aria-label="Megosztás" checked={sharing} onCheckedChange={setSharing} /></div><div className="flex items-center justify-between gap-3"><label htmlFor="trails" className="text-sm">Nyomvonal</label><Switch id="trails" checked={showTrails} onCheckedChange={setShowTrails} /></div><Button variant="outline" className="w-full" onClick={signOut}><LogOut className="mr-2 h-4 w-4" />Kilépés</Button></div>}
+        </DialogContent>
+      </Dialog>
     </div>
   );
+
 }
 
 function kmh(speed: number | null) {
