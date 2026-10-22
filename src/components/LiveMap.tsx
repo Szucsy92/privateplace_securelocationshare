@@ -217,6 +217,7 @@ export default function LiveMap({ people, focus, showTrails, followId, orientati
     if (pts.length < 2) return;
     const a = pts[pts.length - 2];
     const b = pts[pts.length - 1];
+    if (!a || !b) return;
     setMapHeading(bearingDegrees(a, b));
   }, [people, followId, orientation]);
 
