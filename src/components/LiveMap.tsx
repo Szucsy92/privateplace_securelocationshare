@@ -37,6 +37,7 @@ export default function LiveMap({ people, focus, showTrails }: Props) {
           center: { lat: 47.4979, lng: 19.0402 },
           zoom: 12,
           disableDefaultUI: true,
+          clickableIcons: false,
           zoomControl: true,
           gestureHandling: "greedy",
           styles: darkMapStyle,

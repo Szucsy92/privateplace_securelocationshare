@@ -1,5 +1,14 @@
 export const TRAIL_MS = 30 * 60 * 1000;
 
+export function shouldTrackOwnPosition(userId: string | undefined) {
+  return Boolean(userId);
+}
+
+export function clearTrackHistory<T>(points: T[]): T[] {
+  const current = points[points.length - 1];
+  return current === undefined ? [] : [current];
+}
+
 export function shouldPublishLocation(sharing: boolean, now: number, lastSent: number) {
   return sharing && now - lastSent >= 1000;
 }

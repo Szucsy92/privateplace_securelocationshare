@@ -110,6 +110,7 @@ export type Database = {
         Args: { _target: string; _viewer: string }
         Returns: boolean
       }
+      delete_my_location_data: { Args: never; Returns: number }
       find_profile_by_email: {
         Args: { _email: string }
         Returns: {
@@ -122,6 +123,7 @@ export type Database = {
         Args: { _me: string; _other: string }
         Returns: boolean
       }
+      purge_old_locations: { Args: never; Returns: number }
     }
     Enums: {
       follow_status: "pending" | "accepted" | "rejected"
