@@ -380,21 +380,21 @@ function MapPage() {
   );
 
   return (
-    <div className="map-workspace bg-background">
-      <header className="z-10 flex shrink-0 items-center justify-between gap-2 border-b bg-surface px-3 py-2">
+    <div className="map-workspace glass-shell">
+      <header className="glass z-10 flex shrink-0 items-center justify-between gap-2 px-3 py-2">
         <div className="min-w-0 flex-1">
           <h1 className="font-display text-base font-bold">Élő térkép</h1>
-          <p className="truncate text-xs text-muted-foreground">{self?.display_name ?? user?.email}</p>
+          <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground"><span className="status-dot" data-state={sharing ? "on" : "off"} />{sharing ? "Megosztás aktív" : "Megosztás kikapcsolva"}</p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <Button variant="ghost" size="icon" aria-label="Személy hozzáadása" title="Személy hozzáadása" onClick={() => setDialog("add")}><Plus className="h-5 w-5" /></Button>
-          <Button variant="ghost" size="icon" className="relative" aria-label="Engedélykérések" title="Engedélykérések" onClick={() => setDialog("requests")}>
+          <Button variant="ghost" size="icon" className="indicator rounded-full" data-state={dialog === "add" ? "on" : undefined} aria-label="Személy hozzáadása" title="Személy hozzáadása" onClick={() => setDialog("add")}><Plus className="h-5 w-5" /></Button>
+          <Button variant="ghost" size="icon" className="indicator relative rounded-full" data-state={incoming.length > 0 ? "on" : "off"} aria-label="Engedélykérések" title="Engedélykérések" onClick={() => setDialog("requests")}>
             <Bell className="h-5 w-5" />{incoming.length > 0 && <span className="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground">{incoming.length}</span>}
           </Button>
-          <Button variant="ghost" size="icon" aria-label="Beállítások" title="Beállítások" onClick={() => setDialog("settings")}><Settings2 className="h-5 w-5" /></Button>
+          <Button variant="ghost" size="icon" className="indicator rounded-full" data-state={dialog === "settings" ? "on" : undefined} aria-label="Beállítások" title="Beállítások" onClick={() => setDialog("settings")}><Settings2 className="h-5 w-5" /></Button>
         </div>
       </header>
-      <main className="relative min-h-0 flex-1" aria-label="Térkép">
+      <main className="map-panel min-h-0 flex-1" aria-label="Térkép">
         <ClientOnly fallback={<div className="h-full bg-muted" />}>
           <Suspense fallback={<div className="h-full bg-muted" />}>
             <LiveMap
@@ -407,23 +407,26 @@ function MapPage() {
             />
           </Suspense>
         </ClientOnly>
-        <div className="absolute left-3 top-3 flex items-center gap-2 rounded-md border bg-surface px-3 py-2 text-xs shadow-panel">
-          <span className={gpsStatus === "live" ? "live-dot" : "h-2 w-2 rounded-full bg-muted-foreground"} />
+        <div className="map-overlay glass absolute left-3 top-3 flex items-center gap-2 rounded-full px-3 py-2 text-xs">
+          <span className="status-dot" data-state={gpsStatus === "live" ? "on" : gpsStatus === "waiting" ? "off" : "warn"} />
           {gpsStatus === "denied" ? "Helyhozzáférés szükséges" : gpsStatus === "error" ? "Nincs GPS-jel" : gpsStatus === "waiting" ? "Helyzet keresése…" : sharing ? `Megosztás · ${watchers.length} néző` : "Saját helyzet · privát"}
         </div>
-        <div className="absolute bottom-5 left-3 flex flex-col gap-2">
-          <Button size="icon" variant="secondary" className="border shadow-panel" aria-label="Saját pozíció" title="Saját pozíció" onClick={() => user && jumpTo(user.id)}><Crosshair className="h-5 w-5" /></Button>
+        <div className="map-overlay glass absolute right-3 top-3 rounded-full px-3 py-2 text-xs">
+          {orientation === "heading" ? "▲ Haladási irány" : "N Észak felül"}
+        </div>
+        <div className="map-overlay absolute bottom-5 left-3 flex flex-col gap-2">
+          <Button size="icon" variant="ghost" className="indicator glass h-11 w-11 rounded-full" data-state={followId === user?.id ? "on" : "off"} aria-label="Saját pozíció" title={followId === user?.id ? "Követés aktív" : "Saját pozíció"} onClick={() => user && jumpTo(user.id)}><Crosshair className="h-5 w-5" /></Button>
         </div>
       </main>
-      <section className="shrink-0 border-t bg-surface" aria-label="Saját magam és akiket követek">
+      <section className="glass shrink-0 rounded-b-none" aria-label="Saját magam és akiket követek">
         <div className="people-rail">
-          <article className="person-tile rounded-lg border border-primary/50 bg-background p-3">
+          <article className="indicator person-tile glass rounded-2xl p-3" data-state={followId === user?.id ? "on" : undefined}>
             <div className="flex items-center gap-2">
               {avatar(self, COLORS[0] ?? "")}
-              <div className="min-w-0 flex-1"><h2 className="text-sm font-semibold">Saját magam</h2><p className="truncate text-xs text-muted-foreground">{ownMeta ? `${ownFresh ? "élő" : "utoljára " + relTime(ownMeta.at)} · ${kmh(ownMeta.speed)}` : "Még nincs helyzet"}</p></div>
-              <Button variant="ghost" size="icon" aria-label="Ugrás saját magamhoz" title="Ugrás saját magamhoz" onClick={() => user && jumpTo(user.id)}><Crosshair className="h-5 w-5" /></Button>
+              <div className="min-w-0 flex-1"><h2 className="text-sm font-semibold">Saját magam</h2><p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground"><span className="status-dot" data-state={ownFresh ? "on" : "off"} />{ownMeta ? `${ownFresh ? "élő" : "utoljára " + relTime(ownMeta.at)} · ${kmh(ownMeta.speed)}` : "Még nincs helyzet"}</p></div>
+              <Button variant="ghost" size="icon" className="indicator rounded-full" data-state={followId === user?.id ? "on" : "off"} aria-label="Ugrás saját magamhoz" title="Ugrás saját magamhoz" onClick={() => user && jumpTo(user.id)}><Crosshair className="h-5 w-5" /></Button>
             </div>
-            <div className="mt-3 flex h-6 items-center justify-between gap-2"><span className="text-xs text-muted-foreground">{ownMeta?.accuracy != null ? `Pontosság ±${Math.round(ownMeta.accuracy)} m` : "Helyzet keresése…"}</span>{(gpsStatus === "denied" || gpsStatus === "error") && <Button variant="outline" size="sm" className="h-6" onClick={() => setGpsRequest((n) => n + 1)}>Újrapróbálás</Button>}</div>
+            <div className="mt-3 flex h-6 items-center justify-between gap-2"><span className="text-xs text-muted-foreground">{ownMeta?.accuracy != null ? `Pontosság ±${Math.round(ownMeta.accuracy)} m` : "Helyzet keresése…"}</span>{(gpsStatus === "denied" || gpsStatus === "error") && <Button variant="outline" size="sm" className="h-6 rounded-full" onClick={() => setGpsRequest((n) => n + 1)}>Újrapróbálás</Button>}</div>
           </article>
           {outgoing.map((f) => {
             const p = profiles[f.followed_id];
@@ -432,16 +435,17 @@ function MapPage() {
             const color = COLORS[(idx < 0 ? 1 : idx) % COLORS.length] ?? "";
             const fresh = m ? clock - m.at < 15000 : false;
             const name = p?.display_name ?? p?.email ?? "Ismeretlen";
-            return <article key={f.id} className="person-tile rounded-lg border bg-background p-3">
-              <div className="flex items-center gap-2">{avatar(p, color)}<div className="min-w-0 flex-1"><h2 className="truncate text-sm font-semibold">{name}</h2><p className="truncate text-xs text-muted-foreground">{f.status === "pending" ? "Jóváhagyásra vár" : f.status === "rejected" ? "Elutasítva" : m ? `${fresh ? "élő" : relTime(m.at)} · ${kmh(m.speed)}` : "Még nincs helyzet"}</p></div><Button variant="ghost" size="icon" disabled={f.status !== "accepted" || !tracks[f.followed_id]?.length} aria-label={`Ugrás: ${name}`} title={`Ugrás: ${name}`} onClick={() => jumpTo(f.followed_id)}><Crosshair className="h-5 w-5" /></Button></div>
-              <div className="mt-3 flex h-6 items-center justify-between"><span className="text-xs text-muted-foreground">{m?.accuracy != null ? `Pontosság ±${Math.round(m.accuracy)} m` : "Nincs GPS-adat"}</span><Button variant="ghost" className="h-6 w-6" size="icon" aria-label={`Követés törlése: ${name}`} title="Követés törlése" onClick={() => removeFollow(f.id)}><X className="h-3 w-3" /></Button></div>
+            const followed = followId === f.followed_id;
+            return <article key={f.id} className="indicator person-tile glass rounded-2xl p-3" data-state={followed ? "on" : undefined}>
+              <div className="flex items-center gap-2">{avatar(p, color)}<div className="min-w-0 flex-1"><h2 className="truncate text-sm font-semibold">{name}</h2><p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground"><span className="status-dot" data-state={f.status === "rejected" ? "warn" : fresh ? "on" : "off"} />{f.status === "pending" ? "Jóváhagyásra vár" : f.status === "rejected" ? "Elutasítva" : m ? `${fresh ? "élő" : relTime(m.at)} · ${kmh(m.speed)}` : "Még nincs helyzet"}</p></div><Button variant="ghost" size="icon" className="indicator rounded-full" data-state={followed ? "on" : "off"} disabled={f.status !== "accepted" || !tracks[f.followed_id]?.length} aria-label={`Ugrás: ${name}`} title={`Ugrás: ${name}`} onClick={() => jumpTo(f.followed_id)}><Crosshair className="h-5 w-5" /></Button></div>
+              <div className="mt-3 flex h-6 items-center justify-between"><span className="text-xs text-muted-foreground">{m?.accuracy != null ? `Pontosság ±${Math.round(m.accuracy)} m` : "Nincs GPS-adat"}</span><Button variant="ghost" className="h-6 w-6 rounded-full" size="icon" aria-label={`Követés törlése: ${name}`} title="Követés törlése" onClick={() => removeFollow(f.id)}><X className="h-3 w-3" /></Button></div>
             </article>;
           })}
-          {outgoing.length === 0 && <div className="flex w-44 shrink-0 flex-col items-start justify-center gap-2 px-2"><p className="text-xs text-muted-foreground">Még senkit nem követsz.</p><Button variant="outline" size="sm" onClick={() => setDialog("add")}><Plus className="mr-1 h-4 w-4" />Személy</Button></div>}
+          {outgoing.length === 0 && <div className="flex w-44 shrink-0 flex-col items-start justify-center gap-2 px-2"><p className="text-xs text-muted-foreground">Még senkit nem követsz.</p><Button variant="outline" size="sm" className="rounded-full" onClick={() => setDialog("add")}><Plus className="mr-1 h-4 w-4" />Személy</Button></div>}
         </div>
       </section>
       <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open && !deleting) { setDialog(null); setConfirmDelete(false); } }}>
-        <DialogContent className="max-h-[85dvh] w-[calc(100%-2rem)] max-w-sm overflow-y-auto rounded-lg">
+        <DialogContent className="max-h-[85dvh] w-[calc(100%-2rem)] max-w-sm overflow-y-auto rounded-3xl border-white/10">
           <DialogHeader><DialogTitle>{dialog === "add" ? "Személy követése" : dialog === "requests" ? "Engedélykérések" : "Beállítások"}</DialogTitle><DialogDescription>{dialog === "add" ? "A követéshez a másik személy jóváhagyása szükséges." : dialog === "requests" ? "Te döntöd el, ki láthatja a megosztott helyzetedet." : "Saját követésed csak a megosztás bekapcsolásakor látható másoknak."}</DialogDescription></DialogHeader>
           {dialog === "add" && <form onSubmit={addPerson} className="space-y-3"><Input type="email" aria-label="Követett személy e-mail címe" placeholder="email@pelda.hu" value={emailInput} onChange={(e) => setEmailInput(e.target.value)} required /><Button className="w-full" type="submit">Kérelem küldése</Button></form>}
           {dialog === "requests" && <div className="space-y-4">{incoming.length === 0 && <p className="text-sm text-muted-foreground">Nincs új engedélykérés.</p>}{incoming.map((f) => <div key={f.id} className="space-y-2"><p className="break-words text-sm">{profiles[f.follower_id]?.display_name ?? profiles[f.follower_id]?.email ?? "Valaki"}</p><div className="flex gap-2"><Button size="sm" onClick={() => respond(f.id, "accepted")}>Engedem</Button><Button size="sm" variant="outline" onClick={() => respond(f.id, "rejected")}>Elutasítom</Button></div></div>)}</div>}
