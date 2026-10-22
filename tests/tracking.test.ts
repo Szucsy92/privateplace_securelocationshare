@@ -1,6 +1,5 @@
-/// <reference types="bun" />
 import { describe, expect, test } from "bun:test";
-import { shouldPublishLocation, appendTrackPoint } from "./tracking";
+import { shouldPublishLocation, appendTrackPoint } from "../src/lib/tracking";
 
 describe("saját követés és megosztás", () => {
   test("a saját követés megosztás nélkül nem küld helyadatot", () => {
