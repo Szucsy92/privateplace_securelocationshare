@@ -4,7 +4,7 @@ import { ClientOnly } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { Bell, Crosshair, LogOut, Plus, Route as RouteIcon, Settings2, Trash2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { TRAIL_MS, appendTrackPoint, shouldPublishLocation, shouldTrackOwnPosition } from "@/lib/tracking";
+import { TRAIL_MS, appendTrackPoint, clearTrackHistory, shouldPublishLocation, shouldTrackOwnPosition } from "@/lib/tracking";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth, syncProfile } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -350,13 +350,8 @@ function MapPage() {
       await Promise.allSettled([...pendingWritesRef.current]);
       const { error } = await supabase.rpc("delete_my_location_data");
       if (error) throw error;
-      privateTracksRef.current = [];
-      setTracks((previous) => ({ ...previous, [user.id]: [] }));
-      setMeta((previous) => {
-        const next = { ...previous };
-        delete next[user.id];
-        return next;
-      });
+      privateTracksRef.current = clearTrackHistory(privateTracksRef.current);
+      setTracks((previous) => ({ ...previous, [user.id]: privateTracksRef.current }));
       setConfirmDelete(false);
       toast.success("A korábbi saját helyadataid törölve. A megosztás kikapcsolva.");
     } catch {
