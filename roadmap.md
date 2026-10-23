@@ -13,4 +13,6 @@
 - [x] Név: Private Place, saját ikon.
 - [x] Saját továbbító (TURN) támogatása építéskor megadható titkokkal + figyelmeztetés kapcsolódási gondnál.
 - [ ] Továbbító fiók (TURN) beszerzése – a felhasználó döntése, csak szükség esetén.
+- [x] APK: fix saját ikon, állandó aláíró kulcs, dátumos fájlnév és verzió.
+- [ ] Aláírási jelszó felvétele GitHub titokként (ANDROID_KEYSTORE_PASSWORD) – a felhasználó teheti meg.
 - [ ] Az új APK kipróbálása telefonon (háttérben futás, ikon).

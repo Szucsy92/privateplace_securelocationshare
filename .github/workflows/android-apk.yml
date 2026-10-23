@@ -38,6 +38,14 @@ jobs:
           SDKM=$(ls "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n1)
           if [ -n "$SDKM" ]; then yes | "$SDKM" --licenses > /dev/null || true; fi
 
+      - name: Dátumos verzió
+        run: |
+          STAMP=$(TZ=Europe/Budapest date +%Y-%m-%d_%H%M)
+          echo "BUILD_STAMP=$STAMP" >> "$GITHUB_ENV"
+          echo "APP_VERSION_NAME=$(TZ=Europe/Budapest date +%Y.%m.%d-%H%M)" >> "$GITHUB_ENV"
+          echo "APP_VERSION_CODE=${{ github.run_number }}" >> "$GITHUB_ENV"
+          echo "RELEASE_TITLE=Private Place $(TZ=Europe/Budapest date '+%Y.%m.%d. %H:%M') (#${{ github.run_number }})" >> "$GITHUB_ENV"
+
       - name: Függőségek
         run: bun install
 
@@ -48,38 +56,54 @@ jobs:
           VITE_TURN_URLS: ${{ secrets.TURN_URLS }}
           VITE_TURN_USERNAME: ${{ secrets.TURN_USERNAME }}
           VITE_TURN_CREDENTIAL: ${{ secrets.TURN_CREDENTIAL }}
-        run: bun run build:app
+        run: VITE_APP_VERSION="$APP_VERSION_NAME" bun run build:app
 
-      - name: Android projekt előkészítése
+      - name: Android projekt előkészítése (engedélyek, ikon, verzió)
         run: |
           if [ ! -d android ]; then npx cap add android; fi
           node scripts/patch-android.mjs
           npx cap sync android
 
-      - name: Alkalmazásikon
-        continue-on-error: true
-        run: npx --yes @capacitor/assets@3 generate --android --iconBackgroundColor '#121a2b' --iconBackgroundColorDark '#121a2b' --splashBackgroundColor '#121a2b' --splashBackgroundColorDark '#121a2b'
-
-      - name: APK fordítása
+      - name: APK fordítása és aláírása
         working-directory: android
+        env:
+          KS_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          mkdir -p ../out
+          if [ -n "$KS_PASSWORD" ]; then
+            ./gradlew assembleRelease --no-daemon \
+              -Pandroid.injected.signing.store.file="$GITHUB_WORKSPACE/signing/private-place.keystore" \
+              -Pandroid.injected.signing.store.password="$KS_PASSWORD" \
+              -Pandroid.injected.signing.key.alias=privateplace \
+              -Pandroid.injected.signing.key.password="$KS_PASSWORD"
+            cp app/build/outputs/apk/release/app-release.apk "../out/private-place-${BUILD_STAMP}.apk"
+            echo "SIGNED=yes" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Nincs ANDROID_KEYSTORE_PASSWORD titok – teszt aláírással készül (frissítéskor újra kell telepíteni)."
+            ./gradlew assembleDebug --no-daemon
+            cp app/build/outputs/apk/debug/app-debug.apk "../out/private-place-${BUILD_STAMP}-teszt.apk"
+            echo "SIGNED=no" >> "$GITHUB_ENV"
+          fi
 
-      - name: APK átnevezése
+      - name: Aláírás ellenőrzése
         run: |
-          mkdir -p out
-          cp android/app/build/outputs/apk/debug/app-debug.apk "out/private-place-${{ github.run_number }}.apk"
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n1)
+          "$APKSIGNER" verify --print-certs out/*.apk | grep -E "Signer #1 certificate (DN|SHA-256)"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: private-place-apk-${{ github.run_number }}
+          name: private-place-${{ env.BUILD_STAMP }}
           path: out/*.apk
 
       - name: Kiadás (Releases)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: apk-${{ github.run_number }}
-          name: Private Place ${{ github.run_number }}
-          body: "Töltsd le a telefonodra az APK-t, és telepítsd. (Ismeretlen forrásból való telepítést engedélyezni kell.)"
+          tag_name: apk-${{ env.BUILD_STAMP }}-${{ github.run_number }}
+          name: ${{ env.RELEASE_TITLE }}
+          body: |
+            Verzió: ${{ env.APP_VERSION_NAME }} (#${{ github.run_number }})
+            Aláírás: ${{ env.SIGNED == 'yes' && 'Private Place saját kulcs – a korábbi aláírt verzió fölé telepíthető.' || 'teszt aláírás – a régi verziót előbb törölni kell.' }}
+
+            Töltsd le a telefonodra az APK-t, és telepítsd. (Ismeretlen forrásból való telepítést engedélyezni kell.)
           files: out/*.apk

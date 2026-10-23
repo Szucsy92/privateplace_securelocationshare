@@ -32,8 +32,13 @@ npm run dev
 
 1. GitHubon nyisd meg az adattárat → **Actions** → **Android APK építése** → **Run workflow**.
 2. (Opcionális) A `public_url` mezőbe írd be a közzétett weboldal címét, így a meghívókban kattintható link is lesz.
-3. Kb. 5–8 perc múlva a kész `private-place-<szám>.apk` a **Releases** alatt (és az Actions futás „Artifacts” részében) tölthető le.
+3. Kb. 5–8 perc múlva a kész `private-place-<dátum_óraperc>.apk` a **Releases** alatt (és az Actions futás „Artifacts” részében) tölthető le.
 4. Telefonon engedélyezd az ismeretlen forrásból való telepítést, majd telepítsd.
+
+### Aláírás
+Az APK a `signing/private-place.keystore` kulccsal aláírva készül, ha a GitHub titkok között szerepel az `ANDROID_KEYSTORE_PASSWORD`. Így minden új verzió a régi fölé telepíthető. Titok nélkül teszt aláírással készül (`-teszt` a fájlnévben).
+
+Az ikon és az indítókép az `assets/android-res` mappából kerül be (újragenerálás: `python3 scripts/make-android-icons.py`).
 
 Az alkalmazásban bekapcsolt megosztásnál a helyzet lezárt képernyőnél is továbbmegy; ezt egy állandó értesítés jelzi. Kikapcsolt megosztásnál a háttérben semmi nem fut.
 
@@ -45,4 +50,4 @@ GitHub → Settings → Secrets and variables → Actions → New repository sec
 
 Utána építsd újra az APK-t.
 
-Helyi építés: `bun run build:app`, majd `npx cap add android && node scripts/patch-android.mjs && npx cap sync android && npx @capacitor/assets generate --android`.
+Helyi építés: `bun run build:app`, majd `npx cap add android && node scripts/patch-android.mjs && npx cap sync android`.
