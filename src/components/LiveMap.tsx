@@ -136,6 +136,14 @@ export default function LiveMap({ people, follow, showTrails, orientation, onUse
         });
         map.on("load", () => {
           if (!map) return;
+          containerRef.current?.querySelector(".maplibregl-ctrl-attrib")?.classList.remove("maplibregl-compact-show");
+          // A sötét alaptérkép hangolása az app kékes tónusához
+          for (const [layer, prop, color] of [
+            ["background", "background-color", "#101827"],
+            ["water", "fill-color", "#0a1322"],
+          ] as const) {
+            if (map.getLayer(layer)) map.setPaintProperty(layer, prop, color);
+          }
           map.addSource("trails", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
           map.addLayer({
             id: "trails",
