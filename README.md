@@ -27,3 +27,12 @@ npm run dev
 - TypeScript
 - React
 - Tailwind CSS
+
+## Élő Hely – Android APK építése
+
+1. GitHubon nyisd meg az adattárat → **Actions** → **Android APK építése** → **Run workflow**.
+2. (Opcionális) A `public_url` mezőbe írd be a közzétett weboldal címét, így a meghívókban kattintható link is lesz.
+3. Kb. 5–8 perc múlva a kész `elo-hely-<szám>.apk` a **Releases** alatt (és az Actions futás „Artifacts” részében) tölthető le.
+4. Telefonon engedélyezd az ismeretlen forrásból való telepítést, majd telepítsd.
+
+Helyi építés: `bun run build:app`, majd `npx cap add android && node scripts/patch-android.mjs && npx cap sync android`.
