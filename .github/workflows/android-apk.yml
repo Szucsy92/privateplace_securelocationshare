@@ -1,0 +1,70 @@
+name: Android APK építése
+
+# Indítás: GitHub → Actions → "Android APK építése" → Run workflow
+on:
+  workflow_dispatch:
+    inputs:
+      public_url:
+        description: "A közzétett weboldal címe a meghívó linkekhez (üresen hagyva csak kód és QR-kód)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Függőségek
+        run: bun install
+
+      - name: Webes felület (statikus) építése
+        env:
+          VITE_PUBLIC_APP_URL: ${{ inputs.public_url }}
+        run: bun run build:app
+
+      - name: Android projekt előkészítése
+        run: |
+          if [ ! -d android ]; then npx cap add android; fi
+          node scripts/patch-android.mjs
+          npx cap sync android
+
+      - name: APK fordítása
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: APK átnevezése
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/app-debug.apk "out/elo-hely-${{ github.run_number }}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: elo-hely-apk-${{ github.run_number }}
+          path: out/*.apk
+
+      - name: Kiadás (Releases)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: Élő Hely ${{ github.run_number }}
+          body: "Töltsd le a telefonodra az APK-t, és telepítsd. (Ismeretlen forrásból való telepítést engedélyezni kell.)"
+          files: out/*.apk
