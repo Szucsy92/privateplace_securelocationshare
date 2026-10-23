@@ -3,6 +3,7 @@ import type { SavedRoom } from "@/lib/rooms";
 import type { LocalProfile } from "@/lib/profile";
 import { colorForDevice, parseHello, parseLocation, type HelloMessage, type LocMessage } from "@/lib/peerMessages";
 import { appendTrackPoint } from "@/lib/tracking";
+import { turnConfigFromEnv } from "@/lib/turn";
 
 export type TrackPoint = { lat: number; lng: number; t: number };
 
@@ -66,6 +67,7 @@ export function usePeerNetwork(opts: {
   const { rooms, deviceId, profile } = opts;
   const [people, setPeople] = useState<Record<string, RemotePerson>>({});
   const [roomPeers, setRoomPeers] = useState<Record<string, number>>({});
+  const [connectIssues, setConnectIssues] = useState(0);
   const joinedRef = useRef(new Map<string, Joined>());
   const peerDeviceRef = useRef(new Map<string, string>());
   const pendingLocRef = useRef(new Map<string, LocMessage>());
@@ -143,10 +145,14 @@ export function usePeerNetwork(opts: {
     void (async () => {
       const { joinRoom } = await import("trystero");
       if (cancelled) return;
+      const turnConfig = turnConfigFromEnv();
       for (const token of wanted) {
         if (joinedRef.current.has(token)) continue;
-        const room = joinRoom({ appId: APP_ID, password: token }, token, {
-          onJoinError: (e) => console.warn("Szoba csatlakozási hiba", e),
+        const room = joinRoom({ appId: APP_ID, password: token, ...(turnConfig ? { turnConfig } : {}) }, token, {
+          onJoinError: (e) => {
+            console.warn("Szoba csatlakozási hiba", e);
+            if (e && typeof e === "object" && "peerId" in e && e.peerId) setConnectIssues((n) => n + 1);
+          },
         }) as unknown as MinimalRoom;
         const j: Joined = {
           room,
@@ -231,5 +237,5 @@ export function usePeerNetwork(opts: {
     await new Promise((r) => setTimeout(r, 400));
   }, []);
 
-  return { people, roomPeers, sendLocation, announceClose };
+  return { people, roomPeers, connectIssues, sendLocation, announceClose };
 }
