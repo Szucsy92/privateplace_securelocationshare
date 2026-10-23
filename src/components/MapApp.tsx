@@ -51,6 +51,7 @@ import {
   type LocalProfile,
   type Prefs,
 } from "@/lib/profile";
+import { isNativeApp, startLocationWatch } from "@/lib/locationSource";
 
 const LiveMap = lazy(() => import("@/components/LiveMap"));
 const SELF = "self";
@@ -68,6 +69,7 @@ function shareBase(): string | null {
 
 export default function MapApp() {
   const [mounted, setMounted] = useState(false);
+  const [nativeApp, setNativeApp] = useState(false);
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [profile, setProfile] = useState<LocalProfile | null>(null);
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
@@ -90,6 +92,7 @@ export default function MapApp() {
 
   // Helyi adatok betöltése (csak a telefonon)
   useEffect(() => {
+    setNativeApp(isNativeApp());
     setDeviceId(getDeviceId());
     const p = loadProfile();
     setProfile(p);
@@ -139,31 +142,37 @@ export default function MapApp() {
   const net = usePeerNetwork({ rooms, deviceId, profile, onRoomClosed });
 
   // Saját GPS: mindig fut, privát; csak a megosztás kapcsoló küld a szobatársaknak.
+  // Az Android-alkalmazásban bekapcsolt megosztásnál lezárt képernyőnél is folytatódik.
+  const backgroundSharing = nativeApp && prefs.sharing;
   useEffect(() => {
     if (!mounted || !profile) return;
-    if (!("geolocation" in navigator)) {
-      setGpsStatus("error");
-      return;
-    }
-    setGpsStatus("waiting");
-    const id = navigator.geolocation.watchPosition(
-      (pos) => {
+    setGpsStatus((s) => (s === "live" ? s : "waiting"));
+    return startLocationWatch({
+      background: backgroundSharing,
+      onFix: (fix) => {
         const now = Date.now();
-        const point = { lat: pos.coords.latitude, lng: pos.coords.longitude, t: now };
+        const point = { lat: fix.lat, lng: fix.lng, t: now };
         selfTrackRef.current = appendTrackPoint(selfTrackRef.current, point, now);
         setSelfTrack(selfTrackRef.current);
-        setSelfMeta({ speed: pos.coords.speed, acc: pos.coords.accuracy, at: now });
+        setSelfMeta({ speed: fix.speed, acc: fix.acc, at: now });
         setGpsStatus("live");
         if (!shouldPublishLocation(prefsRef.current.sharing, now, lastSentRef.current)) return;
         lastSentRef.current = now;
-        net.sendLocation({ lat: point.lat, lng: point.lng, t: now, acc: pos.coords.accuracy ?? null, speed: pos.coords.speed ?? null });
+        net.sendLocation({ lat: fix.lat, lng: fix.lng, t: now, acc: fix.acc, speed: fix.speed });
       },
-      (err) => setGpsStatus(err.code === 1 ? "denied" : "error"),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 },
-    );
-    return () => navigator.geolocation.clearWatch(id);
+      onError: (err) => setGpsStatus(err),
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, profile !== null, gpsRequest]);
+  }, [mounted, profile !== null, gpsRequest, backgroundSharing]);
+
+  // Csatlakozási gond (pl. két szigorú mobilnet között) – egyszer jelezzük.
+  const warnedIssueRef = useRef(false);
+  useEffect(() => {
+    if (net.connectIssues > 0 && !warnedIssueRef.current) {
+      warnedIssueRef.current = true;
+      toast.warning("Egy szobatársaddal nem sikerült közvetlen kapcsolatot létesíteni. Próbáljátok Wi-Fi-n, vagy egy kicsit később.");
+    }
+  }, [net.connectIssues]);
 
   const setSharing = (value: boolean) => {
     updatePrefs({ sharing: value });
@@ -249,7 +258,7 @@ export default function MapApp() {
     <div className="map-workspace glass-shell">
       <header className="glass z-10 flex shrink-0 items-center justify-between gap-2 px-3 py-2">
         <div className="min-w-0 flex-1">
-          <h1 className="font-display text-base font-bold">Élő Hely</h1>
+          <h1 className="font-display text-base font-bold">Private Place</h1>
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="status-dot" data-state={prefs.sharing ? "on" : "off"} />
             <span className="truncate">
@@ -400,7 +409,7 @@ export default function MapApp() {
         >
           {dialog === "welcome" && (
             <ProfileForm
-              title="Üdv az Élő Helyen"
+              title="Üdv a Private Place-ben"
               description="Nincs regisztráció és nincs jelszó. A neved és a képed csak ezen a telefonon tárolódik, és csak a szobatársaid látják."
               initial={null}
               submitLabel="Kezdés"
@@ -461,7 +470,7 @@ export default function MapApp() {
               <ElasticScroll className="max-h-[66dvh] px-5 pb-5">
                 <div className="space-y-4">
                   <div className="glass-inset space-y-3 rounded-2xl p-4">
-                    <SettingRow label="Helyzetem megosztása" hint="Bekapcsolva a szobatársaid élőben látják, merre jársz.">
+                    <SettingRow label="Helyzetem megosztása" hint={nativeApp ? "Bekapcsolva a szobatársaid élőben látják, merre jársz – lezárt képernyőnél is. Ezt egy értesítés jelzi." : "Bekapcsolva a szobatársaid élőben látják, merre jársz, amíg az oldal nyitva van."}>
                       <Switch
                         aria-label="Helyzetem megosztása"
                         checked={prefs.sharing}
@@ -661,7 +670,7 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
   };
   const share = async () => {
     try {
-      await navigator.share({ title: "Élő Hely meghívó", text: link ? "Csatlakozz a szobámhoz:" : `Szobakód: ${code}`, ...(link ? { url: link } : {}) });
+      await navigator.share({ title: "Private Place meghívó", text: link ? "Csatlakozz a szobámhoz:" : `Szobakód: ${code}`, ...(link ? { url: link } : {}) });
     } catch {
       /* a felhasználó bezárta */
     }
@@ -731,7 +740,7 @@ function JoinPanel({ initial, onJoin }: { initial: { token: string; name: string
                 setScanning(false);
                 const p = parseRoomInput(text);
                 if (p) setValue(text);
-                else toast.error("Ez a QR-kód nem Élő Hely meghívó.");
+                else toast.error("Ez a QR-kód nem Private Place meghívó.");
               }}
             />
           )}

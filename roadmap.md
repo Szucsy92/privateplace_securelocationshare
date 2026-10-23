@@ -9,5 +9,8 @@
 - [x] Matt üveg minden felületen (ablakok, értesítések, gombok).
 - [x] Android APK: GitHub Actions gombnyomásos építés.
 - [ ] GitHub összekapcsolása a projekttel (a felhasználó teheti meg a beállításokban).
-- [ ] Háttérben (lezárt képernyőnél) futó GPS az APK-ban – következő lépés.
-- [ ] Mobilnetek közötti kapcsolat megbízhatósága: saját továbbító (TURN) szükség esetén.
+- [x] Háttérben (lezárt képernyőnél) futó megosztás az APK-ban, értesítéssel.
+- [x] Név: Private Place, saját ikon.
+- [x] Saját továbbító (TURN) támogatása építéskor megadható titkokkal + figyelmeztetés kapcsolódási gondnál.
+- [ ] Továbbító fiók (TURN) beszerzése – a felhasználó döntése, csak szükség esetén.
+- [ ] Az új APK kipróbálása telefonon (háttérben futás, ikon).

@@ -18,3 +18,5 @@
 - src/components/MapApp.tsx must stay router-independent because the Android APK renders it from app/main.tsx via vite.app.config.ts (static Capacitor build).
 - The APK is built only by the manual GitHub Actions workflow (.github/workflows/android-apk.yml), which generates the android/ folder in CI; do not commit android/ or dist-app/.
 - Use a numbered follow request for map centering so repeated taps on the same person always recenter the map; tapping the followed person again stops following.
+- Get positions through src/lib/locationSource.ts: browser geolocation on the web, the native background-geolocation plugin in the APK, with a background notification only while sharing is on, because WebView geolocation stops when the screen locks.
+- TURN relays are optional and injected at build time (VITE_TURN_* from GitHub secrets, parsed in src/lib/turn.ts) so the app still needs no server of our own.

@@ -37,6 +37,10 @@ jobs:
       - name: Webes felület (statikus) építése
         env:
           VITE_PUBLIC_APP_URL: ${{ inputs.public_url }}
+          # Opcionális saját továbbító (Settings → Secrets and variables → Actions)
+          VITE_TURN_URLS: ${{ secrets.TURN_URLS }}
+          VITE_TURN_USERNAME: ${{ secrets.TURN_USERNAME }}
+          VITE_TURN_CREDENTIAL: ${{ secrets.TURN_CREDENTIAL }}
         run: bun run build:app
 
       - name: Android projekt előkészítése
@@ -44,6 +48,10 @@ jobs:
           if [ ! -d android ]; then npx cap add android; fi
           node scripts/patch-android.mjs
           npx cap sync android
+
+      - name: Alkalmazásikon
+        continue-on-error: true
+        run: npx --yes @capacitor/assets@3 generate --android --iconBackgroundColor '#121a2b' --iconBackgroundColorDark '#121a2b' --splashBackgroundColor '#121a2b' --splashBackgroundColorDark '#121a2b'
 
       - name: APK fordítása
         working-directory: android
@@ -54,17 +62,17 @@ jobs:
       - name: APK átnevezése
         run: |
           mkdir -p out
-          cp android/app/build/outputs/apk/debug/app-debug.apk "out/elo-hely-${{ github.run_number }}.apk"
+          cp android/app/build/outputs/apk/debug/app-debug.apk "out/private-place-${{ github.run_number }}.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: elo-hely-apk-${{ github.run_number }}
+          name: private-place-apk-${{ github.run_number }}
           path: out/*.apk
 
       - name: Kiadás (Releases)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: apk-${{ github.run_number }}
-          name: Élő Hely ${{ github.run_number }}
+          name: Private Place ${{ github.run_number }}
           body: "Töltsd le a telefonodra az APK-t, és telepítsd. (Ismeretlen forrásból való telepítést engedélyezni kell.)"
           files: out/*.apk

@@ -28,11 +28,21 @@ npm run dev
 - React
 - Tailwind CSS
 
-## Élő Hely – Android APK építése
+## Private Place – Android APK építése
 
 1. GitHubon nyisd meg az adattárat → **Actions** → **Android APK építése** → **Run workflow**.
 2. (Opcionális) A `public_url` mezőbe írd be a közzétett weboldal címét, így a meghívókban kattintható link is lesz.
-3. Kb. 5–8 perc múlva a kész `elo-hely-<szám>.apk` a **Releases** alatt (és az Actions futás „Artifacts” részében) tölthető le.
+3. Kb. 5–8 perc múlva a kész `private-place-<szám>.apk` a **Releases** alatt (és az Actions futás „Artifacts” részében) tölthető le.
 4. Telefonon engedélyezd az ismeretlen forrásból való telepítést, majd telepítsd.
 
-Helyi építés: `bun run build:app`, majd `npx cap add android && node scripts/patch-android.mjs && npx cap sync android`.
+Az alkalmazásban bekapcsolt megosztásnál a helyzet lezárt képernyőnél is továbbmegy; ezt egy állandó értesítés jelzi. Kikapcsolt megosztásnál a háttérben semmi nem fut.
+
+### Opcionális: saját továbbító (TURN)
+Ha két telefon szigorú mobilneten nem találja egymást, egy továbbító segít (pl. Cloudflare vagy Metered ingyenes kerete). Az adat ekkor is titkosítva megy át.
+GitHub → Settings → Secrets and variables → Actions → New repository secret:
+- `TURN_URLS` – pl. `turn:turn.pelda.hu:3478,turns:turn.pelda.hu:5349`
+- `TURN_USERNAME`, `TURN_CREDENTIAL`
+
+Utána építsd újra az APK-t.
+
+Helyi építés: `bun run build:app`, majd `npx cap add android && node scripts/patch-android.mjs && npx cap sync android && npx @capacitor/assets generate --android`.
