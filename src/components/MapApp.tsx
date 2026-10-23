@@ -258,7 +258,7 @@ export default function MapApp() {
     <div className="map-workspace glass-shell">
       <header className="glass z-10 flex shrink-0 items-center justify-between gap-2 px-3 py-2">
         <div className="min-w-0 flex-1">
-          <h1 className="font-display text-base font-bold">Élő Hely</h1>
+          <h1 className="font-display text-base font-bold">Private Place</h1>
           <p className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="status-dot" data-state={prefs.sharing ? "on" : "off"} />
             <span className="truncate">
@@ -409,7 +409,7 @@ export default function MapApp() {
         >
           {dialog === "welcome" && (
             <ProfileForm
-              title="Üdv az Élő Helyen"
+              title="Üdv a Private Place-ben"
               description="Nincs regisztráció és nincs jelszó. A neved és a képed csak ezen a telefonon tárolódik, és csak a szobatársaid látják."
               initial={null}
               submitLabel="Kezdés"
@@ -470,7 +470,7 @@ export default function MapApp() {
               <ElasticScroll className="max-h-[66dvh] px-5 pb-5">
                 <div className="space-y-4">
                   <div className="glass-inset space-y-3 rounded-2xl p-4">
-                    <SettingRow label="Helyzetem megosztása" hint="Bekapcsolva a szobatársaid élőben látják, merre jársz.">
+                    <SettingRow label="Helyzetem megosztása" hint={nativeApp ? "Bekapcsolva a szobatársaid élőben látják, merre jársz – lezárt képernyőnél is. Ezt egy értesítés jelzi." : "Bekapcsolva a szobatársaid élőben látják, merre jársz, amíg az oldal nyitva van."}>
                       <Switch
                         aria-label="Helyzetem megosztása"
                         checked={prefs.sharing}
@@ -670,7 +670,7 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
   };
   const share = async () => {
     try {
-      await navigator.share({ title: "Élő Hely meghívó", text: link ? "Csatlakozz a szobámhoz:" : `Szobakód: ${code}`, ...(link ? { url: link } : {}) });
+      await navigator.share({ title: "Private Place meghívó", text: link ? "Csatlakozz a szobámhoz:" : `Szobakód: ${code}`, ...(link ? { url: link } : {}) });
     } catch {
       /* a felhasználó bezárta */
     }
@@ -740,7 +740,7 @@ function JoinPanel({ initial, onJoin }: { initial: { token: string; name: string
                 setScanning(false);
                 const p = parseRoomInput(text);
                 if (p) setValue(text);
-                else toast.error("Ez a QR-kód nem Élő Hely meghívó.");
+                else toast.error("Ez a QR-kód nem Private Place meghívó.");
               }}
             />
           )}
