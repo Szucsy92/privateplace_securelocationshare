@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { Map as MlMap, Marker as MlMarker, GeoJSONSource } from "maplibre-gl";
+import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import { animationDurationMs, headingFromTrack, lerpPoint, smoothAngle } from "@/lib/mapMath";
 
 export type TrackPoint = { lat: number; lng: number; t: number };
@@ -108,6 +109,7 @@ export default function LiveMap({ people, follow, showTrails, orientation, onUse
       try {
         const lib = await import("maplibre-gl");
         if (cancelled || !containerRef.current) return;
+        lib.setWorkerUrl(workerUrl);
         markerCtorRef.current = lib.Marker;
         map = new lib.Map({
           container: containerRef.current,
