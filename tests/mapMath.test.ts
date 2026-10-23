@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { animationDurationMs, bearingDegrees, lerpPoint } from "@/lib/mapMath";
+import { angleDelta, animationDurationMs, bearingDegrees, headingFromTrack, lerpPoint } from "@/lib/mapMath";
 
 const BP = { lat: 47.4979, lng: 19.0402 };
 
@@ -53,14 +53,12 @@ describe("animationDurationMs", () => {
   });
 });
 
-import { angleDelta, headingFromTrack } from "../src/lib/mapMath";
-
 describe("haladási irány", () => {
-  test("a forgás mindig a rövidebb irányba történik", () => {
+  it("a forgás mindig a rövidebb irányba történik", () => {
     expect(angleDelta(350, 10)).toBe(20);
     expect(angleDelta(10, 350)).toBe(-20);
   });
-  test("helyben állva nincs irány, haladva van", () => {
+  it("helyben állva nincs irány, haladva van", () => {
     expect(headingFromTrack([{ lat: 47.5, lng: 19 }, { lat: 47.5, lng: 19 }])).toBeNull();
     const h = headingFromTrack([{ lat: 47.5, lng: 19 }, { lat: 47.501, lng: 19 }]);
     expect(Math.round(h ?? -1)).toBe(0);
