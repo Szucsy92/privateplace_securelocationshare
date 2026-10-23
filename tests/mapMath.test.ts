@@ -52,3 +52,17 @@ describe("animationDurationMs", () => {
     expect(animationDurationMs(1000, 9000)).toBe(2000);
   });
 });
+
+import { angleDelta, headingFromTrack } from "../src/lib/mapMath";
+
+describe("haladási irány", () => {
+  test("a forgás mindig a rövidebb irányba történik", () => {
+    expect(angleDelta(350, 10)).toBe(20);
+    expect(angleDelta(10, 350)).toBe(-20);
+  });
+  test("helyben állva nincs irány, haladva van", () => {
+    expect(headingFromTrack([{ lat: 47.5, lng: 19 }, { lat: 47.5, lng: 19 }])).toBeNull();
+    const h = headingFromTrack([{ lat: 47.5, lng: 19 }, { lat: 47.501, lng: 19 }]);
+    expect(Math.round(h ?? -1)).toBe(0);
+  });
+});
