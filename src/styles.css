@@ -266,8 +266,6 @@
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior: none;
-  scroll-snap-type: x proximity;
-  scroll-padding-inline: 1.25rem;
   scrollbar-width: none;
   -webkit-mask-image: linear-gradient(90deg, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%);
   mask-image: linear-gradient(90deg, transparent 0, black 1.25rem, black calc(100% - 1.25rem), transparent 100%);
@@ -283,8 +281,6 @@
 }
 
 .capsule {
-  scroll-snap-align: start;
-  scroll-margin-left: 1.25rem;
   display: flex;
   align-items: center;
   gap: 0.6rem;
