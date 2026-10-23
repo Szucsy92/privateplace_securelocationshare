@@ -21,6 +21,7 @@
     "@capacitor/android": "^8.5.3",
     "@capacitor/camera": "^8",
     "@capacitor/core": "^8.5.3",
+    "@capacitor/geolocation": "^8",
     "@capacitor/local-notifications": "^8",
     "@capawesome-team/capacitor-android-battery-optimization": "^8",
     "@hookform/resolvers": "^5.2.2",
