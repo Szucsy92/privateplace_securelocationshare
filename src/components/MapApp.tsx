@@ -51,6 +51,7 @@ import {
   type LocalProfile,
   type Prefs,
 } from "@/lib/profile";
+import { isNativeApp, startLocationWatch } from "@/lib/locationSource";
 
 const LiveMap = lazy(() => import("@/components/LiveMap"));
 const SELF = "self";
@@ -139,31 +140,37 @@ export default function MapApp() {
   const net = usePeerNetwork({ rooms, deviceId, profile, onRoomClosed });
 
   // Saját GPS: mindig fut, privát; csak a megosztás kapcsoló küld a szobatársaknak.
+  // Az Android-alkalmazásban bekapcsolt megosztásnál lezárt képernyőnél is folytatódik.
+  const backgroundSharing = nativeApp && prefs.sharing;
   useEffect(() => {
     if (!mounted || !profile) return;
-    if (!("geolocation" in navigator)) {
-      setGpsStatus("error");
-      return;
-    }
-    setGpsStatus("waiting");
-    const id = navigator.geolocation.watchPosition(
-      (pos) => {
+    setGpsStatus((s) => (s === "live" ? s : "waiting"));
+    return startLocationWatch({
+      background: backgroundSharing,
+      onFix: (fix) => {
         const now = Date.now();
-        const point = { lat: pos.coords.latitude, lng: pos.coords.longitude, t: now };
+        const point = { lat: fix.lat, lng: fix.lng, t: now };
         selfTrackRef.current = appendTrackPoint(selfTrackRef.current, point, now);
         setSelfTrack(selfTrackRef.current);
-        setSelfMeta({ speed: pos.coords.speed, acc: pos.coords.accuracy, at: now });
+        setSelfMeta({ speed: fix.speed, acc: fix.acc, at: now });
         setGpsStatus("live");
         if (!shouldPublishLocation(prefsRef.current.sharing, now, lastSentRef.current)) return;
         lastSentRef.current = now;
-        net.sendLocation({ lat: point.lat, lng: point.lng, t: now, acc: pos.coords.accuracy ?? null, speed: pos.coords.speed ?? null });
+        net.sendLocation({ lat: fix.lat, lng: fix.lng, t: now, acc: fix.acc, speed: fix.speed });
       },
-      (err) => setGpsStatus(err.code === 1 ? "denied" : "error"),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 },
-    );
-    return () => navigator.geolocation.clearWatch(id);
+      onError: (err) => setGpsStatus(err),
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, profile !== null, gpsRequest]);
+  }, [mounted, profile !== null, gpsRequest, backgroundSharing]);
+
+  // Csatlakozási gond (pl. két szigorú mobilnet között) – egyszer jelezzük.
+  const warnedIssueRef = useRef(false);
+  useEffect(() => {
+    if (net.connectIssues > 0 && !warnedIssueRef.current) {
+      warnedIssueRef.current = true;
+      toast.warning("Egy szobatársaddal nem sikerült közvetlen kapcsolatot létesíteni. Próbáljátok Wi-Fi-n, vagy egy kicsit később.");
+    }
+  }, [net.connectIssues]);
 
   const setSharing = (value: boolean) => {
     updatePrefs({ sharing: value });
