@@ -69,6 +69,7 @@ function shareBase(): string | null {
 
 export default function MapApp() {
   const [mounted, setMounted] = useState(false);
+  const [nativeApp, setNativeApp] = useState(false);
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [profile, setProfile] = useState<LocalProfile | null>(null);
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
@@ -91,6 +92,7 @@ export default function MapApp() {
 
   // Helyi adatok betöltése (csak a telefonon)
   useEffect(() => {
+    setNativeApp(isNativeApp());
     setDeviceId(getDeviceId());
     const p = loadProfile();
     setProfile(p);
