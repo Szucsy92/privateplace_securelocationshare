@@ -59,7 +59,7 @@ type DialogKind = "welcome" | "rooms" | "settings" | "share" | "join" | null;
 type GpsStatus = "waiting" | "live" | "denied" | "error";
 
 function shareBase(): string | null {
-  const configured = import.meta.env.VITE_PUBLIC_APP_URL as string | undefined;
+  const configured = import.meta.env["VITE_PUBLIC_APP_URL"] as string | undefined;
   if (configured) return configured;
   const { protocol, hostname, origin } = window.location;
   if (!protocol.startsWith("http") || hostname === "localhost" || hostname === "127.0.0.1") return null;
