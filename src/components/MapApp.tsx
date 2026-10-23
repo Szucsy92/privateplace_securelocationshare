@@ -541,6 +541,9 @@ export default function MapApp() {
                     <Trash2 className="mr-2 h-4 w-4" />
                     Saját útvonal törlése
                   </Button>
+                  <p className="text-center text-[11px] text-muted-foreground">
+                    Private Place · {(import.meta.env["VITE_APP_VERSION"] as string | undefined) || "webes változat"}
+                  </p>
                 </div>
               </ElasticScroll>
             </>
