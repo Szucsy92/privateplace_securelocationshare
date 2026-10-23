@@ -1,8 +1,13 @@
 # Feladatok
-- [x] Egyképernyős térkép és kompakt vezérlők.
-- [x] Saját követés, saját sor és ismételhető odaugrás.
-- [x] Mobil és asztali elrendezés, belépett saját GPS-követés és ablakok ellenőrzése.
-- [x] Automatikus saját helyzetjelzés, megosztástól függetlenül.
-- [x] Hét napos megőrzés, óránkénti törlés és saját helyadatok törlése.
-- [x] Felugró ablakok biztosan fedő hátterének javítása és ellenőrzése.
-- [ ] Térkép odaugrásának vizuális ellenőrzése: a Google a helyi ellenőrzési címet elutasítja (RefererNotAllowedMapError); engedélyezett előnézeti címen ellenőrizendő.
+- [x] Egyképernyős térkép, kompakt vezérlők, saját helyzet mindig látszik.
+- [x] Független nyílt térkép (OpenStreetMap / MapLibre), kulcs nélkül.
+- [x] Fiók nélküli helyi profil (név + kép).
+- [x] Titkos szobák: létrehozás, QR-kód, kód/link, csatlakozás, QR-beolvasás, törlés, kilépés.
+- [x] Közvetlen telefon–telefon helymegosztás (WebRTC), központi tárolás nélkül.
+- [x] Kapszula személyfülek, szélső elmosás, rugalmas túlhúzás, levágásmentes jelzőfények.
+- [x] Követés ki/be koppintással, iránytű (észak / haladási irány), kellemes rálátás.
+- [x] Matt üveg minden felületen (ablakok, értesítések, gombok).
+- [x] Android APK: GitHub Actions gombnyomásos építés.
+- [ ] GitHub összekapcsolása a projekttel (a felhasználó teheti meg a beállításokban).
+- [ ] Háttérben (lezárt képernyőnél) futó GPS az APK-ban – következő lépés.
+- [ ] Mobilnetek közötti kapcsolat megbízhatósága: saját továbbító (TURN) szükség esetén.

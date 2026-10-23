@@ -10,7 +10,11 @@
 <!-- LOVABLE:END -->
 
 - Keep the map workspace in a viewport-sized shell with modal controls and a horizontal people rail so the page never needs vertical scrolling.
-- Keep private self-tracking in browser memory, separate from shared location writes; only the explicit sharing toggle may publish coordinates.
-- Start private GPS observation automatically for signed-in map users, and never merge shared self-history into the private track so the own marker represents this device.
-- Delete own location history through the authenticated invoker RPC after draining pending writes and disabling sharing, so deletion cannot race with queued publication.
-- Use a numbered focus request for map centering so repeated taps on the same person always recenter the map.
+- The app has no accounts and no central location storage: identity is a local profile in localStorage, and locations travel peer-to-peer over WebRTC (trystero, public Nostr relays for signaling) so it runs without our own server.
+- A room token is both the room id and the encryption password; it only leaves the device through the owner's share/QR panel, and room links put it in the URL hash so it never reaches a web server.
+- Keep private self-tracking in memory; only the explicit sharing toggle may send coordinates to peers, and turning it off sends a null location so peers hide the marker.
+- Validate every incoming peer message in src/lib/peerMessages.ts before it touches state, because any room member can send arbitrary data.
+- Use MapLibre GL with a keyless OpenStreetMap style and set the worker URL explicitly (maplibre-gl-worker.mjs?url) so the map works in Vite dev, the web build and the APK.
+- src/components/MapApp.tsx must stay router-independent because the Android APK renders it from app/main.tsx via vite.app.config.ts (static Capacitor build).
+- The APK is built only by the manual GitHub Actions workflow (.github/workflows/android-apk.yml), which generates the android/ folder in CI; do not commit android/ or dist-app/.
+- Use a numbered follow request for map centering so repeated taps on the same person always recenter the map; tapping the followed person again stops following.
