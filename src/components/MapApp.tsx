@@ -2,18 +2,23 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
 import {
+  BatteryCharging,
+  Bell,
   Camera,
   Copy,
   Crosshair,
   DoorOpen,
   ImagePlus,
+  LockKeyhole,
   LogOut,
+  MapPin,
   Navigation2,
   Plus,
   QrCode,
   ScanLine,
   Settings2,
   Share2,
+  ShieldCheck,
   Trash2,
   Users,
 } from "lucide-react";
@@ -52,11 +57,23 @@ import {
   type Prefs,
 } from "@/lib/profile";
 import { isNativeApp, startLocationWatch } from "@/lib/locationSource";
+import {
+  checkAllPermissions,
+  markPermissionsAsked,
+  openAppSettings,
+  permissionKeys,
+  permissionsAsked,
+  requestAllPermissions,
+  requestPermission,
+  type PermKey,
+  type PermMap,
+  type PermState,
+} from "@/lib/permissions";
 
 const LiveMap = lazy(() => import("@/components/LiveMap"));
 const SELF = "self";
 
-type DialogKind = "welcome" | "rooms" | "settings" | "share" | "join" | null;
+type DialogKind = "welcome" | "permissions" | "rooms" | "settings" | "share" | "join" | null;
 type GpsStatus = "waiting" | "live" | "denied" | "error";
 
 function shareBase(): string | null {
@@ -551,6 +568,126 @@ export default function MapApp() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+const PERM_INFO: Record<PermKey, { label: string; hint: string; icon: React.ComponentType<{ className?: string }> }> = {
+  location: { label: "Helyzet", hint: "A saját pozíciód a térképen. Válaszd a „Pontos” helyet.", icon: MapPin },
+  backgroundLocation: {
+    label: "Helyzet lezárt képernyőnél",
+    hint: "A megnyíló beállításokban: Engedélyek → Hely → Mindig engedélyezés.",
+    icon: LockKeyhole,
+  },
+  notifications: { label: "Értesítések", hint: "Jelzi, ha a megosztás a háttérben is fut.", icon: Bell },
+  camera: { label: "Kamera", hint: "A szobák QR-kódjának beolvasásához.", icon: Camera },
+  battery: {
+    label: "Akkumulátor-kímélés kikapcsolása",
+    hint: "Hogy a telefon ne állítsa le a megosztást, amíg zsebben van.",
+    icon: BatteryCharging,
+  },
+};
+
+function PermissionsPanel({ native, onDone }: { native: boolean; onDone: () => void }) {
+  const keys = permissionKeys(native);
+  const [states, setStates] = useState<Partial<PermMap>>({});
+  const [busy, setBusy] = useState<PermKey | "all" | null>(null);
+
+  const refresh = useCallback(async () => setStates(await checkAllPermissions()), []);
+  useEffect(() => {
+    void refresh();
+    const onBack = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    document.addEventListener("visibilitychange", onBack);
+    document.addEventListener("resume", onBack);
+    window.addEventListener("focus", onBack);
+    return () => {
+      document.removeEventListener("visibilitychange", onBack);
+      document.removeEventListener("resume", onBack);
+      window.removeEventListener("focus", onBack);
+    };
+  }, [refresh]);
+
+  const set = (key: PermKey, state: PermState) => setStates((prev) => ({ ...prev, [key]: state }));
+
+  const askOne = async (key: PermKey) => {
+    setBusy(key);
+    try {
+      if (states[key] === "denied" && native) await openAppSettings();
+      else set(key, await requestPermission(key));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const askAll = async () => {
+    setBusy("all");
+    try {
+      await requestAllPermissions(set);
+    } finally {
+      setBusy(null);
+      void refresh();
+    }
+  };
+
+  const allGranted = keys.every((k) => states[k] === "granted" || states[k] === "manual");
+
+  return (
+    <>
+      <PanelHeader
+        title="Engedélyek"
+        description="Hogy a Private Place rendesen működjön, ezekhez kér hozzáférést. Semmi nem kerül központi helyre."
+      />
+      <ElasticScroll className="max-h-[52dvh] px-5">
+        <div className="space-y-2.5 pb-1">
+          {keys.map((key) => {
+            const info = PERM_INFO[key];
+            const Icon = info.icon;
+            const state = states[key];
+            const granted = state === "granted";
+            const denied = state === "denied";
+            return (
+              <div key={key} className="glass-inset flex items-center gap-3 rounded-2xl p-3">
+                <span className="indicator grid h-10 w-10 shrink-0 place-items-center rounded-full" data-state={granted ? "on" : "off"}>
+                  <Icon className="h-5 w-5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold">{info.label}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {denied && !native ? "Elutasítva – a böngésző címsoránál engedélyezheted." : info.hint}
+                  </p>
+                </div>
+                {granted ? (
+                  <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <span className="status-dot" data-state="on" />
+                    Kész
+                  </span>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant={denied ? "outline" : "default"}
+                    className={denied ? "glass-button shrink-0 rounded-full" : "shrink-0 rounded-full"}
+                    disabled={busy !== null || (denied && !native)}
+                    onClick={() => void askOne(key)}
+                  >
+                    {state === "manual" || (denied && native) ? "Beállítás" : denied ? "Elutasítva" : "Engedélyezés"}
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </ElasticScroll>
+      <div className="grid grid-cols-2 gap-2 p-5 pt-4">
+        <Button className="rounded-full" disabled={busy !== null || allGranted} onClick={() => void askAll()}>
+          <ShieldCheck className="mr-1.5 h-4 w-4" />
+          {busy === "all" ? "Kérés…" : "Összes engedélyezése"}
+        </Button>
+        <Button variant="outline" className="glass-button rounded-full" disabled={busy === "all"} onClick={onDone}>
+          {allGranted ? "Kész" : "Tovább"}
+        </Button>
+      </div>
+    </>
   );
 }
 
