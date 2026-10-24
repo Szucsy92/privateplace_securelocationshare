@@ -34,3 +34,4 @@ dist-ssr
 # Android app build
 dist-app
 android
+ios
