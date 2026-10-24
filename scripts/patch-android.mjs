@@ -13,10 +13,14 @@ let xml = readFileSync(manifestPath, "utf8");
 const entries = [
   '<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />',
   '<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />',
+  '<uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />',
   '<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />',
   '<uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />',
   '<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />',
   '<uses-permission android:name="android.permission.CAMERA" />',
+  '<uses-permission android:name="android.permission.WAKE_LOCK" />',
+  '<uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />',
+  '<uses-permission android:name="android.permission.INTERNET" />',
   '<uses-feature android:name="android.hardware.location.gps" android:required="false" />',
   '<uses-feature android:name="android.hardware.camera" android:required="false" />',
 ];
@@ -35,6 +39,22 @@ cpSync("assets/android-res", resDir, { recursive: true, force: true });
 const adaptive = readFileSync(`${resDir}/mipmap-anydpi-v26/ic_launcher.xml`, "utf8");
 if (!adaptive.includes("@mipmap/ic_launcher_foreground")) fail("Az ikon nem került be");
 console.log("Ikon és indítókép bemásolva");
+
+// 2b) Indítóképernyő Android 12+: az ikon háttérszínén, a kerek ikon „kocka” nélkül
+const stylesPath = `${resDir}/values/styles.xml`;
+let styles = readFileSync(stylesPath, "utf8");
+if (!styles.includes("windowSplashScreenBackground")) {
+  styles = styles.replace(
+    /(<style name="AppTheme.NoActionBarLaunch"[^>]*>)/,
+    `$1
+        <item name="windowSplashScreenBackground">@color/ic_launcher_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
+        <item name="android:windowBackground">@drawable/splash</item>`,
+  );
+  writeFileSync(stylesPath, styles);
+}
+if (!styles.includes("windowSplashScreenBackground")) fail("Az indítóképernyő témája nem frissült");
+console.log("Indítóképernyő témája beállítva");
 
 // 3) Háttérkövetés értesítési csatornájának neve
 const valuesDir = `${resDir}/values`;

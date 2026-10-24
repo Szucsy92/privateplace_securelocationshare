@@ -10,7 +10,8 @@ from PIL import Image, ImageDraw
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "assets" / "icon-only.png"
 OUT = ROOT / "assets" / "android-res"
-BG = (0x12, 0x1A, 0x2B)
+# Az ikon saját sarokszíne, hogy az indítókép és az ikon háttere egybeolvadjon.
+BG = (0x0B, 0x14, 0x25)
 
 DENSITIES = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
 SPLASH = {
@@ -37,6 +38,20 @@ def masked(img: Image.Image, size: int, radius_ratio: float) -> Image.Image:
     return icon
 
 
+def feathered(img: Image.Image, size: int) -> Image.Image:
+    """Az ikon szélei puhán áttetszővé válnak, így nincs látható kocka/kör a háttéren."""
+    icon = img.resize((size, size), Image.LANCZOS).convert("RGBA")
+    mask = Image.new("L", (size, size), 0)
+    draw = ImageDraw.Draw(mask)
+    steps = 64
+    for i in range(steps):
+        r = size / 2 * (1 - i / steps)
+        a = int(255 * min(1.0, (i / steps) / 0.35))
+        draw.ellipse((size / 2 - r, size / 2 - r, size / 2 + r, size / 2 + r), fill=a)
+    icon.putalpha(mask)
+    return icon
+
+
 def main():
     src = Image.open(SRC).convert("RGB")
     for name, size in DENSITIES.items():
@@ -54,7 +69,7 @@ def main():
         d.mkdir(parents=True, exist_ok=True)
         canvas = Image.new("RGB", (w, h), BG)
         s = int(min(w, h) * 0.5)
-        logo = masked(src, s, 0.5)
+        logo = feathered(src, s)
         canvas.paste(logo, ((w - s) // 2, (h - s) // 2), logo)
         canvas.save(d / "splash.png")
 
@@ -73,7 +88,7 @@ def main():
     values = OUT / "values"
     values.mkdir(parents=True, exist_ok=True)
     (values / "ic_launcher_background.xml").write_text(
-        '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="ic_launcher_background">#121A2B</color>\n</resources>\n'
+        '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="ic_launcher_background">#0B1425</color>\n</resources>\n'
     )
     print("Kész:", OUT)
 

@@ -444,3 +444,66 @@
 @media (prefers-reduced-motion: reduce) {
   .live-dot, .status-dot::after, .map-avatar.is-self { animation: none; }
 }
+
+/* Egykoppintásos megosztás-kapcsoló a fejlécben */
+.share-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 100%;
+  padding: 0.3rem 0.7rem 0.3rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  background: oklch(1 0 0 / 0.05);
+  border: 1px solid oklch(1 0 0 / 0.12);
+  backdrop-filter: blur(12px);
+  transition: background-color 200ms, border-color 200ms, box-shadow 200ms;
+}
+.share-pill[data-state="on"] {
+  background: oklch(0.82 0.19 165 / 0.14);
+  border-color: oklch(0.82 0.19 165 / 0.45);
+  color: var(--live);
+}
+
+.viewer-avatar { width: 2.25rem; height: 2.25rem; font-size: 0.85rem; }
+
+/* Kompakt üveges súgóbuborékok */
+.hint-bubble {
+  position: fixed;
+  z-index: 40;
+  width: min(15rem, calc(100vw - 2rem));
+  padding: 0.65rem 0.8rem;
+  border-radius: 1rem;
+  animation: hint-in 260ms ease-out;
+}
+.hint-bubble::before {
+  content: "";
+  position: absolute;
+  width: 0.7rem;
+  height: 0.7rem;
+  background: inherit;
+  border: inherit;
+  border-right: 0;
+  border-bottom: 0;
+  transform: rotate(45deg);
+}
+.hint-share { top: calc(max(0.5rem, env(safe-area-inset-top)) + 4rem); left: 1rem; }
+.hint-share::before { top: -0.4rem; left: 1.4rem; }
+.hint-viewers { top: calc(max(0.5rem, env(safe-area-inset-top)) + 4rem); right: 1rem; }
+.hint-viewers::before { top: -0.4rem; right: 6.2rem; }
+.hint-rail { bottom: 7.5rem; left: 1rem; }
+.hint-rail::before { bottom: -0.4rem; left: 2rem; transform: rotate(225deg); }
+.hint-next {
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+@keyframes hint-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
