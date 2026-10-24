@@ -54,6 +54,11 @@ export function parseLocation(data: unknown): LocMessage | undefined {
   return { lat, lng, t, acc: acc != null && acc >= 0 ? acc : null, speed: speed != null && speed >= 0 ? speed : null };
 }
 
+/** Megosztáskérés: csak a pontosan `true` érték érvényes. */
+export function parseShareRequest(data: unknown): boolean {
+  return data === true;
+}
+
 const PALETTE = ["#ffc857", "#7aa2ff", "#ff7ab2", "#8be9fd", "#f78c6c", "#c3a6ff"];
 export const SELF_COLOR = "#3ddc97";
 

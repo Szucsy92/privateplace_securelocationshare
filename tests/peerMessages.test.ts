@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseHello, parseLocation } from "../src/lib/peerMessages";
+import { parseHello, parseLocation, parseShareRequest } from "../src/lib/peerMessages";
 
 describe("bejövő üzenetek ellenőrzése", () => {
   test("a megosztás kikapcsolása (null) eltünteti a helyzetet", () => {
@@ -21,5 +21,13 @@ describe("bejövő üzenetek ellenőrzése", () => {
   });
   test("azonosító nélküli bemutatkozást elutasítunk", () => {
     expect(parseHello({ name: "Anna" })).toBeNull();
+  });
+});
+
+describe("megosztáskérés", () => {
+  test("csak a true érték számít kérésnek", () => {
+    expect(parseShareRequest(true)).toBe(true);
+    expect(parseShareRequest("true")).toBe(false);
+    expect(parseShareRequest({ ask: true })).toBe(false);
   });
 });

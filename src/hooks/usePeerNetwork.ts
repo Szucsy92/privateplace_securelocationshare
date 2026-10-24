@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SavedRoom } from "@/lib/rooms";
 import type { LocalProfile } from "@/lib/profile";
-import { colorForDevice, parseHello, parseLocation, type HelloMessage, type LocMessage } from "@/lib/peerMessages";
+import { colorForDevice, parseHello, parseLocation, parseShareRequest, type HelloMessage, type LocMessage } from "@/lib/peerMessages";
 import { appendTrackPoint } from "@/lib/tracking";
 import { turnConfigFromEnv } from "@/lib/turn";
 
@@ -35,6 +35,7 @@ type Joined = {
   hello: Action<HelloMessage>;
   loc: Action<LocMessage>;
   close: Action<boolean>;
+  ask: Action<boolean>;
   peers: Set<string>;
 };
 
@@ -63,6 +64,7 @@ export function usePeerNetwork(opts: {
   deviceId: string | null;
   profile: LocalProfile | null;
   onRoomClosed: (token: string) => void;
+  onShareRequest?: (deviceId: string) => void;
 }) {
   const { rooms, deviceId, profile } = opts;
   const [people, setPeople] = useState<Record<string, RemotePerson>>({});
@@ -75,6 +77,8 @@ export function usePeerNetwork(opts: {
   const lastLocRef = useRef<LocMessage>(null);
   const onClosedRef = useRef(opts.onRoomClosed);
   onClosedRef.current = opts.onRoomClosed;
+  const onAskRef = useRef(opts.onShareRequest);
+  onAskRef.current = opts.onShareRequest;
   helloRef.current = profile && deviceId ? { deviceId, name: profile.name, avatar: profile.avatar } : null;
 
   const refreshCounts = useCallback(() => {
@@ -159,6 +163,7 @@ export function usePeerNetwork(opts: {
           hello: room.makeAction<HelloMessage>("hello"),
           loc: room.makeAction<LocMessage>("loc"),
           close: room.makeAction<boolean>("close"),
+          ask: room.makeAction<boolean>("ask"),
           peers: new Set(),
         };
         room.onPeerJoin = (peerId) => {
@@ -199,6 +204,11 @@ export function usePeerNetwork(opts: {
           applyLocation(dev, m);
         };
         j.close.onMessage = () => onClosedRef.current(token);
+        j.ask.onMessage = (data, { peerId }) => {
+          if (!parseShareRequest(data)) return;
+          const dev = peerDeviceRef.current.get(peerId);
+          if (dev) onAskRef.current?.(dev);
+        };
         joinedRef.current.set(token, j);
       }
       refreshCounts();
@@ -237,5 +247,17 @@ export function usePeerNetwork(opts: {
     await new Promise((r) => setTimeout(r, 400));
   }, []);
 
-  return { people, roomPeers, connectIssues, sendLocation, announceClose };
+  /** Megosztás kérése egy szobatárstól (minden közös szobán át, ahol elérhető). */
+  const requestShare = useCallback((dev: string) => {
+    let sent = false;
+    for (const j of joinedRef.current.values()) {
+      const targets = [...j.peers].filter((peerId) => peerDeviceRef.current.get(peerId) === dev);
+      if (!targets.length) continue;
+      void j.ask.send(true, { target: targets }).catch(() => undefined);
+      sent = true;
+    }
+    return sent;
+  }, []);
+
+  return { people, roomPeers, connectIssues, sendLocation, announceClose, requestShare };
 }
