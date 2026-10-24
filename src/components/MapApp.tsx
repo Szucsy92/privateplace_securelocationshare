@@ -1094,7 +1094,7 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
       <ElasticScroll className="max-h-[70dvh] px-5 pb-5">
         <div className="flex flex-col items-center gap-4">
           <div className="qr-frame">
-            <QRCodeSVG value={text} size={196} level="M" bgColor={qrBackground} fgColor={qrColor} marginSize={0} />
+            {qrBackground && qrColor && <QRCodeSVG value={text} size={196} level="M" bgColor={qrBackground} fgColor={qrColor} marginSize={0} />}
           </div>
           <div className="glass-inset w-full rounded-2xl p-3 text-center">
             <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Szobakód</p>
