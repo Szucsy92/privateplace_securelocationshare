@@ -7,11 +7,19 @@ export const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 export const ROOM_TOKEN_LENGTH = 20;
 const STORAGE_KEY = "elohely.rooms.v1";
 
+export const ROOM_COLORS = ["mint", "teal", "blue", "sky", "violet", "rose", "red", "amber", "olive", "graphite"] as const;
+export type RoomColor = (typeof ROOM_COLORS)[number];
+export const DEFAULT_ROOM_COLOR: RoomColor = "mint";
+export function isRoomColor(value: unknown): value is RoomColor {
+  return typeof value === "string" && ROOM_COLORS.some((c) => c === value);
+}
+
 export type SavedRoom = {
   token: string;
   name: string;
   owner: boolean;
   createdAt: number;
+  color?: RoomColor;
 };
 
 export function generateRoomToken(random: (n: number) => Uint8Array = defaultRandom): string {
@@ -42,7 +50,7 @@ function normalizeToken(raw: string): string | null {
 }
 
 /** Link vagy beírt kód értelmezése. */
-export function parseRoomInput(input: string): { token: string; name: string | null } | null {
+export function parseRoomInput(input: string): { token: string; name: string | null; color?: RoomColor } | null {
   const text = input.trim();
   if (!text) return null;
   const hashIndex = text.indexOf("#");
@@ -53,16 +61,18 @@ export function parseRoomInput(input: string): { token: string; name: string | n
       const token = normalizeToken(raw);
       if (!token) return null;
       const name = params.get("nev");
-      return { token, name: name ? name.slice(0, 40) : null };
+      const color = params.get("szin");
+      return { token, name: name ? name.slice(0, 40) : null, ...(isRoomColor(color) ? { color } : {}) };
     }
   }
   const token = normalizeToken(text);
   return token ? { token, name: null } : null;
 }
 
-export function buildRoomLink(base: string, token: string, name?: string): string {
+export function buildRoomLink(base: string, token: string, name?: string, color?: RoomColor): string {
   const params = new URLSearchParams({ szoba: token });
   if (name) params.set("nev", name);
+  if (color && isRoomColor(color)) params.set("szin", color);
   return `${base.replace(/\/+$/, "")}/#${params.toString()}`;
 }
 
@@ -87,4 +97,11 @@ export function addRoom(rooms: SavedRoom[], room: SavedRoom): SavedRoom[] {
 
 export function removeRoom(rooms: SavedRoom[], token: string): SavedRoom[] {
   return rooms.filter((r) => r.token !== token);
+}
+
+/** A név és a szín helyi címke; a titkos kulcs változatlan marad. */
+export function customizeRoom(rooms: SavedRoom[], token: string, name: string, color: RoomColor): SavedRoom[] {
+  const clean = name.trim().slice(0, 40);
+  if (!clean || !isRoomColor(color)) return rooms;
+  return rooms.map((room) => room.token === token ? { ...room, name: clean, color } : room);
 }

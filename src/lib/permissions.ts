@@ -60,7 +60,8 @@ export async function checkPermission(key: PermKey): Promise<PermState> {
     switch (key) {
       case "location": {
         const { Geolocation } = await import("@capacitor/geolocation");
-        return normalize((await Geolocation.checkPermissions()).location);
+        const state = await Geolocation.checkPermissions();
+        return state.location === "granted" || state.coarseLocation === "granted" ? "granted" : normalize(state.location);
       }
       case "backgroundLocation":
         // Ezt csak a telefon beállításaiban lehet „Mindig engedélyezés”-re állítani.
@@ -100,7 +101,7 @@ export async function requestPermission(key: PermKey): Promise<PermState> {
           navigator.geolocation.getCurrentPosition(
             () => resolve(),
             () => resolve(),
-            { enableHighAccuracy: true, timeout: 15000 },
+            { enableHighAccuracy: false, maximumAge: 0, timeout: 10000 },
           ),
         );
       } else if (key === "camera" && navigator.mediaDevices?.getUserMedia) {
@@ -116,7 +117,8 @@ export async function requestPermission(key: PermKey): Promise<PermState> {
     switch (key) {
       case "location": {
         const { Geolocation } = await import("@capacitor/geolocation");
-        return normalize((await Geolocation.requestPermissions({ permissions: ["location", "coarseLocation"] })).location);
+        const state = await Geolocation.requestPermissions({ permissions: ["location", "coarseLocation"] });
+        return state.location === "granted" || state.coarseLocation === "granted" ? "granted" : normalize(state.location);
       }
       case "backgroundLocation":
         await openAppSettings();

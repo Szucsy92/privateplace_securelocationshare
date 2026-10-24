@@ -170,7 +170,7 @@ export function usePeerNetwork(opts: {
           j.peers.add(peerId);
           refreshCounts();
           if (helloRef.current) void j.hello.send(helloRef.current, { target: peerId }).catch(() => undefined);
-          if (lastLocRef.current) void j.loc.send(lastLocRef.current, { target: peerId }).catch(() => undefined);
+          void j.loc.send(lastLocRef.current, { target: peerId }).catch(() => undefined);
         };
         room.onPeerLeave = (peerId) => {
           j.peers.delete(peerId);
@@ -203,7 +203,7 @@ export function usePeerNetwork(opts: {
           }
           applyLocation(dev, m);
         };
-        j.close.onMessage = () => onClosedRef.current(token);
+        j.close.onMessage = (data) => { if (data === true) onClosedRef.current(token); };
         j.ask.onMessage = (data, { peerId }) => {
           if (!parseShareRequest(data)) return;
           const dev = peerDeviceRef.current.get(peerId);
