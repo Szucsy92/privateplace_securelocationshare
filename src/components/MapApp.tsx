@@ -11,6 +11,10 @@ import {
   ImagePlus,
   LockKeyhole,
   LogOut,
+  Eye,
+  HelpCircle,
+  Pause,
+  Play,
   MapPin,
   Navigation2,
   Plus,
@@ -73,7 +77,7 @@ import {
 const LiveMap = lazy(() => import("@/components/LiveMap"));
 const SELF = "self";
 
-type DialogKind = "welcome" | "permissions" | "rooms" | "settings" | "share" | "join" | null;
+type DialogKind = "welcome" | "permissions" | "viewers" | "rooms" | "settings" | "share" | "join" | null;
 type GpsStatus = "waiting" | "live" | "denied" | "error";
 
 function shareBase(): string | null {
@@ -100,6 +104,7 @@ export default function MapApp() {
   const [gpsStatus, setGpsStatus] = useState<GpsStatus>("waiting");
   const [gpsRequest, setGpsRequest] = useState(0);
   const [clock, setClock] = useState(() => Date.now());
+  const [hintsKey, setHintsKey] = useState(0);
   const selfTrackRef = useRef<TrackPoint[]>([]);
   const lastSentRef = useRef(0);
   const prefsRef = useRef(prefs);
@@ -156,7 +161,26 @@ export default function MapApp() {
     [updateRooms],
   );
 
-  const net = usePeerNetwork({ rooms, deviceId, profile, onRoomClosed });
+  const sharingRef = useRef(prefs.sharing);
+  sharingRef.current = prefs.sharing;
+  const setSharingRef = useRef<(v: boolean) => void>(() => undefined);
+  const onShareRequest = useCallback((dev: string) => {
+    const who = netPeopleRef.current[dev]?.name ?? "Egy szobatársad";
+    if (sharingRef.current) {
+      toast.info(`${who} kérte a helyzetedet – a megosztás már be van kapcsolva.`);
+      return;
+    }
+    toast(`${who} szeretné látni, merre vagy`, {
+      description: "Egy koppintással bekapcsolhatod a megosztást.",
+      duration: 15000,
+      action: { label: "Megosztás", onClick: () => setSharingRef.current(true) },
+    });
+    void notifyShareRequest(who);
+  }, []);
+  const netPeopleRef = useRef<Record<string, RemotePerson>>({});
+
+  const net = usePeerNetwork({ rooms, deviceId, profile, onRoomClosed, onShareRequest });
+  netPeopleRef.current = net.people;
 
   // Saját GPS: mindig fut, privát; csak a megosztás kapcsoló küld a szobatársaknak.
   // Az Android-alkalmazásban bekapcsolt megosztásnál lezárt képernyőnél is folytatódik.
@@ -203,6 +227,16 @@ export default function MapApp() {
       net.sendLocation({ lat: last.lat, lng: last.lng, t: last.t, acc: selfMeta?.acc ?? null, speed: selfMeta?.speed ?? null });
     }
   };
+  setSharingRef.current = setSharing;
+
+  const askToShare = (dev: string) => {
+    const p = net.people[dev];
+    if (!p?.online) {
+      toast.info("Ő most nincs online, ezért nem tudod megkérni.");
+      return;
+    }
+    if (net.requestShare(dev)) toast.success(`Kérés elküldve ${p.name} részére.`);
+  };
 
   const remote = useMemo(
     () =>
@@ -229,7 +263,11 @@ export default function MapApp() {
       return;
     }
     if (!hasPosition(id)) {
-      toast.info(id === SELF ? "Még keresem a helyzetedet. Engedélyezd a helyhozzáférést." : "Ő most nem osztja meg a helyzetét.");
+      if (id === SELF) toast.info("Még keresem a helyzetedet. Engedélyezd a helyhozzáférést.");
+      else
+        toast(`${net.people[id]?.name ?? "Ő"} most nem osztja meg a helyzetét`, {
+          action: { label: "Kérés", onClick: () => askToShare(id) },
+        });
       return;
     }
     setFollow((prev) => ({ id, request: (prev?.request ?? 0) + 1 }));
@@ -267,6 +305,7 @@ export default function MapApp() {
   };
 
   const onlineCount = remote.filter((p) => p.online).length;
+  const viewers = prefs.sharing ? remote.filter((p) => p.online) : [];
   const selfFresh = selfMeta ? clock - selfMeta.at < 15000 : false;
 
   if (!mounted) return <div className="map-workspace glass-shell" />;
@@ -276,14 +315,30 @@ export default function MapApp() {
       <header className="glass z-10 flex shrink-0 items-center justify-between gap-2 px-3 py-2">
         <div className="min-w-0 flex-1">
           <h1 className="font-display text-base font-bold">Private Place</h1>
-          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          <button
+            className="share-pill indicator mt-0.5"
+            data-state={prefs.sharing ? "on" : "off"}
+            aria-pressed={prefs.sharing}
+            aria-label={prefs.sharing ? "Megosztás leállítása" : "Megosztás indítása"}
+            onClick={() => setSharing(!prefs.sharing)}
+          >
             <span className="status-dot" data-state={prefs.sharing ? "on" : "off"} />
-            <span className="truncate">
-              {prefs.sharing ? "Megosztás aktív" : "Megosztás kikapcsolva"} · {rooms.length} szoba
-            </span>
-          </p>
+            {prefs.sharing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+            <span>{prefs.sharing ? `Megosztás be · ${viewers.length} lát` : "Megosztás ki"}</span>
+          </button>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="indicator rounded-full"
+            data-state={dialog === "viewers" ? "on" : "off"}
+            aria-label="Ki látja a helyzetemet?"
+            title="Ki látja a helyzetemet?"
+            onClick={() => setDialog("viewers")}
+          >
+            <Eye className="h-5 w-5" />
+          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -410,6 +465,8 @@ export default function MapApp() {
         </div>
       </section>
 
+      {profile && dialog === null && <HintBubbles key={hintsKey} />}
+
       <Dialog
         open={dialog !== null}
         onOpenChange={(open) => {
@@ -433,9 +490,65 @@ export default function MapApp() {
               onSave={(p) => {
                 saveProfile(p);
                 setProfile(p);
+                setDialog(permissionsAsked() ? (pendingJoin ? "join" : null) : "permissions");
+              }}
+            />
+          )}
+
+          {dialog === "permissions" && (
+            <PermissionsPanel
+              native={nativeApp}
+              onDone={() => {
+                markPermissionsAsked();
+                setGpsRequest((n) => n + 1);
                 setDialog(pendingJoin ? "join" : null);
               }}
             />
+          )}
+
+          {dialog === "viewers" && (
+            <>
+              <PanelHeader
+                title="Ki látja a helyzetemet?"
+                description="Csak a szobáidban éppen kapcsolódó emberek, és csak amíg a megosztás be van kapcsolva."
+              />
+              <div className="space-y-3 px-5 pb-5">
+                <div className="glass-inset flex items-center justify-between gap-3 rounded-2xl p-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="status-dot" data-state={prefs.sharing ? "on" : "off"} />
+                    <span className="text-sm font-semibold">{prefs.sharing ? "Megosztás bekapcsolva" : "Megosztás kikapcsolva"}</span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={prefs.sharing ? "outline" : "default"}
+                    className={prefs.sharing ? "glass-button rounded-full" : "rounded-full"}
+                    onClick={() => setSharing(!prefs.sharing)}
+                  >
+                    {prefs.sharing ? <Pause className="mr-1 h-4 w-4" /> : <Play className="mr-1 h-4 w-4" />}
+                    {prefs.sharing ? "Leállítás" : "Indítás"}
+                  </Button>
+                </div>
+                <ElasticScroll className="max-h-[40dvh]">
+                  <div className="space-y-2">
+                    {viewers.length === 0 && (
+                      <p className="glass-inset rounded-2xl p-4 text-sm text-muted-foreground">
+                        {prefs.sharing ? "Most senki nem kapcsolódik a szobáidban, így senki nem lát." : "Senki nem látja a helyzetedet."}
+                      </p>
+                    )}
+                    {viewers.map((p) => (
+                      <div key={p.deviceId} className="glass-inset flex items-center gap-3 rounded-2xl p-2.5">
+                        <span className="capsule-avatar viewer-avatar" style={{ "--person-color": p.color } as React.CSSProperties}>
+                          {p.avatar ? <img src={p.avatar} alt="" /> : p.name.charAt(0).toUpperCase()}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-semibold">{p.name}</span>
+                        <span className="status-dot mr-2" data-state="on" />
+                      </div>
+                    ))}
+                  </div>
+                </ElasticScroll>
+                <p className="text-xs text-muted-foreground">Ha valakit ki akarsz zárni, töröld vagy hagyd el a közös szobát a Szobák menüben.</p>
+              </div>
+            </>
           )}
 
           {dialog === "join" && <JoinPanel initial={pendingJoin} onJoin={joinRoom} />}
@@ -496,6 +609,25 @@ export default function MapApp() {
                         onCheckedChange={setSharing}
                       />
                     </SettingRow>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button variant="outline" className="glass-button rounded-full" onClick={() => setDialog("permissions")}>
+                      <ShieldCheck className="mr-1.5 h-4 w-4" />
+                      Engedélyek
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="glass-button rounded-full"
+                      onClick={() => {
+                        resetHints();
+                        setHintsKey((n) => n + 1);
+                        setDialog(null);
+                      }}
+                    >
+                      <HelpCircle className="mr-1.5 h-4 w-4" />
+                      Súgó
+                    </Button>
                   </div>
 
                   <div className="glass-inset space-y-3 rounded-2xl p-4">
@@ -569,6 +701,70 @@ export default function MapApp() {
       </Dialog>
     </div>
   );
+}
+
+const HINTS_KEY = "privateplace.hints.v1";
+const HINTS: { text: string; place: string }[] = [
+  { text: "Ezzel a gombbal egy koppintással indítod vagy leállítod a megosztást. Akkut kímél, ha leállítod.", place: "hint-share" },
+  { text: "A szem ikon mutatja, ki látja most a helyzetedet.", place: "hint-viewers" },
+  { text: "Koppints egy személyre a követéshez. Ha nem oszt meg, innen kérheted meg rá.", place: "hint-rail" },
+  { text: "Ha valaki megosztást kér, felül üzenet jelenik meg – a „Megosztás” gombbal azonnal bekapcsolod.", place: "hint-share" },
+];
+
+function resetHints() {
+  try {
+    localStorage.removeItem(HINTS_KEY);
+  } catch {
+    /* nem kritikus */
+  }
+}
+
+/** Rövid, üveges súgóbuborékok első használatkor (a Beállítások → Súgó gombbal újra). */
+function HintBubbles() {
+  const [step, setStep] = useState<number | null>(null);
+  useEffect(() => {
+    try {
+      setStep(Number(localStorage.getItem(HINTS_KEY) ?? "0") || 0);
+    } catch {
+      setStep(HINTS.length);
+    }
+  }, []);
+  if (step === null || step >= HINTS.length) return null;
+  const hint = HINTS[step]!;
+  const next = (to: number) => {
+    setStep(to);
+    try {
+      localStorage.setItem(HINTS_KEY, String(to));
+    } catch {
+      /* nem kritikus */
+    }
+  };
+  return (
+    <div className={`hint-bubble glass ${hint.place}`} role="status">
+      <p className="text-xs leading-snug">{hint.text}</p>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <button className="text-[11px] text-muted-foreground underline underline-offset-2" onClick={() => next(HINTS.length)}>
+          Kihagyás
+        </button>
+        <button className="hint-next" onClick={() => next(step + 1)}>
+          {step + 1 < HINTS.length ? `Tovább ${step + 1}/${HINTS.length}` : "Értem"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Ha az app a háttérben fut (pl. zsebben), rendszerértesítés is jelzi a kérést. */
+async function notifyShareRequest(who: string) {
+  if (!isNativeApp() || document.visibilityState === "visible") return;
+  try {
+    const { LocalNotifications } = await import("@capacitor/local-notifications");
+    await LocalNotifications.schedule({
+      notifications: [{ id: Math.floor(Date.now() % 2_000_000_000), title: "Helymegosztást kértek", body: `${who} szeretné látni, merre vagy.` }],
+    });
+  } catch {
+    /* értesítés nem engedélyezett */
+  }
 }
 
 const PERM_INFO: Record<PermKey, { label: string; hint: string; icon: React.ComponentType<{ className?: string }> }> = {
