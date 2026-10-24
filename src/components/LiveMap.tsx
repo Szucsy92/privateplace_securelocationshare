@@ -26,6 +26,7 @@ type Props = {
   follow: { id: string; request: number } | null;
   showTrails: boolean;
   orientation: Orientation;
+  theme: "dark" | "light";
   onUserPan: () => void;
   compassRef?: RefObject<HTMLElement | null>;
 };
@@ -56,7 +57,34 @@ function fillAvatar(el: HTMLDivElement, person: MapPerson) {
   el.title = person.name;
 }
 
-export default function LiveMap({ people, follow, showTrails, orientation, onUserPan, compassRef }: Props) {
+function applyMapContrast(map: MlMap, theme: "dark" | "light") {
+  const css = getComputedStyle(document.documentElement);
+  const color = (role: string) => css.getPropertyValue(`--map-${theme}-${role}`).trim();
+  for (const layer of map.getStyle().layers ?? []) {
+    const id = layer.id;
+    if (layer.type === "background") map.setPaintProperty(id, "background-color", color("background"));
+    if (layer.type === "fill") {
+      if (id === "water") map.setPaintProperty(id, "fill-color", color("water"));
+      if (id === "building") {
+        map.setPaintProperty(id, "fill-color", color("building"));
+        map.setPaintProperty(id, "fill-outline-color", color("building-edge"));
+        map.setPaintProperty(id, "fill-opacity", 1);
+      }
+      if (id === "landuse_park" || id === "landcover_wood") map.setPaintProperty(id, "fill-color", color("park"));
+    }
+    if (layer.type === "line" && (id.startsWith("highway_") || id.startsWith("road_"))) {
+      map.setPaintProperty(id, "line-color", color(id.includes("casing") ? "road-casing" : id.includes("major") || id.includes("motorway") ? "road-major" : "road"));
+      map.setPaintProperty(id, "line-opacity", 1);
+    }
+    if (layer.type === "symbol" && layer.layout?.["text-field"]) {
+      map.setPaintProperty(id, "text-color", color("label"));
+      map.setPaintProperty(id, "text-halo-color", color("halo"));
+      map.setPaintProperty(id, "text-halo-width", 1.3);
+    }
+  }
+}
+
+export default function LiveMap({ people, follow, showTrails, orientation, theme, onUserPan, compassRef }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MlMap | null>(null);
   const markerCtorRef = useRef<typeof MlMarker | null>(null);
@@ -137,13 +165,6 @@ export default function LiveMap({ people, follow, showTrails, orientation, onUse
         map.on("load", () => {
           if (!map) return;
           containerRef.current?.querySelector(".maplibregl-ctrl-attrib")?.classList.remove("maplibregl-compact-show");
-          // A sötét alaptérkép hangolása az app kékes tónusához
-          for (const [layer, prop, color] of [
-            ["background", "background-color", "#101827"],
-            ["water", "fill-color", "#0a1322"],
-          ] as const) {
-            if (map.getLayer(layer)) map.setPaintProperty(layer, prop, color);
-          }
           map.addSource("trails", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
           map.addLayer({
             id: "trails",
@@ -170,6 +191,11 @@ export default function LiveMap({ people, follow, showTrails, orientation, onUse
       mapRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map && ready) applyMapContrast(map, theme);
+  }, [ready, theme]);
 
   // Jelölők, irányok, nyomvonalak
   useEffect(() => {

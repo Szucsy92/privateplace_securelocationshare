@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   ROOM_TOKEN_LENGTH,
+  ROOM_COLORS,
+  customizeRoom,
   addRoom,
   buildRoomLink,
   formatRoomToken,
@@ -43,4 +45,21 @@ describe("titkos szobák", () => {
     const room = { token: generateRoomToken(), name: "X", owner: false, createdAt: 1 };
     expect(addRoom([room], room)).toHaveLength(1);
   });
+});
+
+test("pontosan tíz különböző szobaszín választható", () => {
+  expect(ROOM_COLORS).toHaveLength(10);
+  expect(new Set(ROOM_COLORS).size).toBe(10);
+});
+test("az átnevezés és színváltás nem változtatja meg a titkos szobakódot", () => {
+  const room = { token: generateRoomToken(), name: "Szobám", owner: true, createdAt: 1 };
+  const edited = customizeRoom([room], room.token, " Család ", "blue");
+  expect(edited[0]).toEqual({ ...room, name: "Család", color: "blue" });
+  expect(customizeRoom(edited, room.token, "  ", "red")).toEqual(edited);
+});
+test("a szobaszín a meghívó rejtett részében utazik", () => {
+  const token = generateRoomToken();
+  const link = buildRoomLink("https://pelda.hu", token, "Család", "rose");
+  expect(parseRoomInput(link)).toEqual({ token, name: "Család", color: "rose" });
+  expect(link.split("#")[0]).toBe("https://pelda.hu/");
 });
