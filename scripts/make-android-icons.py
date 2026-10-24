@@ -62,7 +62,13 @@ def main():
         masked(src, size, 0.5).save(d / "ic_launcher_round.png")
         # Rétegzett ikon (Android 8+): előtér 108dp, a telefon maga vágja körre/négyzetre
         fg = int(size * 108 / 48)
-        src.resize((fg, fg), Image.LANCZOS).save(d / "ic_launcher_foreground.png")
+        # Az adaptív ikon látható középső 72dp-jébe illesztjük ugyanazt a képet,
+        # nem nagyítjuk a teljes 108dp előtérre (ez okozta a levágást).
+        canvas = Image.new("RGBA", (fg, fg), (*BG, 255))
+        inner = int(fg * 64 / 108)
+        logo = src.resize((inner, inner), Image.LANCZOS)
+        canvas.paste(logo, ((fg - inner) // 2, (fg - inner) // 2))
+        canvas.save(d / "ic_launcher_foreground.png")
 
     for folder, (w, h) in SPLASH.items():
         d = OUT / folder

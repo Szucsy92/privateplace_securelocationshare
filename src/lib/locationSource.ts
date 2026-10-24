@@ -46,63 +46,85 @@ export function startLocationWatch(opts: {
   let stopped = false;
   let cleanup: () => void = () => undefined;
 
+  let acquisitionTimer: ReturnType<typeof setTimeout> | undefined;
+  let gotFix = false;
+  const reportFix = (fix: Fix) => {
+    if (stopped || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lng) || Math.abs(fix.lat) > 90 || Math.abs(fix.lng) > 180) return;
+    gotFix = true;
+    clearTimeout(acquisitionTimer);
+    opts.onFix(fix);
+  };
+  const reportError = (err: FixError) => {
+    if (!stopped && (err === "denied" || !gotFix)) opts.onError(err);
+  };
+  acquisitionTimer = setTimeout(() => reportError("error"), 25000);
+
   if (!isNativeApp()) {
     if (!("geolocation" in navigator)) {
+      clearTimeout(acquisitionTimer);
       opts.onError("error");
       return () => undefined;
     }
-    const id = navigator.geolocation.watchPosition(
-      (pos) =>
-        opts.onFix({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          acc: pos.coords.accuracy ?? null,
-          speed: pos.coords.speed ?? null,
-        }),
-      (err) => opts.onError(err.code === 1 ? "denied" : "error"),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 },
-    );
-    return () => navigator.geolocation.clearWatch(id);
+    const fromPosition = (pos: GeolocationPosition) => reportFix({
+      lat: pos.coords.latitude, lng: pos.coords.longitude,
+      acc: pos.coords.accuracy ?? null, speed: pos.coords.speed ?? null,
+    });
+    const quickFix = () => navigator.geolocation.getCurrentPosition(fromPosition,
+      (err) => reportError(err.code === 1 ? "denied" : "error"),
+      { enableHighAccuracy: false, maximumAge: 0, timeout: 10000 });
+    quickFix();
+    const id = navigator.geolocation.watchPosition(fromPosition, (err) => {
+      reportError(err.code === 1 ? "denied" : "error");
+      if (err.code !== 1 && !stopped) quickFix();
+    }, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
+    return () => {
+      stopped = true;
+      clearTimeout(acquisitionTimer);
+      navigator.geolocation.clearWatch(id);
+    };
   }
 
   void (async () => {
     try {
+      const { Geolocation } = await import("@capacitor/geolocation");
+      let permissions = await Geolocation.checkPermissions();
+      if (stopped) return;
+      if (permissions.location !== "granted" && permissions.coarseLocation !== "granted") {
+        permissions = await Geolocation.requestPermissions({ permissions: ["location", "coarseLocation"] });
+      }
+      if (stopped) return;
+      if (permissions.location !== "granted" && permissions.coarseLocation !== "granted") {
+        reportError("denied");
+        return;
+      }
+      // A hálózati hely elsőként megjelenhet; a műholdas követő pontosítja.
+      void Geolocation.getCurrentPosition({ enableHighAccuracy: false, maximumAge: 0, timeout: 10000 })
+        .then((pos) => reportFix({ lat: pos.coords.latitude, lng: pos.coords.longitude,
+          acc: pos.coords.accuracy ?? null, speed: pos.coords.speed ?? null }))
+        .catch(() => undefined);
       const plugin = await getBackgroundPlugin();
       if (opts.background) await ensureNotificationPermission();
       if (stopped) return;
-      const id = await plugin.addWatcher(
-        {
-          ...(opts.background
-            ? {
-                backgroundTitle: "Private Place – megosztás aktív",
-                backgroundMessage: "A szobatársaid élőben látják a helyzetedet. A megosztást az appban kapcsolhatod ki.",
-              }
-            : {}),
-          requestPermissions: true,
-          stale: false,
-          distanceFilter: 0,
-        },
-        (loc, err) => {
-          if (err) {
-            opts.onError(err.code === "NOT_AUTHORIZED" ? "denied" : "error");
-            return;
-          }
-          if (!loc) return;
-          opts.onFix({ lat: loc.latitude, lng: loc.longitude, acc: loc.accuracy ?? null, speed: loc.speed ?? null });
-        },
-      );
-      if (stopped) {
-        void plugin.removeWatcher({ id });
-        return;
-      }
-      cleanup = () => void plugin.removeWatcher({ id });
-    } catch {
-      if (!stopped) opts.onError("error");
+      const id = await plugin.addWatcher({
+        ...(opts.background ? {
+          backgroundTitle: "Private Place – megosztás aktív",
+          backgroundMessage: "A szobatársaid élőben látják a helyzetedet. A megosztást az appban kapcsolhatod ki.",
+        } : {}),
+        requestPermissions: true, stale: false, distanceFilter: 0,
+      }, (loc, err) => {
+        if (err) { reportError(err.code === "NOT_AUTHORIZED" ? "denied" : "error"); return; }
+        if (loc) reportFix({ lat: loc.latitude, lng: loc.longitude, acc: loc.accuracy ?? null, speed: loc.speed ?? null });
+      });
+      if (stopped) { void plugin.removeWatcher({ id }).catch(() => undefined); return; }
+      cleanup = () => void plugin.removeWatcher({ id }).catch(() => undefined);
+    } catch (err) {
+      const code = typeof err === "object" && err !== null && "code" in err ? String(err.code) : "";
+      reportError(code === "OS-PLUG-GLOC-0003" || code === "NOT_AUTHORIZED" ? "denied" : "error");
     }
   })();
-
   return () => {
     stopped = true;
+    clearTimeout(acquisitionTimer);
     cleanup();
   };
 }

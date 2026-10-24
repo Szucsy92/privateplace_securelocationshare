@@ -25,3 +25,7 @@
 - The launch screen uses the icon's own corner color (#0B1425) as background and a feathered logo, so no icon square shows on startup.
 - First run shows the permissions panel right after the name is saved (reopenable from Settings); one-shot glass hint bubbles are stored in localStorage and reset via Settings → Súgó.
 - Share requests are a peer 'ask' action (validated by parseShareRequest); they only arrive while the app is running, since there is no server to push them.
+
+- Room customization is local metadata; keep room tokens stable and carry optional palette IDs only in invitation hashes so edits never break peer connections.
+- Map day/night contrast uses semantic CSS palette tokens on existing MapLibre layers; keep markers, sources, camera and live tracking intact on theme changes.
+- Location acquisition accepts a fresh approximate foreground fix while the accurate watcher starts; restart after permissions/resume, and clean up pending callbacks and timers when stopping.

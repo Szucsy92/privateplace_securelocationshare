@@ -3,6 +3,11 @@ import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
 import {
   BatteryCharging,
+  Pencil,
+  Sun,
+  Moon,
+  Check,
+  X,
   Bell,
   Camera,
   Copy,
@@ -40,6 +45,10 @@ import { appendTrackPoint, clearTrackHistory, shouldPublishLocation } from "@/li
 import { SELF_COLOR } from "@/lib/peerMessages";
 import {
   addRoom,
+  customizeRoom,
+  ROOM_COLORS,
+  DEFAULT_ROOM_COLOR,
+  type RoomColor,
   buildRoomLink,
   formatRoomToken,
   generateRoomToken,
@@ -97,7 +106,7 @@ export default function MapApp() {
   const [rooms, setRooms] = useState<SavedRoom[]>([]);
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [shareToken, setShareToken] = useState<string | null>(null);
-  const [pendingJoin, setPendingJoin] = useState<{ token: string; name: string | null } | null>(null);
+  const [pendingJoin, setPendingJoin] = useState<{ token: string; name: string | null; color?: RoomColor } | null>(null);
   const [follow, setFollow] = useState<{ id: string; request: number } | null>(null);
   const [selfTrack, setSelfTrack] = useState<TrackPoint[]>([]);
   const [selfMeta, setSelfMeta] = useState<{ speed: number | null; acc: number | null; at: number } | null>(null);
@@ -186,7 +195,7 @@ export default function MapApp() {
   // Az Android-alkalmazásban bekapcsolt megosztásnál lezárt képernyőnél is folytatódik.
   const backgroundSharing = nativeApp && prefs.sharing;
   useEffect(() => {
-    if (!mounted || !profile) return;
+    if (!mounted || !profile || dialog === "welcome" || dialog === "permissions") return;
     setGpsStatus((s) => (s === "live" ? s : "waiting"));
     return startLocationWatch({
       background: backgroundSharing,
@@ -204,7 +213,31 @@ export default function MapApp() {
       onError: (err) => setGpsStatus(err),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, profile !== null, gpsRequest, backgroundSharing]);
+  }, [mounted, profile !== null, gpsRequest, backgroundSharing, dialog === "permissions", dialog === "welcome"]);
+
+  // Újraindítás a telefon beállításaiból vagy a háttérből visszatérve.
+  useEffect(() => {
+    const resume = () => {
+      if (document.visibilityState === "visible") setGpsRequest((n) => n + 1);
+    };
+    let permission: PermissionStatus | undefined;
+    let cancelled = false;
+    if (!nativeApp && navigator.permissions) {
+      void navigator.permissions.query({ name: "geolocation" }).then((p) => {
+        if (cancelled) return;
+        permission = p;
+        p.addEventListener("change", resume);
+      }).catch(() => undefined);
+    }
+    document.addEventListener("visibilitychange", resume);
+    document.addEventListener("resume", resume);
+    return () => {
+      cancelled = true;
+      permission?.removeEventListener("change", resume);
+      document.removeEventListener("visibilitychange", resume);
+      document.removeEventListener("resume", resume);
+    };
+  }, [nativeApp]);
 
   // Csatlakozási gond (pl. két szigorú mobilnet között) – egyszer jelezzük.
   const warnedIssueRef = useRef(false);
@@ -218,11 +251,12 @@ export default function MapApp() {
   const setSharing = (value: boolean) => {
     updatePrefs({ sharing: value });
     if (!value) {
+      prefsRef.current = { ...prefsRef.current, sharing: false };
       net.sendLocation(null);
       return;
     }
     const last = selfTrackRef.current[selfTrackRef.current.length - 1];
-    if (last) {
+    if (last && Date.now() - last.t < 15000) {
       lastSentRef.current = Date.now();
       net.sendLocation({ lat: last.lat, lng: last.lng, t: last.t, acc: selfMeta?.acc ?? null, speed: selfMeta?.speed ?? null });
     }
@@ -263,7 +297,10 @@ export default function MapApp() {
       return;
     }
     if (!hasPosition(id)) {
-      if (id === SELF) toast.info("Még keresem a helyzetedet. Engedélyezd a helyhozzáférést.");
+      if (id === SELF) {
+        if (gpsStatus === "denied") setDialog("permissions");
+        else { setGpsRequest((n) => n + 1); toast.info("Újra keresem a helyzetedet. Ellenőrizd, hogy a telefon helymeghatározása be van-e kapcsolva."); }
+      }
       else
         toast(`${net.people[id]?.name ?? "Ő"} most nem osztja meg a helyzetét`, {
           action: { label: "Kérés", onClick: () => askToShare(id) },
@@ -282,16 +319,16 @@ export default function MapApp() {
   const createRoom = () => {
     const token = generateRoomToken();
     const owned = rooms.filter((r) => r.owner).length;
-    updateRooms((prev) => addRoom(prev, { token, name: owned ? `Szobám ${owned + 1}` : "Szobám", owner: true, createdAt: Date.now() }));
+    updateRooms((prev) => addRoom(prev, { token, name: owned ? `Szobám ${owned + 1}` : "Szobám", owner: true, createdAt: Date.now(), color: DEFAULT_ROOM_COLOR }));
     setShareToken(token);
     setDialog("share");
   };
 
-  const joinRoom = (token: string, name: string | null) => {
+  const joinRoom = (token: string, name: string | null, color?: RoomColor) => {
     if (rooms.some((r) => r.token === token)) {
       toast.info("Ebben a szobában már benne vagy.");
     } else {
-      updateRooms((prev) => addRoom(prev, { token, name: name || "Meghívott szoba", owner: false, createdAt: Date.now() }));
+      updateRooms((prev) => addRoom(prev, { token, name: name || "Meghívott szoba", owner: false, createdAt: Date.now(), color: color ?? DEFAULT_ROOM_COLOR }));
       toast.success("Csatlakoztál. Amint a többiek is online vannak, látjátok egymást.");
     }
     setPendingJoin(null);
@@ -372,6 +409,7 @@ export default function MapApp() {
             follow={follow}
             showTrails={prefs.showTrails}
             orientation={prefs.orientation}
+            theme={prefs.mapTheme}
             onUserPan={() => setFollow(null)}
             compassRef={compassRef}
           />
@@ -387,13 +425,13 @@ export default function MapApp() {
                 : gpsStatus === "waiting"
                   ? "Helyzet keresése…"
                   : prefs.sharing
-                    ? "Élő · megosztva"
-                    : "Élő · privát"}
+                    ? selfFresh ? "Élő · megosztva" : "Helyzet frissítése…"
+                    : selfFresh ? "Élő · privát" : "Helyzet frissítése…"}
           </span>
-          {(gpsStatus === "denied" || gpsStatus === "error") && (
-            <button className="underline underline-offset-2" onClick={() => setGpsRequest((n) => n + 1)}>
-              Újra
-            </button>
+          {(gpsStatus !== "live" || !selfFresh) && (
+            <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => gpsStatus === "denied" ? setDialog("permissions") : setGpsRequest((n) => n + 1)}>
+              {gpsStatus === "denied" ? "Engedélyezés" : "Újra"}
+            </Button>
           )}
         </div>
 
@@ -408,6 +446,13 @@ export default function MapApp() {
             {prefs.orientation === "heading" ? <Navigation2 className="h-5 w-5" /> : <span className="font-display text-sm font-bold">N</span>}
           </span>
         </button>
+
+        <Button size="icon" variant="ghost" className="map-overlay glass compass-btn absolute right-3 top-16"
+          aria-label={prefs.mapTheme === "dark" ? "Nappali térkép" : "Éjszakai térkép"}
+          title={prefs.mapTheme === "dark" ? "Nappali térkép" : "Éjszakai térkép"}
+          onClick={() => updatePrefs({ mapTheme: prefs.mapTheme === "dark" ? "light" : "dark" })}>
+          {prefs.mapTheme === "dark" ? <Sun /> : <Moon />}
+        </Button>
 
         <Button
           size="icon"
@@ -577,6 +622,7 @@ export default function MapApp() {
                         setDialog("share");
                       }}
                       onDelete={() => void deleteRoom(room)}
+                      onSave={(name, color) => updateRooms((prev) => customizeRoom(prev, room.token, name, color))}
                     />
                   ))}
                 </div>
@@ -730,7 +776,8 @@ function HintBubbles() {
     }
   }, []);
   if (step === null || step >= HINTS.length) return null;
-  const hint = HINTS[step]!;
+  const hint = HINTS[step];
+  if (!hint) return null;
   const next = (to: number) => {
     setStep(to);
     try {
@@ -768,7 +815,7 @@ async function notifyShareRequest(who: string) {
 }
 
 const PERM_INFO: Record<PermKey, { label: string; hint: string; icon: React.ComponentType<{ className?: string }> }> = {
-  location: { label: "Helyzet", hint: "A saját pozíciód a térképen. Válaszd a „Pontos” helyet.", icon: MapPin },
+  location: { label: "Helyzet", hint: "A saját pozíciód a térképen. A hozzávetőleges hely is működik; a „Pontos” jobb.", icon: MapPin },
   backgroundLocation: {
     label: "Helyzet lezárt képernyőnél",
     hint: "A megnyíló beállításokban: Engedélyek → Hely → Mindig engedélyezés.",
@@ -940,18 +987,24 @@ function PersonCapsule(props: {
   );
 }
 
-function RoomRow({ room, peers, onShare, onDelete }: { room: SavedRoom; peers: number; onShare: () => void; onDelete: () => void }) {
+function RoomRow({ room, peers, onShare, onDelete, onSave }: { room: SavedRoom; peers: number; onShare: () => void; onDelete: () => void; onSave: (name: string, color: RoomColor) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(room.name);
+  const [color, setColor] = useState<RoomColor>(room.color ?? DEFAULT_ROOM_COLOR);
   const [confirm, setConfirm] = useState(false);
   return (
     <div className="glass-inset rounded-2xl p-3">
       <div className="flex items-center gap-3">
-        <span className="status-dot ml-1 shrink-0" data-state={peers > 0 ? "on" : "off"} />
+        <span className={`room-swatch room-${room.color ?? DEFAULT_ROOM_COLOR} ml-1 shrink-0`} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">{room.name}</p>
           <p className="text-xs text-muted-foreground">
             {room.owner ? "Saját szoba" : "Meghívás"} · {peers > 0 ? `${peers} kapcsolódva` : "várakozás a többiekre"}
           </p>
         </div>
+        <Button variant="ghost" size="icon" className="shrink-0 rounded-full" aria-label={`Szoba szerkesztése: ${room.name}`} title="Név és szín" onClick={() => { setName(room.name); setColor(room.color ?? DEFAULT_ROOM_COLOR); setEditing((v) => !v); }}>
+          <Pencil className="h-4 w-4" />
+        </Button>
         {room.owner && (
           <Button variant="ghost" size="icon" className="rounded-full" aria-label={`QR-kód: ${room.name}`} title="QR-kód és megosztás" onClick={onShare}>
             <QrCode className="h-5 w-5" />
@@ -968,8 +1021,22 @@ function RoomRow({ room, peers, onShare, onDelete }: { room: SavedRoom; peers: n
           {room.owner ? <Trash2 className="h-4 w-4" /> : <LogOut className="h-4 w-4" />}
         </Button>
       </div>
+      {editing && (
+        <form className="mt-3 space-y-3 border-t border-border pt-3" onSubmit={(e) => { e.preventDefault(); if (name.trim()) { onSave(name, color); setEditing(false); } }}>
+          <Input aria-label="Szoba neve" className="glass-input" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} />
+          <div className="grid grid-cols-5 gap-2" aria-label="Szoba színe">
+            {ROOM_COLORS.map((c) => <Button key={c} type="button" variant="ghost" size="icon" className={`room-choice room-${c}`} aria-label={ROOM_COLOR_NAMES[c]} title={ROOM_COLOR_NAMES[c]} aria-pressed={color === c} onClick={() => setColor(c)}>
+              <span className="room-swatch">{color === c && <Check className="h-3 w-3" />}</span>
+            </Button>)}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" size="icon" aria-label="Szerkesztés elvetése" onClick={() => setEditing(false)}><X /></Button>
+            <Button type="submit" size="sm" disabled={!name.trim()}><Check />Mentés</Button>
+          </div>
+        </form>
+      )}
       {confirm && (
-        <div className="mt-3 space-y-2 border-t border-white/10 pt-3">
+        <div className="mt-3 space-y-2 border-t border-border pt-3">
           <p className="text-xs text-muted-foreground">
             {room.owner
               ? "Törlöd a szobát? Mindenki kikerül belőle, és a régi kód vagy link többé nem működik."
@@ -989,10 +1056,19 @@ function RoomRow({ room, peers, onShare, onDelete }: { room: SavedRoom; peers: n
   );
 }
 
+const ROOM_COLOR_NAMES: Record<RoomColor, string> = { mint: "Menta", teal: "Türkiz", blue: "Kék", sky: "Égszínkék", violet: "Lila", rose: "Rózsaszín", red: "Korall", amber: "Arany", olive: "Olívazöld", graphite: "Grafit" };
+
 function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => void }) {
+  const [qrColor, setQrColor] = useState<string>();
+  const [qrBackground, setQrBackground] = useState<string>();
+  useEffect(() => {
+    const css = getComputedStyle(document.documentElement);
+    setQrColor(css.getPropertyValue(`--room-${room?.color ?? DEFAULT_ROOM_COLOR}`).trim());
+    setQrBackground(css.getPropertyValue("--qr-background").trim());
+  }, [room?.color]);
   if (!room) return null;
   const base = shareBase();
-  const link = base ? buildRoomLink(base, room.token, room.name) : null;
+  const link = base ? buildRoomLink(base, room.token, room.name, room.color ?? DEFAULT_ROOM_COLOR) : null;
   const code = formatRoomToken(room.token);
   const text = link ?? code;
 
@@ -1018,7 +1094,7 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
       <ElasticScroll className="max-h-[70dvh] px-5 pb-5">
         <div className="flex flex-col items-center gap-4">
           <div className="qr-frame">
-            <QRCodeSVG value={text} size={196} level="M" bgColor="#ffffff" fgColor="#0d1424" marginSize={0} />
+            {qrBackground && qrColor && <QRCodeSVG value={text} size={196} level="M" bgColor={qrBackground} fgColor={qrColor} marginSize={0} />}
           </div>
           <div className="glass-inset w-full rounded-2xl p-3 text-center">
             <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Szobakód</p>
@@ -1049,7 +1125,7 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
   );
 }
 
-function JoinPanel({ initial, onJoin }: { initial: { token: string; name: string | null } | null; onJoin: (token: string, name: string | null) => void }) {
+function JoinPanel({ initial, onJoin }: { initial: { token: string; name: string | null; color?: RoomColor } | null; onJoin: (token: string, name: string | null, color?: RoomColor) => void }) {
   const [value, setValue] = useState(initial ? formatRoomToken(initial.token) : "");
   const [scanning, setScanning] = useState(false);
   const parsed = parseRoomInput(value);
@@ -1066,7 +1142,7 @@ function JoinPanel({ initial, onJoin }: { initial: { token: string; name: string
           className="space-y-3"
           onSubmit={(e) => {
             e.preventDefault();
-            if (parsed) onJoin(parsed.token, name);
+            if (parsed) onJoin(parsed.token, name, parsed.color ?? initial?.color);
             else toast.error("Ez nem érvényes szobakód vagy link.");
           }}
         >

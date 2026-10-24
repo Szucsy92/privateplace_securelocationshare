@@ -1,4 +1,9 @@
 # Feladatok
+- [ ] Helylekérés javítása és újrapróbálás engedélyezés/visszatérés után; saját és közvetlen megosztás ellenőrzése.
+- [ ] 5%-kal világosabb matt üveg, görgetési elmosás, kontrasztos Nap/Hold térkép.
+- [ ] Szobák helyi átnevezése, 10 szín, színazonos QR-kód.
+- [ ] Android ikon középre igazítása és biztonságos méretezése.
+- [ ] Összevont módosítások, tesztek és teljes felületi ellenőrzés.
 - [x] Egyképernyős térkép, kompakt vezérlők, saját helyzet mindig látszik.
 - [x] Független nyílt térkép (OpenStreetMap / MapLibre), kulcs nélkül.
 - [x] Fiók nélküli helyi profil (név + kép).
