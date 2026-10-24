@@ -79,7 +79,7 @@
   --glass-inset: oklch(1 0 0 / 0.045);
   --glass-edge: oklch(1 0 0 / 0.1);
   --glow: oklch(0.82 0.19 165 / 0.5);
-  --qr-background: var(--qr-background);
+  --qr-background: #ffffff;
   --room-mint: #176449;
   --room-teal: #11666b;
   --room-blue: #254b9b;
