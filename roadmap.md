@@ -1,9 +1,11 @@
 # Feladatok
-- [ ] Helylekérés javítása és újrapróbálás engedélyezés/visszatérés után; saját és közvetlen megosztás ellenőrzése.
-- [ ] 5%-kal világosabb matt üveg, görgetési elmosás, kontrasztos Nap/Hold térkép.
-- [ ] Szobák helyi átnevezése, 10 szín, színazonos QR-kód.
-- [ ] Android ikon középre igazítása és biztonságos méretezése.
-- [ ] Összevont módosítások, tesztek és teljes felületi ellenőrzés.
+- [ ] 1. GPS stabilizálása: friss hálózati rásegítés, jelvesztésnél utolsó pont, visszatéréskori újraindítás.
+- [ ] 2. Hibrid iránytű: 0.8/1.4 m/s hiszterézis, 0.2 EMA, szobatárs irányának követése; nyíl csak iránytű módban.
+- [ ] 3. QR és APK: legújabb kiadás, verzióellenőrzés, elutasítható meghívó, telepítés utáni megnyitás.
+- [ ] 4. Felület: térképbuborék (akku/távolság), háromsoros stabil kapszulák, öt szín, meleg kőszürke nappali térkép, célkereszt eltávolítása, indítási kilépés.
+- [ ] 5. Szobák: színes névkör, nagy QR ikon minden tagnak, lenyíló személylista, ellenőrzött tulajdonosi törlés/eltávolítás.
+- [ ] Összevont módosítások és tesztek; valódi böngészős folyamatellenőrzés.
+- [x] Android ikon középre igazítása és biztonságos méretezése.
 - [x] Egyképernyős térkép, kompakt vezérlők, saját helyzet mindig látszik.
 - [x] Független nyílt térkép (OpenStreetMap / MapLibre), kulcs nélkül.
 - [x] Fiók nélküli helyi profil (név + kép).
