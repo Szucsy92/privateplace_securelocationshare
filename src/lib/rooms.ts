@@ -7,7 +7,7 @@ export const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 export const ROOM_TOKEN_LENGTH = 20;
 const STORAGE_KEY = "elohely.rooms.v1";
 
-export const ROOM_COLORS = ["mint", "teal", "blue", "sky", "violet", "rose", "red", "amber", "olive", "graphite"] as const;
+export const ROOM_COLORS = ["mint", "violet", "rose", "amber", "sky"] as const;
 export type RoomColor = (typeof ROOM_COLORS)[number];
 export const DEFAULT_ROOM_COLOR: RoomColor = "mint";
 export function isRoomColor(value: unknown): value is RoomColor {
@@ -20,6 +20,8 @@ export type SavedRoom = {
   owner: boolean;
   createdAt: number;
   color?: RoomColor;
+  ownerKey?: string;
+  ownerPrivateKey?: JsonWebKey;
 };
 
 export function generateRoomToken(random: (n: number) => Uint8Array = defaultRandom): string {
@@ -50,7 +52,7 @@ function normalizeToken(raw: string): string | null {
 }
 
 /** Link vagy beírt kód értelmezése. */
-export function parseRoomInput(input: string): { token: string; name: string | null; color?: RoomColor } | null {
+export function parseRoomInput(input: string): { token: string; name: string | null; color?: RoomColor; ownerKey?: string } | null {
   const text = input.trim();
   if (!text) return null;
   const hashIndex = text.indexOf("#");
@@ -62,17 +64,19 @@ export function parseRoomInput(input: string): { token: string; name: string | n
       if (!token) return null;
       const name = params.get("nev");
       const color = params.get("szin");
-      return { token, name: name ? name.slice(0, 40) : null, ...(isRoomColor(color) ? { color } : {}) };
+      const ownerKey = params.get("gazda");
+      return { token, name: name ? name.slice(0, 40) : null, ...(isRoomColor(color) ? { color } : {}), ...(ownerKey && /^[A-Za-z0-9_-]{87}$/.test(ownerKey) ? { ownerKey } : {}) };
     }
   }
   const token = normalizeToken(text);
   return token ? { token, name: null } : null;
 }
 
-export function buildRoomLink(base: string, token: string, name?: string, color?: RoomColor): string {
+export function buildRoomLink(base: string, token: string, name?: string, color?: RoomColor, ownerKey?: string): string {
   const params = new URLSearchParams({ szoba: token });
   if (name) params.set("nev", name);
   if (color && isRoomColor(color)) params.set("szin", color);
+  if (ownerKey && /^[A-Za-z0-9_-]{87}$/.test(ownerKey)) params.set("gazda", ownerKey);
   return `${base.replace(/\/+$/, "")}/#${params.toString()}`;
 }
 
@@ -80,7 +84,7 @@ export function loadRooms(): SavedRoom[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const list = raw ? (JSON.parse(raw) as SavedRoom[]) : [];
-    return Array.isArray(list) ? list.filter((r) => normalizeToken(r.token) === r.token) : [];
+    return Array.isArray(list) ? list.filter((r) => r && normalizeToken(r.token) === r.token).map((r) => ({ ...r, color: isRoomColor(r.color) ? r.color : DEFAULT_ROOM_COLOR })) : [];
   } catch {
     return [];
   }
