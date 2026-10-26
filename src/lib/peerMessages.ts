@@ -1,4 +1,6 @@
 /** A telefonok között közvetlenül küldött üzenetek és azok ellenőrzése. */
+import { SELECTION_COLORS } from "./palette";
+import type { RoomControl } from "./moderation";
 
 export type HelloMessage = {
   deviceId: string;
@@ -12,6 +14,9 @@ export type LocationMessage = {
   t: number;
   acc: number | null;
   speed: number | null;
+  heading?: number | null;
+  battery?: number | null;
+  since?: number | null;
 };
 
 /** null = a küldő kikapcsolta a megosztást. */
@@ -51,7 +56,14 @@ export function parseLocation(data: unknown): LocMessage | undefined {
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return undefined;
   const acc = finiteOrNull(d["acc"]);
   const speed = finiteOrNull(d["speed"]);
-  return { lat, lng, t, acc: acc != null && acc >= 0 ? acc : null, speed: speed != null && speed >= 0 ? speed : null };
+  const heading = finiteOrNull(d["heading"]);
+  const battery = finiteOrNull(d["battery"]);
+  const since = finiteOrNull(d["since"]);
+  return { lat, lng, t, acc: acc != null && acc >= 0 ? acc : null, speed: speed != null && speed >= 0 ? speed : null,
+    ...(d["heading"] !== undefined ? { heading: heading !== null && heading >= 0 && heading < 360 ? heading : null } : {}),
+    ...(d["battery"] !== undefined ? { battery: battery !== null && battery >= 0 && battery <= 100 ? battery : null } : {}),
+    ...(d["since"] !== undefined ? { since: since !== null && since >= 0 && since <= t ? since : null } : {}),
+  };
 }
 
 /** Megosztáskérés: csak a pontosan `true` érték érvényes. */
@@ -59,11 +71,21 @@ export function parseShareRequest(data: unknown): boolean {
   return data === true;
 }
 
-const PALETTE = ["#ffc857", "#7aa2ff", "#ff7ab2", "#8be9fd", "#f78c6c", "#c3a6ff"];
-export const SELF_COLOR = "#3ddc97";
+export function parseRoomControl(data: unknown): RoomControl | null {
+  if (!data || typeof data !== "object") return null;
+  const d = data as Record<string, unknown>;
+  if ((d.kind !== "close" && d.kind !== "kick") || typeof d.token !== "string" || !/^[A-HJ-NP-Z2-9]{20}$/.test(d.token)) return null;
+  if (d.kind === "close" ? d.target !== null : typeof d.target !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(d.target)) return null;
+  if (typeof d.at !== "number" || !Number.isFinite(d.at) || d.at < 0 || d.at > Date.now() + 60000) return null;
+  if (typeof d.nonce !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(d.nonce) || typeof d.signature !== "string" || !/^[A-Za-z0-9_-]{80,100}$/.test(d.signature)) return null;
+  return { kind: d.kind, token: d.token, target: d.target as string | null, at: d.at, nonce: d.nonce, signature: d.signature };
+}
+
+const PALETTE = Object.values(SELECTION_COLORS);
+export const SELF_COLOR = SELECTION_COLORS.mint;
 
 export function colorForDevice(deviceId: string): string {
   let h = 0;
   for (let i = 0; i < deviceId.length; i++) h = (h * 31 + deviceId.charCodeAt(i)) >>> 0;
-  return PALETTE[h % PALETTE.length] ?? PALETTE[0]!;
+  return PALETTE[h % PALETTE.length] ?? SELF_COLOR;
 }
