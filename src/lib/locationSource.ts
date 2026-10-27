@@ -128,7 +128,7 @@ export function startLocationWatch(opts: {
         requestPermissions: true, stale: false, distanceFilter: 0,
       }, (loc, err) => {
         if (err) { reportError(err.code === "NOT_AUTHORIZED" ? "denied" : "error"); return; }
-        if (loc) reportFix({ lat: loc.latitude, lng: loc.longitude, acc: loc.accuracy ?? null, speed: loc.speed ?? null, bearing: loc.bearing ?? null, at: loc.time });
+        if (loc) reportFix({ lat: loc.latitude, lng: loc.longitude, acc: loc.accuracy ?? null, speed: loc.speed ?? null, bearing: loc.bearing ?? null, at: loc.time ?? Date.now() });
       });
       if (stopped) { void plugin.removeWatcher({ id }).catch(() => undefined); return; }
       cleanup = () => void plugin.removeWatcher({ id }).catch(() => undefined);

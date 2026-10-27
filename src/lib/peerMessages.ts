@@ -74,11 +74,11 @@ export function parseShareRequest(data: unknown): boolean {
 export function parseRoomControl(data: unknown): RoomControl | null {
   if (!data || typeof data !== "object") return null;
   const d = data as Record<string, unknown>;
-  if ((d.kind !== "close" && d.kind !== "kick") || typeof d.token !== "string" || !/^[A-HJ-NP-Z2-9]{20}$/.test(d.token)) return null;
-  if (d.kind === "close" ? d.target !== null : typeof d.target !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(d.target)) return null;
-  if (typeof d.at !== "number" || !Number.isFinite(d.at) || d.at < 0 || d.at > Date.now() + 60000) return null;
-  if (typeof d.nonce !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(d.nonce) || typeof d.signature !== "string" || !/^[A-Za-z0-9_-]{80,100}$/.test(d.signature)) return null;
-  return { kind: d.kind, token: d.token, target: d.target as string | null, at: d.at, nonce: d.nonce, signature: d.signature };
+  if ((d['kind'] !== "close" && d['kind'] !== "kick") || typeof d['token'] !== "string" || !/^[A-HJ-NP-Z2-9]{20}$/.test(d['token'])) return null;
+  if (d['kind'] === "close" ? d['target'] !== null : typeof d['target'] !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(d['target'])) return null;
+  if (typeof d['at'] !== "number" || !Number.isFinite(d['at']) || d['at'] < 0 || d['at'] > Date.now() + 60000) return null;
+  if (typeof d['nonce'] !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(d['nonce']) || typeof d['signature'] !== "string" || !/^[A-Za-z0-9_-]{80,100}$/.test(d['signature'])) return null;
+  return { kind: d['kind'] as RoomControl['kind'], token: d['token'] as string, target: d['target'] as string | null, at: d['at'] as number, nonce: d['nonce'] as string, signature: d['signature'] as string };
 }
 
 const PALETTE = Object.values(SELECTION_COLORS);
