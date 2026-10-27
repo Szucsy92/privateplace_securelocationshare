@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SavedRoom } from "@/lib/rooms";
 import type { LocalProfile } from "@/lib/profile";
-import { colorForDevice, parseHello, parseLocation, parseShareRequest, type HelloMessage, type LocMessage } from "@/lib/peerMessages";
+import { colorForDevice, parseHello, parseLocation, parseRoomControl, parseShareRequest, type HelloMessage, type LocMessage } from "@/lib/peerMessages";
 import { appendTrackPoint } from "@/lib/tracking";
 import { turnConfigFromEnv } from "@/lib/turn";
+import { loadRoomControls, rememberRoomControl, verifyRoomControl, type RoomControl } from "@/lib/moderation";
 
 export type TrackPoint = { lat: number; lng: number; t: number };
 
@@ -16,6 +17,9 @@ export type RemotePerson = {
   speed: number | null;
   acc: number | null;
   at: number | null;
+  heading: number | null;
+  battery: number | null;
+  since: number | null;
   online: boolean;
   sharing: boolean;
 };
@@ -34,47 +38,40 @@ type Joined = {
   room: MinimalRoom;
   hello: Action<HelloMessage>;
   loc: Action<LocMessage>;
-  close: Action<boolean>;
+  control: Action<RoomControl>;
   ask: Action<boolean>;
   peers: Set<string>;
 };
 
 function emptyPerson(deviceId: string): RemotePerson {
-  return {
-    deviceId,
-    name: "Névtelen",
-    avatar: null,
-    color: colorForDevice(deviceId),
-    points: [],
-    speed: null,
-    acc: null,
-    at: null,
-    online: true,
-    sharing: false,
-  };
+  return { deviceId, name: "Névtelen", avatar: null, color: colorForDevice(deviceId), points: [], speed: null, acc: null, at: null, heading: null, battery: null, since: null, online: true, sharing: false };
 }
+
+const isKicked = (token: string, dev: string) => loadRoomControls().some((c) => c.kind === "kick" && c.token === token && c.target === dev);
 
 /**
  * Közvetlen telefon–telefon kapcsolat (WebRTC) a mentett titkos szobákban.
- * Központi tárolás nincs: a kézfogáshoz nyilvános továbbítókat használunk,
- * az üzeneteket a szoba kódja titkosítja.
+ * A tulajdonosi műveleteket (törlés, eltávolítás) a szoba aláíró kulcsával ellenőrizzük.
  */
 export function usePeerNetwork(opts: {
   rooms: SavedRoom[];
   deviceId: string | null;
   profile: LocalProfile | null;
-  onRoomClosed: (token: string) => void;
+  onRoomClosed: (token: string, reason: "closed" | "kicked") => void;
   onShareRequest?: (deviceId: string) => void;
 }) {
   const { rooms, deviceId, profile } = opts;
   const [people, setPeople] = useState<Record<string, RemotePerson>>({});
   const [roomPeers, setRoomPeers] = useState<Record<string, number>>({});
+  const [roomMembers, setRoomMembers] = useState<Record<string, string[]>>({});
   const [connectIssues, setConnectIssues] = useState(0);
   const joinedRef = useRef(new Map<string, Joined>());
   const peerDeviceRef = useRef(new Map<string, string>());
   const pendingLocRef = useRef(new Map<string, LocMessage>());
   const helloRef = useRef<HelloMessage | null>(null);
   const lastLocRef = useRef<LocMessage>(null);
+  const roomsRef = useRef(rooms);
+  roomsRef.current = rooms;
   const onClosedRef = useRef(opts.onRoomClosed);
   onClosedRef.current = opts.onRoomClosed;
   const onAskRef = useRef(opts.onShareRequest);
@@ -82,9 +79,19 @@ export function usePeerNetwork(opts: {
   helloRef.current = profile && deviceId ? { deviceId, name: profile.name, avatar: profile.avatar } : null;
 
   const refreshCounts = useCallback(() => {
-    const next: Record<string, number> = {};
-    for (const [token, j] of joinedRef.current) next[token] = j.peers.size;
-    setRoomPeers(next);
+    const counts: Record<string, number> = {};
+    const members: Record<string, string[]> = {};
+    for (const [token, j] of joinedRef.current) {
+      counts[token] = j.peers.size;
+      const devs = new Set<string>();
+      for (const peerId of j.peers) {
+        const dev = peerDeviceRef.current.get(peerId);
+        if (dev && !isKicked(token, dev)) devs.add(dev);
+      }
+      members[token] = [...devs];
+    }
+    setRoomPeers(counts);
+    setRoomMembers(members);
   }, []);
 
   const peerInAnyRoom = (peerId: string) => {
@@ -95,22 +102,31 @@ export function usePeerNetwork(opts: {
   const applyLocation = useCallback((dev: string, m: LocMessage) => {
     setPeople((prev) => {
       const p = prev[dev] ?? emptyPerson(dev);
-      if (m === null) return { ...prev, [dev]: { ...p, sharing: false, online: true, points: [], at: null } };
+      if (m === null) return { ...prev, [dev]: { ...p, sharing: false, online: true, points: [], at: null, heading: null, since: null } };
       const now = Date.now();
       return {
         ...prev,
         [dev]: {
-          ...p,
-          sharing: true,
-          online: true,
+          ...p, sharing: true, online: true,
           points: appendTrackPoint(p.points, { lat: m.lat, lng: m.lng, t: now }, now),
-          speed: m.speed,
-          acc: m.acc,
-          at: now,
+          speed: m.speed, acc: m.acc, at: now,
+          heading: m.heading ?? null,
+          battery: m.battery !== undefined ? m.battery : p.battery,
+          since: m.since != null ? now - (m.t - m.since) : p.since ?? now,
         },
       };
     });
   }, []);
+
+  const dropDevice = useCallback((token: string, dev: string) => {
+    const j = joinedRef.current.get(token);
+    if (!j) return;
+    for (const peerId of [...j.peers]) if (peerDeviceRef.current.get(peerId) === dev) j.peers.delete(peerId);
+    let elsewhere = false;
+    for (const [peerId, d] of peerDeviceRef.current) if (d === dev && peerInAnyRoom(peerId)) elsewhere = true;
+    if (!elsewhere) setPeople((prev) => { const next = { ...prev }; delete next[dev]; return next; });
+    refreshCounts();
+  }, [refreshCounts]);
 
   const leaveRoom = useCallback(
     (token: string, removePeople: boolean) => {
@@ -162,7 +178,7 @@ export function usePeerNetwork(opts: {
           room,
           hello: room.makeAction<HelloMessage>("hello"),
           loc: room.makeAction<LocMessage>("loc"),
-          close: room.makeAction<boolean>("close"),
+          control: room.makeAction<RoomControl>("ctrl"),
           ask: room.makeAction<boolean>("ask"),
           peers: new Set(),
         };
@@ -182,11 +198,13 @@ export function usePeerNetwork(opts: {
         j.hello.onMessage = (data, { peerId }) => {
           const h = parseHello(data);
           if (!h || h.deviceId === deviceId) return;
+          if (isKicked(token, h.deviceId)) { j.peers.delete(peerId); refreshCounts(); return; }
           peerDeviceRef.current.set(peerId, h.deviceId);
           setPeople((prev) => {
             const p = prev[h.deviceId] ?? emptyPerson(h.deviceId);
             return { ...prev, [h.deviceId]: { ...p, name: h.name, avatar: h.avatar, online: true } };
           });
+          refreshCounts();
           const pending = pendingLocRef.current.get(peerId);
           if (pending !== undefined) {
             pendingLocRef.current.delete(peerId);
@@ -194,6 +212,7 @@ export function usePeerNetwork(opts: {
           }
         };
         j.loc.onMessage = (data, { peerId }) => {
+          if (!j.peers.has(peerId)) return;
           const m = parseLocation(data);
           if (m === undefined) return;
           const dev = peerDeviceRef.current.get(peerId);
@@ -203,7 +222,17 @@ export function usePeerNetwork(opts: {
           }
           applyLocation(dev, m);
         };
-        j.close.onMessage = (data) => { if (data === true) onClosedRef.current(token); };
+        j.control.onMessage = (data) => {
+          const c = parseRoomControl(data);
+          const saved = roomsRef.current.find((r) => r.token === token);
+          if (!c || c.token !== token || !saved?.ownerKey) return;
+          void verifyRoomControl(c, saved.ownerKey).then((ok) => {
+            if (!ok) return;
+            if (c.kind === "close") onClosedRef.current(token, "closed");
+            else if (c.target === deviceId) onClosedRef.current(token, "kicked");
+            else if (c.target) { rememberRoomControl(c); dropDevice(token, c.target); }
+          });
+        };
         j.ask.onMessage = (data, { peerId }) => {
           if (!parseShareRequest(data)) return;
           const dev = peerDeviceRef.current.get(peerId);
@@ -217,7 +246,7 @@ export function usePeerNetwork(opts: {
     return () => {
       cancelled = true;
     };
-  }, [tokensKey, ready, deviceId, leaveRoom, refreshCounts, applyLocation]);
+  }, [tokensKey, ready, deviceId, leaveRoom, refreshCounts, applyLocation, dropDevice]);
 
   useEffect(
     () => () => {
@@ -226,7 +255,6 @@ export function usePeerNetwork(opts: {
     [leaveRoom],
   );
 
-  // Profilváltozás azonnal eljut mindenkihez.
   useEffect(() => {
     const h = helloRef.current;
     if (!h) return;
@@ -240,14 +268,19 @@ export function usePeerNetwork(opts: {
     }
   }, []);
 
-  const announceClose = useCallback(async (token: string) => {
-    const j = joinedRef.current.get(token);
-    if (!j || !j.peers.size) return;
-    await j.close.send(true).catch(() => undefined);
-    await new Promise((r) => setTimeout(r, 400));
-  }, []);
+  /** Aláírt tulajdonosi művelet elküldése és helyi alkalmazása. */
+  const sendControl = useCallback(async (control: RoomControl) => {
+    const j = joinedRef.current.get(control.token);
+    if (j?.peers.size) {
+      await j.control.send(control).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    if (control.kind === "kick" && control.target) {
+      rememberRoomControl(control);
+      dropDevice(control.token, control.target);
+    }
+  }, [dropDevice]);
 
-  /** Megosztás kérése egy szobatárstól (minden közös szobán át, ahol elérhető). */
   const requestShare = useCallback((dev: string) => {
     let sent = false;
     for (const j of joinedRef.current.values()) {
@@ -259,5 +292,5 @@ export function usePeerNetwork(opts: {
     return sent;
   }, []);
 
-  return { people, roomPeers, connectIssues, sendLocation, announceClose, requestShare };
+  return { people, roomPeers, roomMembers, connectIssues, sendLocation, sendControl, requestShare };
 }
