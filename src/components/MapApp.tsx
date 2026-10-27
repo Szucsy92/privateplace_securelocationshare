@@ -1056,7 +1056,7 @@ function RoomRow({ room, peers, onShare, onDelete, onSave }: { room: SavedRoom; 
   );
 }
 
-const ROOM_COLOR_NAMES: Record<RoomColor, string> = { mint: "Menta", teal: "Türkiz", blue: "Kék", sky: "Égszínkék", violet: "Lila", rose: "Rózsaszín", red: "Korall", amber: "Arany", olive: "Olívazöld", graphite: "Grafit" };
+const ROOM_COLOR_NAMES: Record<RoomColor, string> = { mint: "Menta Zöld", violet: "Elektromos Levendula", rose: "Selyem Barack", amber: "Napfény Citromsárga", sky: "Jégkék" };
 
 function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => void }) {
   const [qrColor, setQrColor] = useState<string>();

@@ -25,13 +25,13 @@ export function validApkUrl(value: unknown): value is string {
 export async function latestRelease(signal?: AbortSignal): Promise<AppRelease | null> {
   const repo = import.meta.env["VITE_RELEASE_REPOSITORY"] as string | undefined;
   if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) return null;
-  const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, { signal });
+  const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, signal ? { signal } : {});
   if (!response.ok) throw new Error("Release unavailable");
   const data = await response.json() as { assets?: { name: string; browser_download_url: string }[] };
   const meta = data.assets?.find((a) => a.name === "private-place-release.json");
   const apk = data.assets?.find((a) => a.name === "private-place-latest.apk");
   if (!meta || !apk || !validApkUrl(apk.browser_download_url)) return null;
-  const metadata = await fetch(meta.browser_download_url, { signal });
+  const metadata = await fetch(meta.browser_download_url, signal ? { signal } : {});
   if (!metadata.ok) return null;
   const values = await metadata.json() as AppRelease;
   return Number.isInteger(values.versionCode) && typeof values.version === "string" ? { versionCode: values.versionCode, version: values.version, apk: apk.browser_download_url } : null;

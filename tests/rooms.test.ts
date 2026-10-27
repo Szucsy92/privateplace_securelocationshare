@@ -47,15 +47,15 @@ describe("titkos szobák", () => {
   });
 });
 
-test("pontosan tíz különböző szobaszín választható", () => {
-  expect(ROOM_COLORS).toHaveLength(10);
-  expect(new Set(ROOM_COLORS).size).toBe(10);
+test("pontosan öt különböző szobaszín választható", () => {
+  expect(ROOM_COLORS).toHaveLength(5);
+  expect(new Set(ROOM_COLORS).size).toBe(5);
 });
 test("az átnevezés és színváltás nem változtatja meg a titkos szobakódot", () => {
   const room = { token: generateRoomToken(), name: "Szobám", owner: true, createdAt: 1 };
-  const edited = customizeRoom([room], room.token, " Család ", "blue");
-  expect(edited[0]).toEqual({ ...room, name: "Család", color: "blue" });
-  expect(customizeRoom(edited, room.token, "  ", "red")).toEqual(edited);
+  const edited = customizeRoom([room], room.token, " Család ", "sky");
+  expect(edited[0]).toEqual({ ...room, name: "Család", color: "sky" });
+  expect(customizeRoom(edited, room.token, "  ", "rose")).toEqual(edited);
 });
 test("a szobaszín a meghívó rejtett részében utazik", () => {
   const token = generateRoomToken();

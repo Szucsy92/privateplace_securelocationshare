@@ -80,16 +80,11 @@
   --glass-edge: oklch(1 0 0 / 0.1);
   --glow: oklch(0.82 0.19 165 / 0.5);
   --qr-background: #ffffff;
-  --room-mint: #176449;
-  --room-teal: #11666b;
-  --room-blue: #254b9b;
-  --room-sky: #236386;
-  --room-violet: #6a4098;
-  --room-rose: #9b3b6b;
-  --room-red: #9d3c3c;
-  --room-amber: #855719;
-  --room-olive: #526522;
-  --room-graphite: #46515e;
+  --room-mint: #14B8A6;
+  --room-violet: #818CF8;
+  --room-rose: #FB7185;
+  --room-amber: #FBBF24;
+  --room-sky: #38BDF8;
   --map-dark-background: #1d2731;
   --map-dark-water: #133d50;
   --map-dark-building: #566673;
@@ -570,15 +565,10 @@
 .people-rail-wrap::before { left: 0; }
 .people-rail-wrap::after { right: 0; transform: rotate(180deg); }
 .room-mint { --room-color: var(--room-mint); }
-.room-teal { --room-color: var(--room-teal); }
-.room-blue { --room-color: var(--room-blue); }
 .room-sky { --room-color: var(--room-sky); }
 .room-violet { --room-color: var(--room-violet); }
 .room-rose { --room-color: var(--room-rose); }
-.room-red { --room-color: var(--room-red); }
 .room-amber { --room-color: var(--room-amber); }
-.room-olive { --room-color: var(--room-olive); }
-.room-graphite { --room-color: var(--room-graphite); }
 .room-swatch {
   display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%;
   background: var(--room-color); color: var(--qr-background); border: 1px solid var(--glass-edge);
