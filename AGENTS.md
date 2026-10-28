@@ -29,3 +29,4 @@
 - Room customization is local metadata; keep room tokens stable and carry optional palette IDs only in invitation hashes so edits never break peer connections.
 - Map day/night contrast uses semantic CSS palette tokens on existing MapLibre layers; keep markers, sources, camera and live tracking intact on theme changes.
 - Location acquisition accepts a fresh approximate foreground fix while the accurate watcher starts; restart after permissions/resume, and clean up pending callbacks and timers when stopping.
+- Room deletion uses signed controls through sendControl; new rooms store a local signing key and invitations carry only the verification key in the hash, so members cannot forge owner actions. Legacy rooms without keys are removed locally only.
