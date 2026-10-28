@@ -1,4 +1,5 @@
 # Feladatok
+- [x] Indulási hiba javítása: elavult szobatörlési hívás cseréje; 39 teszt sikeres, böngészőben névmegadás, szobalétrehozás és törlés ellenőrizve.
 - [ ] 1. GPS stabilizálása: friss hálózati rásegítés, jelvesztésnél utolsó pont, visszatéréskori újraindítás.
 - [ ] 2. Hibrid iránytű: 0.8/1.4 m/s hiszterézis, 0.2 EMA, szobatárs irányának követése; nyíl csak iránytű módban.
 - [ ] 3. QR és APK: legújabb kiadás, verzióellenőrzés, elutasítható meghívó, telepítés utáni megnyitás.

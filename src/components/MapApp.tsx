@@ -70,6 +70,7 @@ import {
   type Prefs,
 } from "@/lib/profile";
 import { isNativeApp, startLocationWatch } from "@/lib/locationSource";
+import { createRoomAuthority, signRoomControl } from "@/lib/moderation";
 import {
   checkAllPermissions,
   markPermissionsAsked,
@@ -106,7 +107,7 @@ export default function MapApp() {
   const [rooms, setRooms] = useState<SavedRoom[]>([]);
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [shareToken, setShareToken] = useState<string | null>(null);
-  const [pendingJoin, setPendingJoin] = useState<{ token: string; name: string | null; color?: RoomColor } | null>(null);
+  const [pendingJoin, setPendingJoin] = useState<{ token: string; name: string | null; color?: RoomColor; ownerKey?: string } | null>(null);
   const [follow, setFollow] = useState<{ id: string; request: number } | null>(null);
   const [selfTrack, setSelfTrack] = useState<TrackPoint[]>([]);
   const [selfMeta, setSelfMeta] = useState<{ speed: number | null; acc: number | null; at: number } | null>(null);
@@ -160,10 +161,10 @@ export default function MapApp() {
   }, []);
 
   const onRoomClosed = useCallback(
-    (token: string) => {
+    (token: string, reason: "closed" | "kicked") => {
       updateRooms((prev) => {
         const room = prev.find((r) => r.token === token);
-        if (room && !room.owner) toast.info(`A(z) „${room.name}” szobát a létrehozója törölte.`);
+        if (room && !room.owner) toast.info(reason === "kicked" ? `A létrehozó eltávolított a(z) „${room.name}” szobából.` : `A(z) „${room.name}” szobát a létrehozója törölte.`);
         return room && !room.owner ? removeRoom(prev, token) : prev;
       });
     },
@@ -316,19 +317,26 @@ export default function MapApp() {
     if (next === "heading" && !follow && hasPosition(SELF)) setFollow((prev) => ({ id: SELF, request: (prev?.request ?? 0) + 1 }));
   };
 
-  const createRoom = () => {
+  const createRoom = async () => {
+    let authority;
+    try {
+      authority = await createRoomAuthority();
+    } catch {
+      toast.error("A szoba létrehozása nem sikerült. Próbáld újra.");
+      return;
+    }
     const token = generateRoomToken();
     const owned = rooms.filter((r) => r.owner).length;
-    updateRooms((prev) => addRoom(prev, { token, name: owned ? `Szobám ${owned + 1}` : "Szobám", owner: true, createdAt: Date.now(), color: DEFAULT_ROOM_COLOR }));
+    updateRooms((prev) => addRoom(prev, { token, name: owned ? `Szobám ${owned + 1}` : "Szobám", owner: true, createdAt: Date.now(), color: DEFAULT_ROOM_COLOR, ...authority }));
     setShareToken(token);
     setDialog("share");
   };
 
-  const joinRoom = (token: string, name: string | null, color?: RoomColor) => {
+  const joinRoom = (token: string, name: string | null, color?: RoomColor, ownerKey?: string) => {
     if (rooms.some((r) => r.token === token)) {
       toast.info("Ebben a szobában már benne vagy.");
     } else {
-      updateRooms((prev) => addRoom(prev, { token, name: name || "Meghívott szoba", owner: false, createdAt: Date.now(), color: color ?? DEFAULT_ROOM_COLOR }));
+      updateRooms((prev) => addRoom(prev, { token, name: name || "Meghívott szoba", owner: false, createdAt: Date.now(), color: color ?? DEFAULT_ROOM_COLOR, ...(ownerKey ? { ownerKey } : {}) }));
       toast.success("Csatlakoztál. Amint a többiek is online vannak, látjátok egymást.");
     }
     setPendingJoin(null);
@@ -336,9 +344,17 @@ export default function MapApp() {
   };
 
   const deleteRoom = async (room: SavedRoom) => {
-    if (room.owner) await net.announceClose(room.token);
+    if (room.owner && room.ownerKey && room.ownerPrivateKey) {
+      try {
+        const control = await signRoomControl(room.token, { ownerKey: room.ownerKey, ownerPrivateKey: room.ownerPrivateKey }, "close", null);
+        await net.sendControl(control);
+      } catch {
+        toast.error("A szoba törlése nem sikerült. Próbáld újra.");
+        return;
+      }
+    }
     updateRooms((prev) => removeRoom(prev, room.token));
-    toast.success(room.owner ? "A szoba törölve. A régi link többé nem működik." : "Kiléptél a szobából.");
+    toast.success(room.owner ? room.ownerPrivateKey ? "A szoba törölve." : "A régi szobát eltávolítottam erről a készülékről." : "Kiléptél a szobából.");
   };
 
   const onlineCount = remote.filter((p) => p.online).length;
@@ -628,7 +644,7 @@ export default function MapApp() {
                 </div>
               </ElasticScroll>
               <div className="grid grid-cols-2 gap-2 p-5 pt-4">
-                <Button className="rounded-full" onClick={createRoom}>
+                <Button className="rounded-full" onClick={() => void createRoom()}>
                   <Plus className="mr-1.5 h-4 w-4" />
                   Új szoba
                 </Button>
@@ -1068,7 +1084,7 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
   }, [room?.color]);
   if (!room) return null;
   const base = shareBase();
-  const link = base ? buildRoomLink(base, room.token, room.name, room.color ?? DEFAULT_ROOM_COLOR) : null;
+  const link = base ? buildRoomLink(base, room.token, room.name, room.color ?? DEFAULT_ROOM_COLOR, room.ownerKey) : null;
   const code = formatRoomToken(room.token);
   const text = link ?? code;
 
@@ -1125,7 +1141,7 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
   );
 }
 
-function JoinPanel({ initial, onJoin }: { initial: { token: string; name: string | null; color?: RoomColor } | null; onJoin: (token: string, name: string | null, color?: RoomColor) => void }) {
+function JoinPanel({ initial, onJoin }: { initial: { token: string; name: string | null; color?: RoomColor; ownerKey?: string } | null; onJoin: (token: string, name: string | null, color?: RoomColor, ownerKey?: string) => void }) {
   const [value, setValue] = useState(initial ? formatRoomToken(initial.token) : "");
   const [scanning, setScanning] = useState(false);
   const parsed = parseRoomInput(value);
@@ -1142,7 +1158,7 @@ function JoinPanel({ initial, onJoin }: { initial: { token: string; name: string
           className="space-y-3"
           onSubmit={(e) => {
             e.preventDefault();
-            if (parsed) onJoin(parsed.token, name, parsed.color ?? initial?.color);
+            if (parsed) onJoin(parsed.token, name, parsed.color ?? initial?.color, parsed.ownerKey ?? (parsed.token === initial?.token ? initial.ownerKey : undefined));
             else toast.error("Ez nem érvényes szobakód vagy link.");
           }}
         >
