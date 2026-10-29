@@ -1,10 +1,10 @@
 # Feladatok
 - [x] Indulási hiba javítása: elavult szobatörlési hívás cseréje; 39 teszt sikeres, böngészőben névmegadás, szobalétrehozás és törlés ellenőrizve.
-- [ ] 1. GPS stabilizálása: friss hálózati rásegítés, jelvesztésnél utolsó pont, visszatéréskori újraindítás.
-- [ ] 2. Hibrid iránytű: 0.8/1.4 m/s hiszterézis, 0.2 EMA, szobatárs irányának követése; nyíl csak iránytű módban.
-- [ ] 3. QR és APK: legújabb kiadás, verzióellenőrzés, elutasítható meghívó, telepítés utáni megnyitás.
-- [ ] 4. Felület: térképbuborék (akku/távolság), háromsoros stabil kapszulák, öt szín, meleg kőszürke nappali térkép, célkereszt eltávolítása, indítási kilépés.
-- [ ] 5. Szobák: színes névkör, nagy QR ikon minden tagnak, lenyíló személylista, ellenőrzött tulajdonosi törlés/eltávolítás.
+- [ ] 1. Működés: GPS frissesség, utolsó pont megtartása, háttérfutás, értesítés leállítás/kilépés; közvetlen kapcsolat és később érkező néző friss helyzete.
+- [ ] 2. Számítások: hibrid iránytű 0.8/1.4 m/s és EMA 0.2; akkumulátor; közlekedési mód 20/50 km/h tartós 7 másodperc, megállásvédelem és kézi választás.
+- [ ] 3. Meghívók és felügyelet: QR/APK frissítés, elutasítható csatlakozás, tulajdonosi személyeltávolítás.
+- [ ] 4. Alacsony prioritású felület: kompakt címes térképbuborék idővel, háromsoros kapszulák, lenyíló szobák, közlekedési választó, meleg kőszürke térkép, első kilépési megerősítés.
+- [ ] 5. Legalacsonyabb prioritás: felső kerek play/pause kapcsoló; státuszváltozáskor max. 3 másodperc kiterjedés; menta/sárga/korall pulzálás, szöveg nélküli fejlécpont.
 - [ ] Összevont módosítások és tesztek; valódi böngészős folyamatellenőrzés.
 - [x] Android ikon középre igazítása és biztonságos méretezése.
 - [x] Egyképernyős térkép, kompakt vezérlők, saját helyzet mindig látszik.
