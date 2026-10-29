@@ -27,10 +27,22 @@ const entries = [
 const missing = entries.filter((e) => !xml.includes(e));
 if (missing.length) {
   xml = xml.replace("<application", `${missing.join("\n    ")}\n\n    <application`);
-  writeFileSync(manifestPath, xml);
 }
+
+// Biztonsági mentés tiltása: a szobakódok és a tulajdonosi kulcsok a helyi tárolóban vannak,
+// ezeket nem szabad felhőbe vagy adb backup útján kimenteni.
+const appTag = /<application\b[^>]*>/.exec(xml)?.[0];
+if (!appTag) fail("Nem található az <application> elem az AndroidManifestben");
+if (/android:allowBackup="[^"]*"/.test(appTag)) {
+  xml = xml.replace(/android:allowBackup="[^"]*"/, 'android:allowBackup="false"');
+} else {
+  xml = xml.replace("<application", '<application android:allowBackup="false"');
+}
+if (!/<application\b[^>]*android:allowBackup="false"/.test(xml)) fail("Az allowBackup=false nem került be");
+
+writeFileSync(manifestPath, xml);
 for (const e of entries) if (!xml.includes(e)) fail(`Hiányzó engedély: ${e}`);
-console.log("AndroidManifest kiegészítve:", missing.length, "új bejegyzés");
+console.log("AndroidManifest kiegészítve:", missing.length, "új bejegyzés; allowBackup=false");
 
 // 2) Saját ikon (rétegzett ikon Android 8+ és régi ikonok) + indítókép
 const resDir = "android/app/src/main/res";
@@ -78,5 +90,13 @@ const code = process.env.APP_VERSION_CODE;
 const name = process.env.APP_VERSION_NAME;
 if (code && /^\d+$/.test(code)) gradle = gradle.replace(/versionCode\s+\d+/, `versionCode ${code}`);
 if (name && /^[\w.\-]+$/.test(name)) gradle = gradle.replace(/versionName\s+"[^"]*"/, `versionName "${name}"`);
+
+// 5) A natív PrivateRuntime.java a LocalBroadcastManagert használja, amit a Capacitor app modulja nem hoz magával.
+const LBM = 'implementation "androidx.localbroadcastmanager:localbroadcastmanager:1.1.0"';
+if (!gradle.includes("androidx.localbroadcastmanager:localbroadcastmanager")) {
+  const next = gradle.replace(/^dependencies\s*\{/m, (m) => `${m}\n    ${LBM}`);
+  if (next === gradle) fail("Nem található a dependencies blokk az app/build.gradle fájlban");
+  gradle = next;
+}
 writeFileSync(gradlePath, gradle);
 console.log("Verzió:", name ?? "(alap)", code ?? "");
