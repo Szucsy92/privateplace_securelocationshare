@@ -25,6 +25,11 @@ describe("bejövő üzenetek ellenőrzése", () => {
 });
 
 describe("megosztáskérés", () => {
+  test("only the three transport modes may reach peer state", () => {
+    const point = { lat: 47, lng: 19, t: 1000 };
+    expect(parseLocation({ ...point, transport: "car" })?.transport).toBe("car");
+    expect(parseLocation({ ...point, transport: "<script>" })?.transport).toBeUndefined();
+  });
   test("csak a true érték számít kérésnek", () => {
     expect(parseShareRequest(true)).toBe(true);
     expect(parseShareRequest("true")).toBe(false);
