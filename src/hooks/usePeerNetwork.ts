@@ -5,6 +5,8 @@ import { colorForDevice, parseHello, parseLocation, parseRoomControl, parseShare
 import { appendTrackPoint } from "@/lib/tracking";
 import { turnConfigFromEnv } from "@/lib/turn";
 import { loadRoomControls, rememberRoomControl, verifyRoomControl, type RoomControl } from "@/lib/moderation";
+import { freshLocation, acceptMeasurement } from "@/lib/locationFreshness";
+import type { TransportMode } from "@/lib/transport";
 
 export type TrackPoint = { lat: number; lng: number; t: number };
 
@@ -22,6 +24,8 @@ export type RemotePerson = {
   since: number | null;
   online: boolean;
   sharing: boolean;
+  transport: TransportMode | null;
+  measurementAt: number | null;
 };
 
 const APP_ID = "hu.elohely.app/v1";
@@ -44,7 +48,7 @@ type Joined = {
 };
 
 function emptyPerson(deviceId: string): RemotePerson {
-  return { deviceId, name: "Névtelen", avatar: null, color: colorForDevice(deviceId), points: [], speed: null, acc: null, at: null, heading: null, battery: null, since: null, online: true, sharing: false };
+  return { deviceId, name: "Névtelen", avatar: null, color: colorForDevice(deviceId), points: [], speed: null, acc: null, at: null, heading: null, battery: null, since: null, online: true, sharing: false, transport: null, measurementAt: null };
 }
 
 const isKicked = (token: string, dev: string) => loadRoomControls().some((c) => c.kind === "kick" && c.token === token && c.target === dev);
@@ -102,17 +106,20 @@ export function usePeerNetwork(opts: {
   const applyLocation = useCallback((dev: string, m: LocMessage) => {
     setPeople((prev) => {
       const p = prev[dev] ?? emptyPerson(dev);
-      if (m === null) return { ...prev, [dev]: { ...p, sharing: false, online: true, points: [], at: null, heading: null, since: null } };
+      if (m === null) return { ...prev, [dev]: { ...p, sharing: false, online: true, points: [], at: null, heading: null, since: null, measurementAt: null } };
       const now = Date.now();
+      if (!acceptMeasurement(p.measurementAt, m)) return { ...prev, [dev]: { ...p, heading: m.heading ?? p.heading, battery: m.battery ?? p.battery, transport: m.transport ?? p.transport } };
+      const age = Math.max(0, now - m.t);
       return {
         ...prev,
         [dev]: {
           ...p, sharing: true, online: true,
-          points: appendTrackPoint(p.points, { lat: m.lat, lng: m.lng, t: now }, now),
-          speed: m.speed, acc: m.acc, at: now,
+          points: appendTrackPoint(p.points, { lat: m.lat, lng: m.lng, t: now - age }, now),
+          speed: m.speed, acc: m.acc, at: now - age, measurementAt: m.t,
           heading: m.heading ?? null,
           battery: m.battery !== undefined ? m.battery : p.battery,
           since: m.since != null ? now - (m.t - m.since) : p.since ?? now,
+          transport: m.transport ?? p.transport,
         },
       };
     });
@@ -186,7 +193,7 @@ export function usePeerNetwork(opts: {
           j.peers.add(peerId);
           refreshCounts();
           if (helloRef.current) void j.hello.send(helloRef.current, { target: peerId }).catch(() => undefined);
-          void j.loc.send(lastLocRef.current, { target: peerId }).catch(() => undefined);
+          void j.loc.send(freshLocation(lastLocRef.current, Date.now()), { target: peerId }).catch(() => undefined);
         };
         room.onPeerLeave = (peerId) => {
           j.peers.delete(peerId);
@@ -234,7 +241,7 @@ export function usePeerNetwork(opts: {
           });
         };
         j.ask.onMessage = (data, { peerId }) => {
-          if (!parseShareRequest(data)) return;
+          if (!j.peers.has(peerId) || !parseShareRequest(data)) return;
           const dev = peerDeviceRef.current.get(peerId);
           if (dev) onAskRef.current?.(dev);
         };
@@ -266,6 +273,25 @@ export function usePeerNetwork(opts: {
     for (const j of joinedRef.current.values()) {
       if (j.peers.size) void j.loc.send(m).catch(() => undefined);
     }
+  }, []);
+
+  // A connected observer receives metadata updates even while the owner is stationary.
+  // Repeat the original timestamp: never disguise a stale fix as a new measurement.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const latest = lastLocRef.current;
+      if (!latest || !freshLocation(latest, Date.now())) return;
+      for (const j of joinedRef.current.values()) if (j.peers.size) void j.loc.send(latest).catch(() => undefined);
+    }, 5000);
+    const announce = () => {
+      for (const j of joinedRef.current.values()) {
+        if (helloRef.current) void j.hello.send(helloRef.current).catch(() => undefined);
+        void j.loc.send(freshLocation(lastLocRef.current, Date.now())).catch(() => undefined);
+      }
+    };
+    window.addEventListener("online", announce);
+    window.addEventListener("pageshow", announce);
+    return () => { clearInterval(timer); window.removeEventListener("online", announce); window.removeEventListener("pageshow", announce); };
   }, []);
 
   /** Aláírt tulajdonosi művelet elküldése és helyi alkalmazása. */

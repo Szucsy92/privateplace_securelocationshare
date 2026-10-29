@@ -57,6 +57,8 @@ jobs:
       - name: Webes felület (statikus) építése
         env:
           VITE_PUBLIC_APP_URL: ${{ inputs.public_url }}
+          VITE_RELEASE_REPOSITORY: ${{ github.repository }}
+          VITE_APP_VERSION_CODE: ${{ github.run_number }}
           VITE_TURN_URLS: ${{ secrets.TURN_URLS }}
           VITE_TURN_USERNAME: ${{ secrets.TURN_USERNAME }}
           VITE_TURN_CREDENTIAL: ${{ secrets.TURN_CREDENTIAL }}
@@ -67,6 +69,7 @@ jobs:
           if [ ! -d android ]; then npx cap add android; fi
           node scripts/patch-android.mjs
           npx cap sync android
+          node scripts/patch-background.mjs
 
       - name: APK fordítása és aláírása
         working-directory: android
@@ -98,7 +101,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: out/*.apk
+          path: out/*
           if-no-files-found: error
 
   ios:
@@ -120,6 +123,8 @@ jobs:
       - name: Webes felület (statikus) építése
         env:
           VITE_PUBLIC_APP_URL: ${{ inputs.public_url }}
+          VITE_RELEASE_REPOSITORY: ${{ github.repository }}
+          VITE_APP_VERSION_CODE: ${{ github.run_number }}
           VITE_TURN_URLS: ${{ secrets.TURN_URLS }}
           VITE_TURN_USERNAME: ${{ secrets.TURN_USERNAME }}
           VITE_TURN_CREDENTIAL: ${{ secrets.TURN_CREDENTIAL }}
@@ -160,7 +165,13 @@ jobs:
         with:
           path: out
           merge-multiple: true
-      - run: ls -la out
+      - name: Legújabb telepítő és verzióadatok
+        run: |
+          APK=$(ls out/*.apk 2>/dev/null | head -n1)
+          if [ -n "$APK" ]; then
+            cp "$APK" out/private-place-latest.apk
+            printf '{"versionCode":%s,"version":"%s"}\n' '${{ github.run_number }}' '${{ needs.stamp.outputs.version }}' > out/private-place-release.json
+          fi
       - name: Kiadás (Releases)
         uses: softprops/action-gh-release@v2
         with:

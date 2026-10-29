@@ -53,14 +53,14 @@ export function startLocationWatch(opts: {
   const reportFix = (fix: Fix) => {
     if (stopped || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lng) || Math.abs(fix.lat) > 90 || Math.abs(fix.lng) > 180) return;
     const at = fix.at ?? Date.now();
-    if (at < latestAt || Date.now() - at > 30000) return;
+    if (at < latestAt || Date.now() - at > 30000 || at > Date.now() + 60000) return;
     latestAt = at;
     gotFix = true;
     clearTimeout(acquisitionTimer);
-    opts.onFix(fix);
+    opts.onFix({ ...fix, at });
   };
   const reportError = (err: FixError) => {
-    if (!stopped && (err === "denied" || !gotFix)) opts.onError(err);
+    if (!stopped && (err === "denied" || !gotFix || Date.now() - latestAt > 15000)) opts.onError(err);
   };
   acquisitionTimer = setTimeout(() => reportError("error"), 25000);
 
@@ -123,7 +123,7 @@ export function startLocationWatch(opts: {
       const id = await plugin.addWatcher({
         ...(opts.background ? {
           backgroundTitle: "Private Place – megosztás aktív",
-          backgroundMessage: "A szobatársaid élőben látják a helyzetedet. A megosztást az appban kapcsolhatod ki.",
+          backgroundMessage: "Élő helymegosztás aktív",
         } : {}),
         requestPermissions: true, stale: false, distanceFilter: 0,
       }, (loc, err) => {
