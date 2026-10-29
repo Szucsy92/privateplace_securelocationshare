@@ -85,26 +85,26 @@
   --room-rose: #FB7185;
   --room-amber: #FBBF24;
   --room-sky: #38BDF8;
-  --map-dark-background: #1d2731;
-  --map-dark-water: #133d50;
-  --map-dark-building: #566673;
-  --map-dark-building-edge: #8695a0;
-  --map-dark-road: #bdc7cb;
-  --map-dark-road-major: #ecd6a0;
-  --map-dark-road-casing: #253039;
-  --map-dark-park: #284739;
-  --map-dark-label: #f1f4f6;
-  --map-dark-halo: #1d2731;
-  --map-light-background: #f1f3f4;
-  --map-light-water: #98cfdf;
-  --map-light-building: #bbc3ca;
-  --map-light-building-edge: #7e8b96;
-  --map-light-road: #ffffff;
-  --map-light-road-major: #ffda8b;
-  --map-light-road-casing: #89959e;
-  --map-light-park: #c7dec7;
-  --map-light-label: #25303c;
-  --map-light-halo: #ffffff;
+--map-dark-background: #1f2233;
+--map-dark-water: #214a60;
+--map-dark-building: #333857;
+--map-dark-building-edge: #5a6190;
+--map-dark-road: #8d94b3;
+--map-dark-road-major: #dcd3f2;
+--map-dark-road-casing: #171a2a;
+--map-dark-park: #28433c;
+--map-dark-label: #e6e9f5;
+--map-dark-halo: #1f2233;
+--map-light-background: #efe9df;
+--map-light-water: #a6d6e0;
+--map-light-building: #d6cbb8;
+--map-light-building-edge: #b3a68f;
+--map-light-road: #ffffff;
+--map-light-road-major: #fbe3a0;
+--map-light-road-casing: #c9c1b2;
+--map-light-park: #cde2c0;
+--map-light-label: #2c3347;
+--map-light-halo: #ffffff;
 }
 
 .dark {
