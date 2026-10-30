@@ -165,9 +165,7 @@ export default function MapApp() {
     return () => { stopCompass(); stopBattery(); clearInterval(timer); };
   }, [mounted, profile !== null, stopped]);
   useEffect(() => {
-    const sharingStatus: SharingStatus = !prefs.sharing ? "off" : gpsStatus === "error" || gpsStatus === "denied" ? "lost" : !selfFresh ? "search" : "live";
-  if (stopped) return <div className="map-workspace glass-shell items-center justify-center gap-4"><h1 className="font-display text-lg">Private Place</h1><p className="text-sm text-muted-foreground">A helymegosztás leállítva.</p><Button onClick={() => setStopped(false)}><Play />Vissza a térképhez</Button></div>;
-  if (!mounted) return;
+    if (!mounted) return;
     return watchNativeStop(exit => { setSharingRef.current(false); if (exit) setStopped(true); });
   }, [mounted]);
   useEffect(() => {
