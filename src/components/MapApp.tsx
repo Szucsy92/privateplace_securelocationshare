@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
 import {
   BatteryCharging,
-  Pencil,
+  ChevronDown,
   Sun,
   Moon,
   Check,
@@ -11,7 +11,6 @@ import {
   Bell,
   Camera,
   Copy,
-  Crosshair,
   DoorOpen,
   ImagePlus,
   LockKeyhole,
@@ -69,6 +68,15 @@ import {
   type LocalProfile,
   type Prefs,
 } from "@/lib/profile";
+import { SharingControl, type SharingStatus } from "@/components/SharingControl";
+import { TransportControl } from "@/components/TransportControl";
+import { hybridHeading, type HeadingState } from "@/lib/heading";
+import { watchCompass, watchBattery, requestCompassPermission } from "@/lib/deviceSensors";
+import { watchNativeStop } from "@/lib/nativeRuntime";
+import { updateTransport, type TransportMode, type TransportState } from "@/lib/transport";
+import { updateStop, type StopState } from "@/lib/stationary";
+import { latestRelease, releaseRepository, needsUpdate, appLink, isAndroidBrowser, type AppRelease } from "@/lib/invitations";
+import { headingFromTrack } from "@/lib/mapMath";
 import { isNativeApp, startLocationWatch } from "@/lib/locationSource";
 import { createRoomAuthority, signRoomControl } from "@/lib/moderation";
 import {
@@ -121,6 +129,70 @@ export default function MapApp() {
   prefsRef.current = prefs;
   const compassRef = useRef<HTMLSpanElement | null>(null);
   const railRef = useElasticOverscroll<HTMLDivElement>("x");
+  const headingRef = useRef<HeadingState>({ source: "gps", angle: null });
+  const sensorRef = useRef<number | null>(null);
+  const fixBearingRef = useRef<number | null>(null);
+  const batteryRef = useRef<number | null>(null);
+  const stopRef = useRef<StopState | null>(null);
+  const sinceRef = useRef<number | null>(null);
+  const manualRef = useRef<TransportMode | null>(null);
+  const transportRef = useRef<TransportState>({ mode: "walk", candidate: null, candidateAt: 0 });
+  const [transport, setTransport] = useState<TransportMode>("walk");
+  const [manualTransport, setManualTransport] = useState<TransportMode | null>(null);
+  const [selfHeading, setSelfHeading] = useState<number | null>(null);
+  const [battery, setBattery] = useState<number | null>(null);
+  const [exitConfirm, setExitConfirm] = useState(false);
+  const [stopped, setStopped] = useState(false);
+  const [addressAllowed, setAddressAllowed] = useState(false);
+  const selfMetaRef = useRef(selfMeta);
+  selfMetaRef.current = selfMeta;
+  const publishSelf = () => {
+    const last = selfTrackRef.current.at(-1);
+    if (!prefsRef.current.sharing || !last || Date.now() - last.t > 15000) return;
+    net.sendLocation({ lat: last.lat, lng: last.lng, t: last.t, speed: selfMetaRef.current?.speed ?? null, acc: selfMetaRef.current?.acc ?? null, heading: headingRef.current.angle, battery: batteryRef.current, since: sinceRef.current, stoppedSince: stopRef.current?.since ?? null, transport: transportRef.current.mode });
+  };
+  const publishRef = useRef(publishSelf);
+  publishRef.current = publishSelf;
+  useEffect(() => {
+    if (!mounted || !profile || stopped) return;
+    const stopCompass = watchCompass(angle => {
+      sensorRef.current = angle;
+      headingRef.current = hybridHeading(headingRef.current, selfMetaRef.current?.speed ?? null, fixBearingRef.current, angle);
+      setSelfHeading(headingRef.current.angle);
+    });
+    const stopBattery = watchBattery(value => { batteryRef.current = value; setBattery(value); });
+    const timer = setInterval(() => publishRef.current(), 1000);
+    return () => { stopCompass(); stopBattery(); clearInterval(timer); };
+  }, [mounted, profile !== null, stopped]);
+  useEffect(() => {
+    if (!mounted) return;
+    return watchNativeStop(exit => { setSharingRef.current(false); if (exit) setStopped(true); });
+  }, [mounted]);
+  useEffect(() => {
+    if (!nativeApp) return;
+    let cancelled = false;
+    let cleanup = () => {};
+    void import("@capacitor/app").then(async ({ App }) => {
+      const receive = (url: string) => {
+        const invitation = parseRoomInput(url);
+        if (!invitation) return;
+        setPendingJoin(invitation);
+        setDialog(loadProfile() ? "join" : "welcome");
+      };
+      const listener = await App.addListener("appUrlOpen", ({ url }) => receive(url));
+      if (cancelled) { await listener.remove(); return; }
+      cleanup = () => { void listener.remove(); };
+      const launch = await App.getLaunchUrl();
+      if (!cancelled && launch) receive(launch.url);
+    });
+    return () => { cancelled = true; cleanup(); };
+  }, [nativeApp]);
+  const exitApp = async () => {
+    setSharingRef.current(false);
+    setStopped(true);
+    setExitConfirm(false);
+    if (isNativeApp()) { const { App } = await import("@capacitor/app"); await App.exitApp(); }
+  };
 
   // Helyi adatok betöltése (csak a telefonon)
   useEffect(() => {
@@ -189,32 +261,40 @@ export default function MapApp() {
   }, []);
   const netPeopleRef = useRef<Record<string, RemotePerson>>({});
 
-  const net = usePeerNetwork({ rooms, deviceId, profile, onRoomClosed, onShareRequest });
+  const net = usePeerNetwork({ rooms, deviceId, profile: stopped ? null : profile, onRoomClosed, onShareRequest });
   netPeopleRef.current = net.people;
 
   // Saját GPS: mindig fut, privát; csak a megosztás kapcsoló küld a szobatársaknak.
   // Az Android-alkalmazásban bekapcsolt megosztásnál lezárt képernyőnél is folytatódik.
   const backgroundSharing = nativeApp && prefs.sharing;
   useEffect(() => {
-    if (!mounted || !profile || dialog === "welcome" || dialog === "permissions") return;
+    if (!mounted || !profile || stopped || dialog === "welcome" || dialog === "permissions") return;
     setGpsStatus((s) => (s === "live" ? s : "waiting"));
     return startLocationWatch({
       background: backgroundSharing,
       onFix: (fix) => {
         const now = Date.now();
-        const point = { lat: fix.lat, lng: fix.lng, t: now };
+        const at = fix.at ?? now;
+        const point = { lat: fix.lat, lng: fix.lng, t: at };
         selfTrackRef.current = appendTrackPoint(selfTrackRef.current, point, now);
         setSelfTrack(selfTrackRef.current);
-        setSelfMeta({ speed: fix.speed, acc: fix.acc, at: now });
+        setSelfMeta({ speed: fix.speed, acc: fix.acc, at });
+        selfMetaRef.current = { speed: fix.speed, acc: fix.acc, at };
+        fixBearingRef.current = fix.bearing ?? headingFromTrack(selfTrackRef.current);
+        headingRef.current = hybridHeading(headingRef.current, fix.speed, fixBearingRef.current, sensorRef.current);
+        setSelfHeading(headingRef.current.angle);
+        stopRef.current = updateStop(stopRef.current, point, fix.speed, fix.acc, at);
+        transportRef.current = updateTransport(transportRef.current, fix.speed, at, manualRef.current);
+        setTransport(transportRef.current.mode);
         setGpsStatus("live");
         if (!shouldPublishLocation(prefsRef.current.sharing, now, lastSentRef.current)) return;
         lastSentRef.current = now;
-        net.sendLocation({ lat: fix.lat, lng: fix.lng, t: now, acc: fix.acc, speed: fix.speed });
+        publishRef.current();
       },
       onError: (err) => setGpsStatus(err),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, profile !== null, gpsRequest, backgroundSharing, dialog === "permissions", dialog === "welcome"]);
+  }, [mounted, profile !== null, stopped, gpsRequest, backgroundSharing, dialog === "permissions", dialog === "welcome"]);
 
   // Újraindítás a telefon beállításaiból vagy a háttérből visszatérve.
   useEffect(() => {
@@ -250,6 +330,8 @@ export default function MapApp() {
   }, [net.connectIssues]);
 
   const setSharing = (value: boolean) => {
+    prefsRef.current = { ...prefsRef.current, sharing: value };
+    sinceRef.current = value ? sinceRef.current ?? Date.now() : null;
     updatePrefs({ sharing: value });
     if (!value) {
       prefsRef.current = { ...prefsRef.current, sharing: false };
@@ -259,7 +341,7 @@ export default function MapApp() {
     const last = selfTrackRef.current[selfTrackRef.current.length - 1];
     if (last && Date.now() - last.t < 15000) {
       lastSentRef.current = Date.now();
-      net.sendLocation({ lat: last.lat, lng: last.lng, t: last.t, acc: selfMeta?.acc ?? null, speed: selfMeta?.speed ?? null });
+      publishRef.current();
     }
   };
   setSharingRef.current = setSharing;
@@ -282,13 +364,13 @@ export default function MapApp() {
   const mapPeople: MapPerson[] = useMemo(() => {
     const list: MapPerson[] = [];
     if (profile && selfTrack.length)
-      list.push({ id: SELF, name: profile.name, avatarUrl: profile.avatar, color: SELF_COLOR, points: selfTrack, isSelf: true });
+      list.push({ id: SELF, name: profile.name, avatarUrl: profile.avatar, color: SELF_COLOR, points: selfTrack, isSelf: true, heading: selfHeading, battery, stoppedSince: stopRef.current?.since ?? null });
     for (const p of remote) {
       if (p.sharing && p.points.length)
-        list.push({ id: p.deviceId, name: p.name, avatarUrl: p.avatar, color: p.color, points: p.points });
+        list.push({ id: p.deviceId, name: p.name, avatarUrl: p.avatar, color: p.color, points: p.points, heading: p.heading, battery: p.battery, stoppedSince: p.stoppedSince });
     }
     return list;
-  }, [profile, selfTrack, remote]);
+  }, [profile, selfTrack, remote, selfHeading, battery]);
 
   const hasPosition = (id: string) => mapPeople.some((p) => p.id === id);
 
@@ -312,6 +394,7 @@ export default function MapApp() {
   };
 
   const toggleOrientation = () => {
+    void requestCompassPermission().catch(() => false);
     const next: Orientation = prefs.orientation === "north" ? "heading" : "north";
     updatePrefs({ orientation: next });
     if (next === "heading" && !follow && hasPosition(SELF)) setFollow((prev) => ({ id: SELF, request: (prev?.request ?? 0) + 1 }));
@@ -357,10 +440,17 @@ export default function MapApp() {
     toast.success(room.owner ? room.ownerPrivateKey ? "A szoba törölve." : "A régi szobát eltávolítottam erről a készülékről." : "Kiléptél a szobából.");
   };
 
+  const kickPerson = async (room: SavedRoom, person: RemotePerson) => {
+    if (!room.owner || !room.ownerKey || !room.ownerPrivateKey || !window.confirm(`Biztosan eltávolítod ${person.name}-t a szobából?`)) return;
+    try { await net.sendControl(await signRoomControl(room.token, { ownerKey: room.ownerKey, ownerPrivateKey: room.ownerPrivateKey }, "kick", person.deviceId)); }
+    catch { toast.error("Az eltávolítás nem sikerült."); }
+  };
   const onlineCount = remote.filter((p) => p.online).length;
   const viewers = prefs.sharing ? remote.filter((p) => p.online) : [];
   const selfFresh = selfMeta ? clock - selfMeta.at < 15000 : false;
 
+  const sharingStatus: SharingStatus = !prefs.sharing ? "off" : gpsStatus === "error" || gpsStatus === "denied" ? "lost" : !selfFresh ? "search" : "live";
+  if (stopped) return <div className="map-workspace glass-shell items-center justify-center gap-4"><h1 className="font-display text-lg">Private Place</h1><p className="text-sm text-muted-foreground">A helymegosztás leállítva.</p><Button onClick={() => setStopped(false)}><Play />Vissza a térképhez</Button></div>;
   if (!mounted) return <div className="map-workspace glass-shell" />;
 
   return (
@@ -368,19 +458,10 @@ export default function MapApp() {
       <header className="glass z-10 flex shrink-0 items-center justify-between gap-2 px-3 py-2">
         <div className="min-w-0 flex-1">
           <h1 className="font-display text-base font-bold">Private Place</h1>
-          <button
-            className="share-pill indicator mt-0.5"
-            data-state={prefs.sharing ? "on" : "off"}
-            aria-pressed={prefs.sharing}
-            aria-label={prefs.sharing ? "Megosztás leállítása" : "Megosztás indítása"}
-            onClick={() => setSharing(!prefs.sharing)}
-          >
-            <span className="status-dot" data-state={prefs.sharing ? "on" : "off"} />
-            {prefs.sharing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-            <span>{prefs.sharing ? `Megosztás be · ${viewers.length} lát` : "Megosztás ki"}</span>
-          </button>
+          <span className="header-signal" data-status={sharingStatus} aria-label={sharingStatus === "live" ? "Élő" : sharingStatus === "search" ? "Keresés" : sharingStatus === "lost" ? "Nincs jel" : "Kikapcsolva"} />
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
+          <SharingControl status={sharingStatus} onToggle={() => setSharing(!prefs.sharing)} />
           <Button
             variant="ghost"
             size="icon"
@@ -428,28 +509,10 @@ export default function MapApp() {
             theme={prefs.mapTheme}
             onUserPan={() => setFollow(null)}
             compassRef={compassRef}
+            addressAllowed={addressAllowed}
+            onAllowAddress={() => { if (window.confirm("A cím lekéréséhez a kijelölt koordinátát elküldjük az OpenStreetMap címszolgáltatásának. Engedélyezed?")) setAddressAllowed(true); }}
           />
         </Suspense>
-
-        <div className="map-overlay glass absolute left-3 top-3 flex items-center gap-2 rounded-full px-3 py-2 text-xs">
-          <span className="status-dot" data-state={gpsStatus === "live" ? "on" : gpsStatus === "waiting" ? "off" : "warn"} />
-          <span>
-            {gpsStatus === "denied"
-              ? "Helyhozzáférés szükséges"
-              : gpsStatus === "error"
-                ? "Nincs GPS-jel"
-                : gpsStatus === "waiting"
-                  ? "Helyzet keresése…"
-                  : prefs.sharing
-                    ? selfFresh ? "Élő · megosztva" : "Helyzet frissítése…"
-                    : selfFresh ? "Élő · privát" : "Helyzet frissítése…"}
-          </span>
-          {(gpsStatus !== "live" || !selfFresh) && (
-            <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => gpsStatus === "denied" ? setDialog("permissions") : setGpsRequest((n) => n + 1)}>
-              {gpsStatus === "denied" ? "Engedélyezés" : "Újra"}
-            </Button>
-          )}
-        </div>
 
         <button
           className="map-overlay indicator glass compass-btn absolute right-3 top-3"
@@ -470,17 +533,11 @@ export default function MapApp() {
           {prefs.mapTheme === "dark" ? <Sun /> : <Moon />}
         </Button>
 
-        <Button
-          size="icon"
-          variant="ghost"
-          className="map-overlay indicator glass absolute bottom-4 left-3 h-12 w-12 rounded-full"
-          data-state={follow?.id === SELF ? "on" : "off"}
-          aria-label={follow?.id === SELF ? "Saját követés kikapcsolása" : "Saját pozíció követése"}
-          title={follow?.id === SELF ? "Követés kikapcsolása" : "Saját pozíció"}
-          onClick={() => toggleFollow(SELF)}
-        >
-          <Crosshair className="h-5 w-5" />
-        </Button>
+        <TransportControl key={follow?.id ?? SELF} mode={follow && follow.id !== SELF ? net.people[follow.id]?.transport ?? null : transport} own={!follow || follow.id === SELF} manual={manualTransport !== null} onSelect={mode => {
+          manualRef.current = mode; setManualTransport(mode);
+          if (mode) { transportRef.current = { mode, candidate: null, candidateAt: Date.now() }; setTransport(mode); }
+          publishRef.current();
+        }} />
       </main>
 
       <section className="people-rail-wrap shrink-0" aria-label="Saját magam és a szobatársaim">
@@ -494,7 +551,7 @@ export default function MapApp() {
                 color={SELF_COLOR}
                 active={follow?.id === SELF}
                 dot={selfFresh ? "on" : gpsStatus === "denied" || gpsStatus === "error" ? "warn" : "off"}
-                status={selfMeta ? `${selfFresh ? "élő" : relTime(selfMeta.at, clock)} · ${kmh(selfMeta.speed)}` : "Helyzet keresése…"}
+                status={selfMeta ? `${kmh(selfMeta.speed)} · ${sinceRef.current ? relTime(sinceRef.current, clock) : "privát"}` : "Helyzet keresése…"}
                 onClick={() => toggleFollow(SELF)}
               />
             )}
@@ -531,6 +588,7 @@ export default function MapApp() {
       <Dialog
         open={dialog !== null}
         onOpenChange={(open) => {
+          if (!open && dialog === "welcome") { setExitConfirm(true); return; }
           if (!open && dialog !== "welcome") {
             setDialog(null);
             setPendingJoin(null);
@@ -612,7 +670,7 @@ export default function MapApp() {
             </>
           )}
 
-          {dialog === "join" && <JoinPanel initial={pendingJoin} onJoin={joinRoom} />}
+          {dialog === "join" && <JoinPanel initial={pendingJoin} onJoin={joinRoom} onReject={() => { setPendingJoin(null); setDialog(null); }} />}
 
           {dialog === "share" && shareToken && (
             <SharePanel room={rooms.find((r) => r.token === shareToken) ?? null} onDone={() => setDialog("rooms")} />
@@ -633,6 +691,8 @@ export default function MapApp() {
                       key={room.token}
                       room={room}
                       peers={net.roomPeers[room.token] ?? 0}
+                      members={(net.roomMembers[room.token] ?? []).map(id => net.people[id]).filter((p): p is RemotePerson => Boolean(p))}
+                      onKick={p => void kickPerson(room, p)}
                       onShare={() => {
                         setShareToken(room.token);
                         setDialog("share");
@@ -761,6 +821,7 @@ export default function MapApp() {
           )}
         </DialogContent>
       </Dialog>
+      <Dialog open={exitConfirm} onOpenChange={setExitConfirm}><DialogContent className="glass-dialog"><DialogHeader><DialogTitle>Kilépsz az alkalmazásból?</DialogTitle><DialogDescription>A helymegosztás leáll. A térkép használatához meg kell adnod a nevedet.</DialogDescription></DialogHeader><div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setExitConfirm(false)}>Mégsem</Button><Button variant="destructive" onClick={() => void exitApp()}><LogOut />Kilépés</Button></div></DialogContent></Dialog>
     </div>
   );
 }
@@ -982,7 +1043,7 @@ function PersonCapsule(props: {
   onClick: () => void;
 }) {
   return (
-    <button
+    <Button variant="ghost"
       className="capsule indicator"
       data-state={props.active ? "on" : "off"}
       aria-pressed={props.active}
@@ -995,81 +1056,37 @@ function PersonCapsule(props: {
       <span className="flex min-w-0 flex-col items-start pr-4 text-left">
         <span className="max-w-[118px] truncate text-sm font-semibold">{props.name}</span>
         <span className="flex max-w-[118px] items-center gap-2 text-[11px] text-muted-foreground">
-          <span className="status-dot shrink-0" data-state={props.dot} />
           <span className="truncate">{props.status}</span>
         </span>
+        <span className="status-dot mt-1" data-state={props.dot} />
       </span>
-    </button>
+    </Button>
   );
 }
 
-function RoomRow({ room, peers, onShare, onDelete, onSave }: { room: SavedRoom; peers: number; onShare: () => void; onDelete: () => void; onSave: (name: string, color: RoomColor) => void }) {
+function RoomRow({ room, peers, members, onKick, onShare, onDelete, onSave }: { room: SavedRoom; peers: number; members: RemotePerson[]; onKick: (person: RemotePerson) => void; onShare: () => void; onDelete: () => void; onSave: (name: string, color: RoomColor) => void }) {
   const [editing, setEditing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [name, setName] = useState(room.name);
   const [color, setColor] = useState<RoomColor>(room.color ?? DEFAULT_ROOM_COLOR);
   const [confirm, setConfirm] = useState(false);
-  return (
-    <div className="glass-inset rounded-2xl p-3">
-      <div className="flex items-center gap-3">
-        <span className={`room-swatch room-${room.color ?? DEFAULT_ROOM_COLOR} ml-1 shrink-0`} />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold">{room.name}</p>
-          <p className="text-xs text-muted-foreground">
-            {room.owner ? "Saját szoba" : "Meghívás"} · {peers > 0 ? `${peers} kapcsolódva` : "várakozás a többiekre"}
-          </p>
-        </div>
-        <Button variant="ghost" size="icon" className="shrink-0 rounded-full" aria-label={`Szoba szerkesztése: ${room.name}`} title="Név és szín" onClick={() => { setName(room.name); setColor(room.color ?? DEFAULT_ROOM_COLOR); setEditing((v) => !v); }}>
-          <Pencil className="h-4 w-4" />
-        </Button>
-        {room.owner && (
-          <Button variant="ghost" size="icon" className="rounded-full" aria-label={`QR-kód: ${room.name}`} title="QR-kód és megosztás" onClick={onShare}>
-            <QrCode className="h-5 w-5" />
-          </Button>
-        )}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="rounded-full text-destructive"
-          aria-label={room.owner ? `Szoba törlése: ${room.name}` : `Kilépés: ${room.name}`}
-          title={room.owner ? "Szoba törlése" : "Kilépés"}
-          onClick={() => setConfirm(true)}
-        >
-          {room.owner ? <Trash2 className="h-4 w-4" /> : <LogOut className="h-4 w-4" />}
-        </Button>
-      </div>
-      {editing && (
-        <form className="mt-3 space-y-3 border-t border-border pt-3" onSubmit={(e) => { e.preventDefault(); if (name.trim()) { onSave(name, color); setEditing(false); } }}>
-          <Input aria-label="Szoba neve" className="glass-input" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} />
-          <div className="grid grid-cols-5 gap-2" aria-label="Szoba színe">
-            {ROOM_COLORS.map((c) => <Button key={c} type="button" variant="ghost" size="icon" className={`room-choice room-${c}`} aria-label={ROOM_COLOR_NAMES[c]} title={ROOM_COLOR_NAMES[c]} aria-pressed={color === c} onClick={() => setColor(c)}>
-              <span className="room-swatch">{color === c && <Check className="h-3 w-3" />}</span>
-            </Button>)}
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" size="icon" aria-label="Szerkesztés elvetése" onClick={() => setEditing(false)}><X /></Button>
-            <Button type="submit" size="sm" disabled={!name.trim()}><Check />Mentés</Button>
-          </div>
-        </form>
-      )}
-      {confirm && (
-        <div className="mt-3 space-y-2 border-t border-border pt-3">
-          <p className="text-xs text-muted-foreground">
-            {room.owner
-              ? "Törlöd a szobát? Mindenki kikerül belőle, és a régi kód vagy link többé nem működik."
-              : "Kilépsz a szobából? Újra csak egy új meghívással léphetsz vissza."}
-          </p>
-          <div className="flex gap-2">
-            <Button size="sm" variant="destructive" className="rounded-full" onClick={onDelete}>
-              {room.owner ? "Törlés" : "Kilépés"}
-            </Button>
-            <Button size="sm" variant="outline" className="glass-button rounded-full" onClick={() => setConfirm(false)}>
-              Mégsem
-            </Button>
-          </div>
-        </div>
-      )}
+  return <div className="room-row glass-inset rounded-lg p-3">
+    <div className="flex items-center gap-3">
+      <Button variant="ghost" className={`room-name-circle room-${room.color ?? DEFAULT_ROOM_COLOR}`} aria-label={`Szoba szerkesztése: ${room.name}`} onClick={() => { setName(room.name); setColor(room.color ?? DEFAULT_ROOM_COLOR); setEditing(v => !v); }}><span>{room.name}</span></Button>
+      <Button variant="ghost" className="flex-1 h-20" aria-label={`Szoba megnyitása: ${room.name}`} aria-expanded={expanded} onClick={() => setExpanded(v => !v)}><ChevronDown className={expanded ? "rotate-180 transition-transform" : "transition-transform"} /></Button>
+      <Button variant="ghost" size="icon" className="h-14 w-14 rounded-full" aria-label={`QR-kód: ${room.name}`} onClick={onShare}><QrCode className="h-8 w-8" /></Button>
     </div>
-  );
+    {editing && <form className="mt-3 space-y-3 border-t border-border pt-3" onSubmit={e => { e.preventDefault(); if (name.trim()) { onSave(name, color); setEditing(false); } }}>
+      <Input aria-label="Szoba neve" value={name} maxLength={40} onChange={e => setName(e.target.value)} />
+      <div className="grid grid-cols-5 gap-2">{ROOM_COLORS.map(c => <Button key={c} type="button" variant="ghost" size="icon" className={`room-choice room-${c}`} aria-label={ROOM_COLOR_NAMES[c]} aria-pressed={color === c} onClick={() => setColor(c)}><span className="room-swatch">{color === c && <Check className="h-3 w-3" />}</span></Button>)}</div>
+      <div className="flex justify-end gap-2"><Button type="button" variant="ghost" size="icon" aria-label="Szerkesztés elvetése" onClick={() => setEditing(false)}><X /></Button><Button type="submit" disabled={!name.trim()}><Check />Mentés</Button></div>
+    </form>}
+    <div className="room-expansion" data-open={expanded}><div className="min-h-0 overflow-hidden">
+      <div className="flex justify-between items-center border-t border-border mt-3 pt-2"><span className="text-xs text-muted-foreground">{peers} kapcsolódva</span><Button variant="ghost" size="icon" className="text-destructive rounded-full" aria-label={room.owner ? `Szoba törlése: ${room.name}` : `Kilépés: ${room.name}`} onClick={() => setConfirm(true)}>{room.owner ? <Trash2 /> : <LogOut />}</Button></div>
+      <ElasticScroll className="max-h-44"><div className="space-y-2 py-2">{members.map(p => <div key={p.deviceId} className="flex items-center gap-2"><span className="capsule-avatar viewer-avatar" style={{ "--person-color": p.color } as React.CSSProperties}>{p.avatar ? <img src={p.avatar} alt="" /> : p.name.charAt(0)}</span><span className="text-sm flex-1 min-w-0 truncate">{p.name}</span><span className="status-dot" data-state={p.online ? "on" : "off"} />{room.owner && room.ownerPrivateKey && <Button variant="ghost" size="icon" aria-label={`Eltávolítás: ${p.name}`} onClick={() => onKick(p)}><X /></Button>}</div>)}</div></ElasticScroll>
+      {confirm && <div className="space-y-2"><p className="text-xs text-muted-foreground">{room.owner ? "Törlöd a szobát? A jelenleg kapcsolódó tagok értesülnek a törlésről." : "Kilépsz a szobából?"}</p><div className="flex gap-2"><Button size="sm" variant="destructive" onClick={onDelete}>{room.owner ? "Törlés" : "Kilépés"}</Button><Button size="sm" variant="outline" onClick={() => setConfirm(false)}>Mégsem</Button></div></div>}
+    </div></div>
+  </div>;
 }
 
 const ROOM_COLOR_NAMES: Record<RoomColor, string> = { mint: "Menta Zöld", violet: "Elektromos Levendula", rose: "Selyem Barack", amber: "Napfény Citromsárga", sky: "Jégkék" };
@@ -1084,7 +1101,9 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
   }, [room?.color]);
   if (!room) return null;
   const base = shareBase();
-  const link = base ? buildRoomLink(base, room.token, room.name, room.color ?? DEFAULT_ROOM_COLOR, room.ownerKey) : null;
+  const repo = releaseRepository();
+  const rawLink = base ? buildRoomLink(base, room.token, room.name, room.color ?? DEFAULT_ROOM_COLOR, room.ownerKey) : null;
+  const link = rawLink && repo ? `${rawLink}&forras=${encodeURIComponent(repo)}` : rawLink;
   const code = formatRoomToken(room.token);
   const text = link ?? code;
 
@@ -1141,11 +1160,21 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
   );
 }
 
-function JoinPanel({ initial, onJoin }: { initial: { token: string; name: string | null; color?: RoomColor; ownerKey?: string } | null; onJoin: (token: string, name: string | null, color?: RoomColor, ownerKey?: string) => void }) {
+function JoinPanel({ initial, onJoin, onReject }: { initial: { token: string; name: string | null; color?: RoomColor; ownerKey?: string } | null; onJoin: (token: string, name: string | null, color?: RoomColor, ownerKey?: string) => void; onReject: () => void }) {
   const [value, setValue] = useState(initial ? formatRoomToken(initial.token) : "");
   const [scanning, setScanning] = useState(false);
   const parsed = parseRoomInput(value);
   const name = parsed?.name ?? initial?.name ?? null;
+  const [release, setRelease] = useState<AppRelease | null>(null);
+  useEffect(() => {
+    const repo = releaseRepository(window.location.hash);
+    if (!repo) return;
+    const controller = new AbortController();
+    void latestRelease(repo, controller.signal).then(setRelease).catch(() => {});
+    return () => controller.abort();
+  }, []);
+  const installed = Number(import.meta.env["VITE_APP_VERSION_CODE"] ?? 0);
+  const update = isNativeApp() && release && needsUpdate(installed, release.versionCode);
 
   return (
     <>
@@ -1185,9 +1214,10 @@ function JoinPanel({ initial, onJoin }: { initial: { token: string; name: string
               {scanning ? "Beolvasás leállítása" : "QR-kód beolvasása"}
             </Button>
           )}
-          <Button type="submit" className="w-full rounded-full" disabled={!parsed}>
-            Csatlakozás
-          </Button>
+          {release && (update || (isAndroidBrowser() && !isNativeApp())) && <Button type="button" className="w-full rounded-full" onClick={() => { window.location.href = release.apk; }}>{update ? "Frissítés letöltése" : "Alkalmazás letöltése"}</Button>}
+          {initial && !isNativeApp() && isAndroidBrowser() && <Button type="button" variant="outline" className="w-full rounded-full" onClick={() => { window.location.href = appLink(initial); }}>Megnyitás a telepített appban</Button>}
+          <Button type="submit" className="w-full rounded-full" disabled={!parsed}>{update ? "Csatlakozás frissítés nélkül" : "Csatlakozás"}</Button>
+          <Button type="button" variant="ghost" className="w-full rounded-full" onClick={onReject}>Elutasítás</Button>
         </form>
       </ElasticScroll>
     </>
@@ -1277,7 +1307,7 @@ function personStatus(p: RemotePerson, now: number) {
   if (!p.online) return p.at ? `nincs kapcsolat · ${relTime(p.at, now)}` : "nincs kapcsolat";
   if (!p.sharing) return "nem oszt meg";
   if (!p.at) return "csatlakozva";
-  return `${now - p.at < 15000 ? "élő" : relTime(p.at, now)} · ${kmh(p.speed)}`;
+  return `${kmh(p.speed)} · ${p.since ? relTime(p.since, now) : relTime(p.at, now)}`;
 }
 
 function kmh(speed: number | null) {

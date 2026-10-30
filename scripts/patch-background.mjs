@@ -52,6 +52,17 @@ if (!service.includes("sharingLock.acquire")) {
   writeFileSync(servicePath, service);
 }
 const java = "android/app/src/main/java/hu/privateplace/app";
+const manifestPath = "android/app/src/main/AndroidManifest.xml";
+let manifest = readFileSync(manifestPath, "utf8");
+if (!manifest.includes('android:scheme="privateplace"')) {
+  manifest = manifest.replace('</activity>', `<intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="privateplace" android:host="join" />
+            </intent-filter></activity>`);
+  writeFileSync(manifestPath, manifest);
+}
 mkdirSync(java, { recursive: true });
 for (const name of ["PrivateCompass", "PrivateRuntime"]) cpSync(`scripts/native/${name}.java`, `${java}/${name}.java`);
 patch(`${java}/MainActivity.java`, "public class MainActivity extends BridgeActivity {}", `public class MainActivity extends BridgeActivity {

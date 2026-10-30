@@ -18,6 +18,7 @@ export type LocationMessage = {
   heading?: number | null;
   battery?: number | null;
   since?: number | null;
+  stoppedSince?: number | null;
   transport?: TransportMode;
 };
 
@@ -61,11 +62,13 @@ export function parseLocation(data: unknown): LocMessage | undefined {
   const heading = finiteOrNull(d["heading"]);
   const battery = finiteOrNull(d["battery"]);
   const since = finiteOrNull(d["since"]);
+  const stoppedSince = finiteOrNull(d["stoppedSince"]);
   return { lat, lng, t, acc: acc != null && acc >= 0 ? acc : null, speed: speed != null && speed >= 0 ? speed : null,
     ...(isTransportMode(d["transport"]) ? { transport: d["transport"] } : {}),
     ...(d["heading"] !== undefined ? { heading: heading !== null && heading >= 0 && heading < 360 ? heading : null } : {}),
     ...(d["battery"] !== undefined ? { battery: battery !== null && battery >= 0 && battery <= 100 ? battery : null } : {}),
     ...(d["since"] !== undefined ? { since: since !== null && since >= 0 && since <= t ? since : null } : {}),
+    ...(d["stoppedSince"] !== undefined ? { stoppedSince: stoppedSince !== null && stoppedSince >= 0 && stoppedSince <= t ? stoppedSince : null } : {}),
   };
 }
 

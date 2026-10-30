@@ -21,3 +21,12 @@ test("a meghívó csak az ellenőrző kulcsot viszi a rejtett részben", async (
   expect(link.split("#")[0]).toBe("https://pelda.hu/");
   expect(link).not.toContain("privateKey");
 });
+
+test("only the creator can remove a participant and the target cannot be changed", async () => {
+  const owner = await createRoomAuthority();
+  const other = await createRoomAuthority();
+  const control = await signRoomControl(generateRoomToken(), owner, "kick", "participant123");
+  expect(await verifyRoomControl(control, owner.ownerKey)).toBe(true);
+  expect(await verifyRoomControl(control, other.ownerKey)).toBe(false);
+  expect(await verifyRoomControl({ ...control, target: "someoneelse123" }, owner.ownerKey)).toBe(false);
+});

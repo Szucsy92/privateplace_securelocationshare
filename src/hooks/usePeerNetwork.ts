@@ -26,6 +26,7 @@ export type RemotePerson = {
   sharing: boolean;
   transport: TransportMode | null;
   measurementAt: number | null;
+  stoppedSince: number | null;
 };
 
 const APP_ID = "hu.elohely.app/v1";
@@ -48,7 +49,7 @@ type Joined = {
 };
 
 function emptyPerson(deviceId: string): RemotePerson {
-  return { deviceId, name: "Névtelen", avatar: null, color: colorForDevice(deviceId), points: [], speed: null, acc: null, at: null, heading: null, battery: null, since: null, online: true, sharing: false, transport: null, measurementAt: null };
+  return { deviceId, name: "Névtelen", avatar: null, color: colorForDevice(deviceId), points: [], speed: null, acc: null, at: null, heading: null, battery: null, since: null, online: true, sharing: false, transport: null, measurementAt: null, stoppedSince: null };
 }
 
 const isKicked = (token: string, dev: string) => loadRoomControls().some((c) => c.kind === "kick" && c.token === token && c.target === dev);
@@ -108,7 +109,8 @@ export function usePeerNetwork(opts: {
       const p = prev[dev] ?? emptyPerson(dev);
       if (m === null) return { ...prev, [dev]: { ...p, sharing: false, online: true, points: [], at: null, heading: null, since: null, measurementAt: null } };
       const now = Date.now();
-      if (!acceptMeasurement(p.measurementAt, m)) return { ...prev, [dev]: { ...p, heading: m.heading ?? p.heading, battery: m.battery ?? p.battery, transport: m.transport ?? p.transport } };
+      if (p.measurementAt !== null && m.t < p.measurementAt) return prev;
+      if (!acceptMeasurement(p.measurementAt, m)) return { ...prev, [dev]: { ...p, heading: m.heading ?? p.heading, battery: m.battery ?? p.battery, transport: m.transport ?? p.transport, stoppedSince: m.stoppedSince ?? p.stoppedSince } };
       const age = Math.max(0, now - m.t);
       return {
         ...prev,
@@ -120,6 +122,7 @@ export function usePeerNetwork(opts: {
           battery: m.battery !== undefined ? m.battery : p.battery,
           since: m.since != null ? now - (m.t - m.since) : p.since ?? now,
           transport: m.transport ?? p.transport,
+          stoppedSince: m.stoppedSince ?? null,
         },
       };
     });
@@ -164,7 +167,7 @@ export function usePeerNetwork(opts: {
   const ready = Boolean(profile && deviceId);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready) { for (const token of [...joinedRef.current.keys()]) leaveRoom(token, true); return; }
     let cancelled = false;
     const wanted = new Set(tokensKey ? tokensKey.split(",") : []);
     for (const token of [...joinedRef.current.keys()]) if (!wanted.has(token)) leaveRoom(token, true);
@@ -178,7 +181,7 @@ export function usePeerNetwork(opts: {
         const room = joinRoom({ appId: APP_ID, password: token, ...(turnConfig ? { turnConfig } : {}) }, token, {
           onJoinError: (e) => {
             console.warn("Szoba csatlakozási hiba", e);
-            if (e && typeof e === "object" && "peerId" in e && e.peerId) setConnectIssues((n) => n + 1);
+            setConnectIssues((n) => n + 1);
           },
         }) as unknown as MinimalRoom;
         const j: Joined = {
@@ -197,12 +200,14 @@ export function usePeerNetwork(opts: {
         };
         room.onPeerLeave = (peerId) => {
           j.peers.delete(peerId);
+          pendingLocRef.current.delete(peerId);
           refreshCounts();
           if (peerInAnyRoom(peerId)) return;
           const dev = peerDeviceRef.current.get(peerId);
           if (dev) setPeople((prev) => (prev[dev] ? { ...prev, [dev]: { ...prev[dev], online: false } } : prev));
         };
         j.hello.onMessage = (data, { peerId }) => {
+          if (!j.peers.has(peerId)) return;
           const h = parseHello(data);
           if (!h || h.deviceId === deviceId) return;
           if (isKicked(token, h.deviceId)) { j.peers.delete(peerId); refreshCounts(); return; }
