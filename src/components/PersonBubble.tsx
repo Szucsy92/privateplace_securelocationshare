@@ -5,10 +5,12 @@ import { distanceMeters } from "@/lib/mapMath";
 import { stopLabel } from "@/lib/stationary";
 import { lookupAddress } from "@/lib/address";
 import type { MapPerson } from "./LiveMap";
-export function PersonBubble({ person, self, addressAllowed, onAllow }: { person: MapPerson; self?: MapPerson; addressAllowed: boolean; onAllow: () => void }) {
+export function PersonBubble({ person, self, addressAllowed, onAllow }: { person: MapPerson; self: MapPerson | undefined; addressAllowed: boolean; onAllow: () => void }) {
   const [address, setAddress] = useState<string | null>(null);
   const [clock, setClock] = useState(Date.now());
   const lastQuery = useRef<{ lat: number; lng: number; at: number } | null>(null);
+  const requestRef = useRef<AbortController | null>(null);
+  useEffect(() => () => requestRef.current?.abort(), []);
   const last = person.points.at(-1);
   const own = self?.points.at(-1);
   useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, []);
@@ -17,9 +19,10 @@ export function PersonBubble({ person, self, addressAllowed, onAllow }: { person
     const prev = lastQuery.current;
     if (prev && (Date.now() - prev.at < 15000 || distanceMeters(prev, last) < 25)) return;
     const controller = new AbortController();
+    requestRef.current?.abort();
+    requestRef.current = controller;
     lastQuery.current = { ...last, at: Date.now() };
     void lookupAddress(last.lat, last.lng, controller.signal).then(setAddress).catch(() => {});
-    return () => controller.abort();
   }, [addressAllowed, last?.lat, last?.lng, clock]);
   const distance = own && last ? distanceMeters(own, last) : null;
   return <div className="person-bubble glass" role="status" aria-label={`${person.name} adatai`}>

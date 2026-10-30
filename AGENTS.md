@@ -30,3 +30,7 @@
 - Map day/night contrast uses semantic CSS palette tokens on existing MapLibre layers; keep markers, sources, camera and live tracking intact on theme changes.
 - Location acquisition accepts a fresh approximate foreground fix while the accurate watcher starts; restart after permissions/resume, and clean up pending callbacks and timers when stopping.
 - Room deletion uses signed controls through sendControl; new rooms store a local signing key and invitations carry only the verification key in the hash, so members cannot forge owner actions. Legacy rooms without keys are removed locally only.
+- CI applies scripts/patch-background.mjs to the pinned native location dependency after Capacitor sync; app-owned Java plugins supply rotation-vector heading and persisted notification-stop decisions, because installed dependencies and generated platforms must not be committed.
+- Preserve original GPS measurement timestamps in peer replays and heartbeats; update metadata separately and never make stale coordinates appear freshly measured.
+- Transport and stop-duration calculations live in pure tested modules; manual transport overrides persist for the running session until automatic mode is explicitly restored.
+- Address lookup is opt-in and runs only for the opened marker using the public OSM address service, because querying an address discloses that coordinate to a third party.

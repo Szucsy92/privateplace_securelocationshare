@@ -364,7 +364,7 @@ export default function MapApp() {
   const mapPeople: MapPerson[] = useMemo(() => {
     const list: MapPerson[] = [];
     if (profile && selfTrack.length)
-      list.push({ id: SELF, name: profile.name, avatarUrl: profile.avatar, color: SELF_COLOR, points: selfTrack, isSelf: true, heading: selfHeading, battery, stoppedSince: stopRef.current?.since });
+      list.push({ id: SELF, name: profile.name, avatarUrl: profile.avatar, color: SELF_COLOR, points: selfTrack, isSelf: true, heading: selfHeading, battery, stoppedSince: stopRef.current?.since ?? null });
     for (const p of remote) {
       if (p.sharing && p.points.length)
         list.push({ id: p.deviceId, name: p.name, avatarUrl: p.avatar, color: p.color, points: p.points, heading: p.heading, battery: p.battery, stoppedSince: null });
