@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { PersonBubble } from "./PersonBubble";
 import type { Map as MlMap, Marker as MlMarker, GeoJSONSource } from "maplibre-gl";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import { animationDurationMs, headingFromTrack, lerpPoint, smoothAngle } from "@/lib/mapMath";
@@ -12,6 +14,9 @@ export type MapPerson = {
   color: string;
   points: TrackPoint[];
   isSelf?: boolean;
+  heading?: number | null;
+  battery?: number | null;
+  stoppedSince?: number | null;
 };
 
 export type Orientation = "north" | "heading";
@@ -29,6 +34,8 @@ type Props = {
   theme: "dark" | "light";
   onUserPan: () => void;
   compassRef?: RefObject<HTMLElement | null>;
+  addressAllowed: boolean;
+  onAllowAddress: () => void;
 };
 
 type MarkerState = {
@@ -54,7 +61,13 @@ function fillAvatar(el: HTMLDivElement, person: MapPerson) {
     span.textContent = (person.name || "?").charAt(0).toUpperCase();
     el.appendChild(span);
   }
+  const arrow = document.createElement("i");
+  arrow.className = "heading-arrow";
+  el.appendChild(arrow);
   el.title = person.name;
+  el.setAttribute("role", "button");
+  el.setAttribute("tabindex", "0");
+  el.setAttribute("aria-label", `${person.name} adatai`);
 }
 
 function applyMapContrast(map: MlMap, theme: "dark" | "light") {
@@ -84,7 +97,7 @@ function applyMapContrast(map: MlMap, theme: "dark" | "light") {
   }
 }
 
-export default function LiveMap({ people, follow, showTrails, orientation, theme, onUserPan, compassRef }: Props) {
+export default function LiveMap({ people, follow, showTrails, orientation, theme, onUserPan, compassRef, addressAllowed, onAllowAddress }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MlMap | null>(null);
   const markerCtorRef = useRef<typeof MlMarker | null>(null);
@@ -98,6 +111,10 @@ export default function LiveMap({ people, follow, showTrails, orientation, theme
   compassElRef.current = compassRef;
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const bubbleRef = useRef<{ marker: MlMarker; el: HTMLDivElement; root: Root } | null>(null);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
 
   useEffect(() => {
     let cancelled = false;
@@ -115,6 +132,24 @@ export default function LiveMap({ people, follow, showTrails, orientation, theme
         s.pos = lerpPoint(s.anim.from, s.anim.to, k);
         s.marker.setLngLat([s.pos.lng, s.pos.lat]);
         if (k >= 1) s.anim = null;
+      }
+      for (const [id, s] of markersRef.current) {
+        const arrow = s.el.querySelector<HTMLElement>(".heading-arrow");
+        const heading = headingsRef.current.get(id);
+        if (arrow) {
+          arrow.hidden = propsRef.current.orientation !== "heading" || heading === undefined;
+          arrow.style.transform = `rotate(${(heading ?? 0) - m.getBearing()}deg)`;
+        }
+      }
+      const bubble = bubbleRef.current;
+      const personMarker = selectedRef.current ? markersRef.current.get(selectedRef.current) : null;
+      if (bubble && personMarker) {
+        bubble.marker.setLngLat([personMarker.pos.lng, personMarker.pos.lat]);
+        const point = m.project([personMarker.pos.lng, personMarker.pos.lat]);
+        const width = bubble.el.getBoundingClientRect().width;
+        const available = m.getContainer().clientWidth;
+        const offset = Math.max(8 + width / 2, Math.min(available - 8 - width / 2, point.x)) - point.x;
+        bubble.marker.setOffset([offset, point.y < 110 ? 32 + bubble.el.getBoundingClientRect().height : -32]);
       }
       if (flyingRef.current || m.isZooming()) return;
       const { follow: f, orientation: o } = propsRef.current;
@@ -152,6 +187,7 @@ export default function LiveMap({ people, follow, showTrails, orientation, theme
         map.touchZoomRotate.disableRotation();
         map.keyboard.disableRotation();
         map.on("dragstart", () => propsRef.current.onUserPan());
+        map.on("click", () => setSelected(null));
         map.on("moveend", () => {
           flyingRef.current = false;
         });
@@ -187,6 +223,9 @@ export default function LiveMap({ people, follow, showTrails, orientation, theme
       cancelAnimationFrame(raf);
       markersRef.current.forEach((s) => s.marker.remove());
       markersRef.current.clear();
+      bubbleRef.current?.root.unmount();
+      bubbleRef.current?.marker.remove();
+      bubbleRef.current = null;
       map?.remove();
       mapRef.current = null;
     };
@@ -217,7 +256,7 @@ export default function LiveMap({ people, follow, showTrails, orientation, theme
       if (!last) continue;
       const pos = { lat: last.lat, lng: last.lng };
       const key = `${person.avatarUrl ?? ""}|${person.name}|${person.color}`;
-      const heading = headingFromTrack(person.points);
+      const heading = person.heading ?? headingFromTrack(person.points);
       if (heading != null) headingsRef.current.set(person.id, heading);
 
       let s = markersRef.current.get(person.id);
@@ -225,6 +264,9 @@ export default function LiveMap({ people, follow, showTrails, orientation, theme
         const el = document.createElement("div");
         el.className = "map-avatar";
         fillAvatar(el, person);
+        const toggle = (event: Event) => { event.stopPropagation(); setSelected(current => current === person.id ? null : person.id); };
+        el.addEventListener("click", toggle);
+        el.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggle(event); } });
         const marker = new Marker({ element: el, anchor: "center" }).setLngLat([pos.lng, pos.lat]).addTo(map);
         s = { marker, el, pos, key, anim: null };
         markersRef.current.set(person.id, s);
@@ -270,6 +312,25 @@ export default function LiveMap({ people, follow, showTrails, orientation, theme
       }
     }
   }, [people, ready, showTrails]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const Marker = markerCtorRef.current;
+    const person = people.find(p => p.id === selected);
+    const pos = selected ? markersRef.current.get(selected)?.pos : null;
+    if (!map || !Marker || !person || !pos || !ready) {
+      bubbleRef.current?.root.unmount(); bubbleRef.current?.marker.remove(); bubbleRef.current = null;
+      return;
+    }
+    if (!bubbleRef.current) {
+      const el = document.createElement("div");
+      el.className = "person-bubble-anchor";
+      el.addEventListener("click", event => event.stopPropagation());
+      const marker = new Marker({ element: el, anchor: "bottom", offset: [0, -32] }).setLngLat([pos.lng, pos.lat]).addTo(map);
+      bubbleRef.current = { marker, el, root: createRoot(el) };
+    }
+    bubbleRef.current.root.render(<PersonBubble key={person.id} person={person} self={people.find(p => p.isSelf)} addressAllowed={addressAllowed} onAllow={onAllowAddress} />);
+  }, [selected, people, ready, addressAllowed, onAllowAddress]);
 
   // Odaugrás: minden újabb kérésre lágy kameramozgással középre áll.
   useEffect(() => {
