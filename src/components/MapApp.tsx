@@ -149,7 +149,7 @@ export default function MapApp() {
   const publishSelf = () => {
     const last = selfTrackRef.current.at(-1);
     if (!prefsRef.current.sharing || !last || Date.now() - last.t > 15000) return;
-    net.sendLocation({ lat: last.lat, lng: last.lng, t: last.t, speed: selfMetaRef.current?.speed ?? null, acc: selfMetaRef.current?.acc ?? null, heading: headingRef.current.angle, battery: batteryRef.current, since: sinceRef.current, transport: transportRef.current.mode });
+    net.sendLocation({ lat: last.lat, lng: last.lng, t: last.t, speed: selfMetaRef.current?.speed ?? null, acc: selfMetaRef.current?.acc ?? null, heading: headingRef.current.angle, battery: batteryRef.current, since: sinceRef.current, stoppedSince: stopRef.current?.since ?? null, transport: transportRef.current.mode });
   };
   const publishRef = useRef(publishSelf);
   publishRef.current = publishSelf;
@@ -261,7 +261,7 @@ export default function MapApp() {
   }, []);
   const netPeopleRef = useRef<Record<string, RemotePerson>>({});
 
-  const net = usePeerNetwork({ rooms, deviceId, profile, onRoomClosed, onShareRequest });
+  const net = usePeerNetwork({ rooms, deviceId, profile: stopped ? null : profile, onRoomClosed, onShareRequest });
   netPeopleRef.current = net.people;
 
   // Saját GPS: mindig fut, privát; csak a megosztás kapcsoló küld a szobatársaknak.
@@ -367,7 +367,7 @@ export default function MapApp() {
       list.push({ id: SELF, name: profile.name, avatarUrl: profile.avatar, color: SELF_COLOR, points: selfTrack, isSelf: true, heading: selfHeading, battery, stoppedSince: stopRef.current?.since ?? null });
     for (const p of remote) {
       if (p.sharing && p.points.length)
-        list.push({ id: p.deviceId, name: p.name, avatarUrl: p.avatar, color: p.color, points: p.points, heading: p.heading, battery: p.battery, stoppedSince: null });
+        list.push({ id: p.deviceId, name: p.name, avatarUrl: p.avatar, color: p.color, points: p.points, heading: p.heading, battery: p.battery, stoppedSince: p.stoppedSince });
     }
     return list;
   }, [profile, selfTrack, remote, selfHeading, battery]);
@@ -1101,7 +1101,9 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
   }, [room?.color]);
   if (!room) return null;
   const base = shareBase();
-  const link = base ? buildRoomLink(base, room.token, room.name, room.color ?? DEFAULT_ROOM_COLOR, room.ownerKey) : null;
+  const repo = releaseRepository();
+  const rawLink = base ? buildRoomLink(base, room.token, room.name, room.color ?? DEFAULT_ROOM_COLOR, room.ownerKey) : null;
+  const link = rawLink && repo ? `${rawLink}&forras=${encodeURIComponent(repo)}` : rawLink;
   const code = formatRoomToken(room.token);
   const text = link ?? code;
 
