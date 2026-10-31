@@ -53,15 +53,14 @@ if (!service.includes("sharingLock.acquire")) {
 }
 // Android 14+ (API 34+): startForeground() gets the explicit "location" service type.
 // Defensive: any failure is logged and falls back to the plain call, so it can never break location updates.
-// DIAGNOSTIC_TOASTS shows the real outcome on screen (set to false once the notification works).
-const DIAGNOSTIC_TOASTS = true;
+// DIAGNOSTICS records what the service really does and shows it as a Toast when the app comes back to the foreground
+// (set to false once the notification works).
+const DIAGNOSTICS = true;
 service = readFileSync(servicePath, "utf8");
 if (!service.includes("FOREGROUND_SERVICE_TYPE_LOCATION")) {
   const call = /([ \t]*)startForeground\(\s*NOTIFICATION_ID\s*,\s*notification\s*\);/;
   if (!call.test(service)) throw new Error(`Pinned native source changed: ${servicePath} (startForeground call not found)`);
-  const toast = (i, expr) => DIAGNOSTIC_TOASTS
-    ? `${i}{ final String ppMsg = ${expr}; new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> android.widget.Toast.makeText(getApplicationContext(), ppMsg, android.widget.Toast.LENGTH_LONG).show()); }\n`
-    : "";
+  const diag = (i, expr) => (DIAGNOSTICS ? `${i}ppDiag(${expr});\n` : "");
   const enabled = '((android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE)).areNotificationsEnabled()';
   service = service.replace(call, (_m, i) => `${i}try {
 ${i}    if (android.os.Build.VERSION.SDK_INT >= 34) {
@@ -69,14 +68,40 @@ ${i}        startForeground(NOTIFICATION_ID, notification, android.content.pm.Se
 ${i}    } else {
 ${i}        startForeground(NOTIFICATION_ID, notification);
 ${i}    }
-${toast(i + "    ", `"PP: startForeground OK, ertesites engedelyezve=" + ${enabled}`)}${i}} catch (Exception typedStart) {
+${diag(i + "    ", `"startForeground OK, ertesites engedelyezve=" + ${enabled}`)}${i}} catch (Exception typedStart) {
 ${i}    android.util.Log.e("PrivatePlace", "startForeground(location) failed, retrying without type", typedStart);
-${toast(i + "    ", `"PP: startForeground HIBA: " + typedStart`)}${i}    try {
+${diag(i + "    ", `"startForeground HIBA: " + typedStart`)}${i}    try {
 ${i}        startForeground(NOTIFICATION_ID, notification);
 ${i}    } catch (Exception plainStart) {
 ${i}        android.util.Log.e("PrivatePlace", "plain startForeground failed", plainStart);
-${toast(i + "        ", `"PP: tipus nelkuli hiba is: " + plainStart`)}${i}    }
+${diag(i + "        ", `"tipus nelkuli hiba is: " + plainStart`)}${i}    }
 ${i}}`);
+  if (DIAGNOSTICS) {
+    const helpers = `private void ppDiag(String message) {
+        try {
+            android.content.SharedPreferences prefs = getSharedPreferences("privateplace.diag", MODE_PRIVATE);
+            String old = prefs.getString("log", "");
+            prefs.edit().putString("log", old.isEmpty() ? message : old + " | " + message).apply();
+        } catch (Exception ignored) {}
+    }
+    private void ppShowDiag() {
+        try {
+            final android.content.SharedPreferences prefs = getSharedPreferences("privateplace.diag", MODE_PRIVATE);
+            final String log = prefs.getString("log", "");
+            if (log.isEmpty()) return;
+            prefs.edit().remove("log").apply();
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> android.widget.Toast.makeText(getApplicationContext(), "PP: " + log, android.widget.Toast.LENGTH_LONG).show());
+        } catch (Exception ignored) {}
+    }
+    `;
+    const binderNeedle = "private final IBinder binder = new LocalBinder();";
+    if (!service.includes(binderNeedle)) throw new Error(`Pinned native source changed: ${servicePath} (binder field not found)`);
+    service = service.replace(binderNeedle, helpers + binderNeedle);
+    // Optional instrumentation: skipped silently when the pinned source looks different.
+    service = service.replace(/(void\s+onActivityStarted\s*\(\s*\)\s*\{)/, "$1\n            ppShowDiag();\n            ppDiag(\"onActivityStarted\");");
+    service = service.replace(/(void\s+onActivityStopped\s*\(\s*\)\s*\{)/, "$1\n            ppDiag(\"onActivityStopped notification=\" + (notification != null));");
+    service = service.replace(/(void\s+addWatcher\s*\(([^)]*Notification\s+(\w+)[^)]*)\)\s*\{)/, (m, _all, _params, name) => `${m}\n            ppDiag("addWatcher notification=" + (${name} != null));`);
+  }
   writeFileSync(servicePath, service);
 }
 const java = "android/app/src/main/java/hu/privateplace/app";
