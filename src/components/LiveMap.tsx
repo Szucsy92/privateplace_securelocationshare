@@ -70,6 +70,30 @@ function fillAvatar(el: HTMLDivElement, person: MapPerson) {
   el.setAttribute("aria-label", `${person.name} adatai`);
 }
 
+/** Térképfeliratok: a betűméret szorzója (1.25 = +25%) és a kontúr vastagsága képpontban. Itt állítható. */
+const LABEL_SCALE = 1.25;
+const LABEL_HALO_WIDTH = 2;
+
+/** Az alapstílus eredeti betűméretei: a témaváltáskor nem szabad újra megszorozni az már megnagyított értéket. */
+const baseTextSize = new Map<string, unknown>();
+
+/** Szám, interpolate, step vagy régi stops formátumú betűméret skálázása; ismeretlen kifejezéshez nem nyúl. */
+function scaleTextSize(size: unknown, k: number): unknown {
+  if (typeof size === "number") return size * k;
+  if (Array.isArray(size)) {
+    const op = size[0];
+    if (op === "interpolate" || op === "interpolate-hcl" || op === "interpolate-lab")
+      return size.map((x, i) => (i >= 4 && i % 2 === 0 ? scaleTextSize(x, k) : x));
+    if (op === "step") return size.map((x, i) => (i >= 2 && i % 2 === 0 ? scaleTextSize(x, k) : x));
+    return size;
+  }
+  if (size && typeof size === "object" && Array.isArray((size as { stops?: unknown }).stops)) {
+    const f = size as { stops: [number, unknown][] };
+    return { ...f, stops: f.stops.map(([z, v]) => [z, scaleTextSize(v, k)]) };
+  }
+  return size;
+}
+
 function applyMapContrast(map: MlMap, theme: "dark" | "light") {
   const css = getComputedStyle(document.documentElement);
   const color = (role: string) => css.getPropertyValue(`--map-${theme}-${role}`).trim();
@@ -92,7 +116,10 @@ function applyMapContrast(map: MlMap, theme: "dark" | "light") {
     if (layer.type === "symbol" && layer.layout?.["text-field"]) {
       map.setPaintProperty(id, "text-color", color("label"));
       map.setPaintProperty(id, "text-halo-color", color("halo"));
-      map.setPaintProperty(id, "text-halo-width", 1.3);
+      map.setPaintProperty(id, "text-halo-width", LABEL_HALO_WIDTH);
+      if (!baseTextSize.has(id)) baseTextSize.set(id, layer.layout?.["text-size"]);
+      const base = baseTextSize.get(id);
+      if (base !== undefined) map.setLayoutProperty(id, "text-size", scaleTextSize(base, LABEL_SCALE) as never);
     }
   }
 }
