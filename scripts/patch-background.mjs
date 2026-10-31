@@ -1,6 +1,6 @@
 // Deterministic CI patch for the pinned background-geolocation 1.3.1 Android source.
 // No generated Android folders or modified installed dependencies are committed.
-import { readFileSync, writeFileSync, cpSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, cpSync, mkdirSync } from "node:fs";
 const root = "node_modules/@capacitor-community/background-geolocation/android/src/main/java/com/equimaps/capacitor_background_geolocation/";
 function patch(file, needle, replacement) {
   const source = readFileSync(file, "utf8");
@@ -50,29 +50,6 @@ if (!service.includes("sharingLock.acquire")) {
             if (!sharingLock.isHeld()) sharingLock.acquire();`);
   service = service.replace("stopForeground(true);\n                    }", "stopForeground(true);\n                        if (sharingLock != null && sharingLock.isHeld()) sharingLock.release();\n                    }");
   writeFileSync(servicePath, service);
-}
-// Android 14+ (API 34): startForeground() must name the foreground service type, otherwise the system throws
-// (MissingForegroundServiceTypeException) or silently drops the ongoing notification.
-// Applied to the plugin's own call, independently of the wake lock patch above; safe to run repeatedly.
-service = readFileSync(servicePath, "utf8");
-if (!service.includes("FOREGROUND_SERVICE_TYPE_LOCATION")) {
-  const call = /([ \t]*)startForeground\(\s*NOTIFICATION_ID\s*,\s*notification\s*\);/;
-  if (!call.test(service)) throw new Error(`Pinned native source changed: ${servicePath} (startForeground call not found)`);
-  service = service.replace(call, (_m, indent) => `${indent}if (android.os.Build.VERSION.SDK_INT >= 34) { // Android 14+
-${indent}    startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
-${indent}} else {
-${indent}    startForeground(NOTIFICATION_ID, notification);
-${indent}}`);
-  writeFileSync(servicePath, service);
-}
-// The type passed in code must also be declared on the <service> in the manifest, or Android 14 rejects it.
-const libManifestPath = root.replace("java/com/equimaps/capacitor_background_geolocation/", "AndroidManifest.xml");
-if (existsSync(libManifestPath)) {
-  const libManifest = readFileSync(libManifestPath, "utf8");
-  const serviceTag = /<service\b[^>]*BackgroundGeolocationService[^>]*?(\/?)>/.exec(libManifest)?.[0];
-  if (serviceTag && !/android:foregroundServiceType=/.test(serviceTag)) {
-    writeFileSync(libManifestPath, libManifest.replace(serviceTag, serviceTag.replace("<service", '<service android:foregroundServiceType="location"')));
-  }
 }
 const java = "android/app/src/main/java/hu/privateplace/app";
 const manifestPath = "android/app/src/main/AndroidManifest.xml";
