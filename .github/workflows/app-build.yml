@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       public_url:
-        description: "A közzétett weboldal címe a meghívó linkekhez (üresen hagyva csak kód és QR-kód)"
+        description: "A közzétett weboldal címe a meghívó linkekhez. Üresen hagyva a PUBLIC_APP_URL repository változó értéke számít (GitHub → Settings → Secrets and variables → Actions → Variables); ha az sincs, csak kód és QR-kód"
         required: false
         default: ""
 
@@ -57,7 +57,7 @@ jobs:
 
       - name: Webes felület (statikus) építése
         env:
-          VITE_PUBLIC_APP_URL: ${{ inputs.public_url }}
+          VITE_PUBLIC_APP_URL: ${{ inputs.public_url || vars.PUBLIC_APP_URL }}
           VITE_RELEASE_REPOSITORY: ${{ github.repository }}
           VITE_APP_VERSION_CODE: ${{ github.run_number }}
           VITE_TURN_URLS: ${{ secrets.TURN_URLS }}
@@ -130,7 +130,7 @@ jobs:
 
       - name: Webes felület (statikus) építése
         env:
-          VITE_PUBLIC_APP_URL: ${{ inputs.public_url }}
+          VITE_PUBLIC_APP_URL: ${{ inputs.public_url || vars.PUBLIC_APP_URL }}
           VITE_RELEASE_REPOSITORY: ${{ github.repository }}
           VITE_APP_VERSION_CODE: ${{ github.run_number }}
           VITE_TURN_URLS: ${{ secrets.TURN_URLS }}
