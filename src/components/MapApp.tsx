@@ -460,7 +460,6 @@ export default function MapApp() {
       <header className="glass z-10 flex shrink-0 items-center justify-between gap-2 px-3 py-2">
         <div className="min-w-0 flex-1">
           <h1 className="font-display text-base font-bold">Private Place</h1>
-          <span className="header-signal" data-status={sharingStatus} aria-label={sharingStatus === "live" ? "Élő" : sharingStatus === "search" ? "Keresés" : sharingStatus === "lost" ? "Nincs jel" : "Kikapcsolva"} />
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <SharingControl status={sharingStatus} onToggle={() => setSharing(!prefs.sharing)} />
