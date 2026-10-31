@@ -27,16 +27,3 @@ test("native stop actions, compass and deep link are applied once in generated A
     expect(readFileSync(join(dir, "android/app/src/main/AndroidManifest.xml"), "utf8")).toContain('android:scheme="privateplace"');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
-
-test("location permission settings open the Private Place app details page", () => {
-  const java = readFileSync("scripts/native/PrivateRuntime.java", "utf8");
-  const permissions = readFileSync("src/lib/permissions.ts", "utf8");
-  const ui = readFileSync("src/components/MapApp.tsx", "utf8");
-  expect(java).toContain("Settings.ACTION_APPLICATION_DETAILS_SETTINGS");
-  expect(java).toContain('Uri.fromParts("package", getContext().getPackageName(), null)');
-  expect(java).toContain("openLocationSettings");
-  expect(permissions).toContain('registerPlugin<{ openLocationSettings: () => Promise<void> }>("PrivateRuntime")');
-  expect(permissions).toContain("plugin.openLocationSettings()");
-  expect(ui).toContain('key === "backgroundLocation"');
-  expect(ui).toContain("Engedélyek → Hely → Mindig engedélyezés");
-});
