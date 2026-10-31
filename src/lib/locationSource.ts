@@ -27,14 +27,22 @@ async function getBackgroundPlugin() {
   return bgPlugin;
 }
 
-/** Android 13+: az állandó értesítéshez engedély kell; ha elutasítják, a követés akkor is fut. */
+/**
+ * Android 13+: a háttérszolgáltatás indítása előtt kérjük el az értesítési engedélyt.
+ * Legfeljebb 12 másodpercig várunk rá: a GPS-követés akkor is elindul, ha elutasítják vagy a kérés elakad.
+ */
 async function ensureNotificationPermission() {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const { LocalNotifications } = await import("@capacitor/local-notifications");
-    const status = await LocalNotifications.checkPermissions();
-    if (status.display !== "granted") await LocalNotifications.requestPermissions();
+    const { checkNotificationState, requestNotificationState } = await import("./privateRuntime");
+    const ask = (async () => {
+      if ((await checkNotificationState()) !== "granted") await requestNotificationState();
+    })();
+    await Promise.race([ask, new Promise<void>((resolve) => { timer = setTimeout(resolve, 12000); })]);
   } catch {
     // nem kritikus
+  } finally {
+    clearTimeout(timer);
   }
 }
 
