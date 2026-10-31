@@ -9,8 +9,9 @@ on:
         required: false
         default: ""
 
+# Alapból csak olvasás; írási jog csak a kiadást készítő lépésnek van.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   stamp:
@@ -52,7 +53,7 @@ jobs:
           SDKM=$(ls "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n1)
           if [ -n "$SDKM" ]; then yes | "$SDKM" --licenses > /dev/null || true; fi
 
-      - run: bun install
+      - run: bun install --frozen-lockfile
 
       - name: Webes felület (statikus) építése
         env:
@@ -75,18 +76,25 @@ jobs:
         working-directory: android
         env:
           KS_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           chmod +x gradlew
           mkdir -p ../out
-          if [ -n "$KS_PASSWORD" ]; then
+          # A kulcsfájl elsődlegesen a titokból áll vissza; átmenetként a régi signing/ fájl a tartalék.
+          KS_FILE="$GITHUB_WORKSPACE/signing/private-place.keystore"
+          if [ -n "$KS_BASE64" ]; then
+            KS_FILE="$RUNNER_TEMP/private-place.keystore"
+            printf '%s' "$KS_BASE64" | base64 -d > "$KS_FILE"
+          fi
+          if [ -n "$KS_PASSWORD" ] && [ -f "$KS_FILE" ]; then
             ./gradlew assembleRelease --no-daemon \
-              -Pandroid.injected.signing.store.file="$GITHUB_WORKSPACE/signing/private-place.keystore" \
+              -Pandroid.injected.signing.store.file="$KS_FILE" \
               -Pandroid.injected.signing.store.password="$KS_PASSWORD" \
               -Pandroid.injected.signing.key.alias=privateplace \
               -Pandroid.injected.signing.key.password="$KS_PASSWORD"
             cp app/build/outputs/apk/release/app-release.apk "../out/private-place-${BUILD_STAMP}.apk"
           else
-            echo "::warning::Nincs ANDROID_KEYSTORE_PASSWORD titok – teszt aláírással készül."
+            echo "::warning::Hiányzik az ANDROID_KEYSTORE_PASSWORD titok vagy a kulcsfájl – teszt aláírással készül."
             ./gradlew assembleDebug --no-daemon
             cp app/build/outputs/apk/debug/app-debug.apk "../out/private-place-${BUILD_STAMP}-teszt.apk"
           fi
@@ -118,7 +126,7 @@ jobs:
         with:
           node-version: 22
 
-      - run: bun install
+      - run: bun install --frozen-lockfile
 
       - name: Webes felület (statikus) építése
         env:
@@ -160,6 +168,8 @@ jobs:
     needs: [stamp, android, ios]
     if: ${{ always() && (needs.android.result == 'success' || needs.ios.result == 'success') }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
