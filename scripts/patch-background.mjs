@@ -51,6 +51,24 @@ if (!service.includes("sharingLock.acquire")) {
   service = service.replace("stopForeground(true);\n                    }", "stopForeground(true);\n                        if (sharingLock != null && sharingLock.isHeld()) sharingLock.release();\n                    }");
   writeFileSync(servicePath, service);
 }
+// Android 14+ (API 34+): startForeground() gets the explicit "location" service type.
+// Defensive on purpose: any failure is logged and falls back to the plain call, so it can never break location updates.
+service = readFileSync(servicePath, "utf8");
+if (!service.includes("FOREGROUND_SERVICE_TYPE_LOCATION")) {
+  const call = /([ \t]*)startForeground\(\s*NOTIFICATION_ID\s*,\s*notification\s*\);/;
+  if (!call.test(service)) throw new Error(`Pinned native source changed: ${servicePath} (startForeground call not found)`);
+  service = service.replace(call, (_m, i) => `${i}try {
+${i}    if (android.os.Build.VERSION.SDK_INT >= 34) {
+${i}        startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+${i}    } else {
+${i}        startForeground(NOTIFICATION_ID, notification);
+${i}    }
+${i}} catch (Exception typedStart) {
+${i}    android.util.Log.e("PrivatePlace", "startForeground(location) failed, retrying without type", typedStart);
+${i}    startForeground(NOTIFICATION_ID, notification);
+${i}}`);
+  writeFileSync(servicePath, service);
+}
 const java = "android/app/src/main/java/hu/privateplace/app";
 const manifestPath = "android/app/src/main/AndroidManifest.xml";
 let manifest = readFileSync(manifestPath, "utf8");
