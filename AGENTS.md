@@ -34,5 +34,3 @@
 - Preserve original GPS measurement timestamps in peer replays and heartbeats; update metadata separately and never make stale coordinates appear freshly measured.
 - Transport and stop-duration calculations live in pure tested modules; manual transport overrides persist for the running session until automatic mode is explicitly restored.
 - Address lookup is opt-in and runs only for the opened marker using the public OSM address service, because querying an address discloses that coordinate to a third party.
-- Android 14+ requires the foreground service type: scripts/patch-background.mjs makes startForeground pass FOREGROUND_SERVICE_TYPE_LOCATION (SDK_INT >= 34) and ensures the plugin manifest declares foregroundServiceType="location"; keep the patch idempotent and fail loudly if the pinned source changes.
-- App settings and the POST_NOTIFICATIONS prompt go through the app-owned PrivateRuntime plugin (src/lib/privateRuntime.ts is the single registration point); locationSource asks for notification permission before starting the background watcher.
