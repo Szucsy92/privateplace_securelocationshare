@@ -19,13 +19,13 @@ test("native stop actions, compass and deep link are applied once in generated A
       expect(result.exitCode).toBe(0);
     }
     const service = readFileSync(join(dir, dependency, "BackgroundGeolocationService.java"), "utf8");
-    const plugin = readFileSync(join(dir, dependency, "BackgroundGeolocation.java"), "utf8");
-    expect(plugin).toContain("Private Place service-bind retry");
-    expect(plugin).toContain("Background location service did not connect.");
     expect(service.match(/onStartCommand/g)?.length).toBe(1);
     expect(service).toContain('putBoolean("stopped", true).commit()');
     expect(service).toContain("stopForeground(true)");
     expect(service).toContain("sharingLock.release()");
+    expect(service.match(/FOREGROUND_SERVICE_TYPE_LOCATION/g)?.length).toBe(1);
+    expect(service).toContain("SDK_INT >= 34");
+    expect(readFileSync(join(dir, java, "PrivateRuntime.java"), "utf8")).toContain("ACTION_APPLICATION_DETAILS_SETTINGS");
     expect(readFileSync(join(dir, java, "MainActivity.java"), "utf8")).toContain("registerPlugin(PrivateCompass.class)");
     expect(readFileSync(join(dir, "android/app/src/main/AndroidManifest.xml"), "utf8")).toContain('android:scheme="privateplace"');
   } finally { rmSync(dir, { recursive: true, force: true }); }

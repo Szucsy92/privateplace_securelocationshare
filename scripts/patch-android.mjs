@@ -80,25 +80,8 @@ if (!strings.includes("capacitor_background_geolocation_notification_channel_nam
     "</resources>",
     '    <string name="capacitor_background_geolocation_notification_channel_name">Helymegosztás</string>\n</resources>',
   );
+  writeFileSync(stringsPath, strings);
 }
-if (!strings.includes("capacitor_background_geolocation_notification_icon")) {
-  strings = strings.replace(
-    "</resources>",
-    '    <string name="capacitor_background_geolocation_notification_icon">drawable/ic_tracking</string>\n</resources>',
-  );
-}
-writeFileSync(stringsPath, strings);
-
-// Android status-bar notifications require a dedicated, monochrome small icon.
-// The adaptive launcher icon is not a valid substitute on many Android skins.
-const drawableDir = `${resDir}/drawable`;
-mkdirSync(drawableDir, { recursive: true });
-writeFileSync(`${drawableDir}/ic_tracking.xml`, `<?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-    <path android:fillColor="#FFFFFFFF" android:pathData="M12,2C8.13,2 5,5.13 5,9c0,5.25 7,13 7,13s7,-7.75 7,-13c0,-3.87 -3.13,-7 -7,-7zM12,11.5A2.5,2.5 0,1 1,12 6.5a2.5,2.5 0,0 1,0 5z" />
-</vector>
-`);
 
 // 4) Dátumos verzió (APP_VERSION_NAME pl. 2026.10.23-2336, APP_VERSION_CODE = futás sorszáma)
 const gradlePath = "android/app/build.gradle";
