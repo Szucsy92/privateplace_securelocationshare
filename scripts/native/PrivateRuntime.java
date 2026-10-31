@@ -4,8 +4,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.net.Uri;
-import android.provider.Settings;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -32,17 +30,6 @@ public class PrivateRuntime extends Plugin {
         data.put("stopped", prefs.getBoolean("stopped", false));
         prefs.edit().remove("stopped").apply();
         call.resolve(data);
-    }
-    /** Opens this app's own system settings page (Permissions → Location → "Allow all the time", Notifications). */
-    @PluginMethod public void openAppSettings(PluginCall call) {
-        try {
-            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", getContext().getPackageName(), null));
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            getContext().startActivity(intent);
-            call.resolve();
-        } catch (Exception e) {
-            call.reject("Nem nyitható meg az alkalmazás beállítása", e);
-        }
     }
     @Override protected void handleOnDestroy() {
         LocalBroadcastManager.getInstance(getContext()).unregisterReceiver(receiver);
