@@ -144,6 +144,8 @@ export default function MapApp() {
   const [exitConfirm, setExitConfirm] = useState(false);
   const [stopped, setStopped] = useState(false);
   const [addressAllowed, setAddressAllowed] = useState(false);
+  const [nativeStopReady, setNativeStopReady] = useState(false);
+  const invitationRepoRef = useRef<string | null>(null);
   const selfMetaRef = useRef(selfMeta);
   selfMetaRef.current = selfMeta;
   const publishSelf = () => {
@@ -166,7 +168,7 @@ export default function MapApp() {
   }, [mounted, profile !== null, stopped]);
   useEffect(() => {
     if (!mounted) return;
-    return watchNativeStop(exit => { setSharingRef.current(false); if (exit) setStopped(true); });
+    return watchNativeStop(exit => { setSharingRef.current(false); if (exit) setStopped(true); }, () => setNativeStopReady(true));
   }, [mounted]);
   useEffect(() => {
     if (!nativeApp) return;
@@ -202,6 +204,7 @@ export default function MapApp() {
     setProfile(p);
     setPrefs(loadPrefs());
     setRooms(loadRooms());
+    invitationRepoRef.current = releaseRepository(window.location.hash);
     const parsed = window.location.hash ? parseRoomInput(window.location.hash) : null;
     if (parsed) {
       setPendingJoin(parsed);
@@ -268,7 +271,7 @@ export default function MapApp() {
   // Az Android-alkalmazásban bekapcsolt megosztásnál lezárt képernyőnél is folytatódik.
   const backgroundSharing = nativeApp && prefs.sharing;
   useEffect(() => {
-    if (!mounted || !profile || stopped || dialog === "welcome" || dialog === "permissions") return;
+    if (!mounted || !profile || stopped || !nativeStopReady || dialog === "welcome" || dialog === "permissions") return;
     setGpsStatus((s) => (s === "live" ? s : "waiting"));
     return startLocationWatch({
       background: backgroundSharing,
@@ -294,7 +297,7 @@ export default function MapApp() {
       onError: (err) => setGpsStatus(err),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, profile !== null, stopped, gpsRequest, backgroundSharing, dialog === "permissions", dialog === "welcome"]);
+  }, [mounted, profile !== null, stopped, nativeStopReady, gpsRequest, backgroundSharing, dialog === "permissions", dialog === "welcome"]);
 
   // Újraindítás a telefon beállításaiból vagy a háttérből visszatérve.
   useEffect(() => {
@@ -670,7 +673,7 @@ export default function MapApp() {
             </>
           )}
 
-          {dialog === "join" && <JoinPanel initial={pendingJoin} onJoin={joinRoom} onReject={() => { setPendingJoin(null); setDialog(null); }} />}
+          {dialog === "join" && <JoinPanel initial={pendingJoin} repository={invitationRepoRef.current} onJoin={joinRoom} onReject={() => { setPendingJoin(null); setDialog(null); }} />}
 
           {dialog === "share" && shareToken && (
             <SharePanel room={rooms.find((r) => r.token === shareToken) ?? null} onDone={() => setDialog("rooms")} />
@@ -1160,14 +1163,14 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
   );
 }
 
-function JoinPanel({ initial, onJoin, onReject }: { initial: { token: string; name: string | null; color?: RoomColor; ownerKey?: string } | null; onJoin: (token: string, name: string | null, color?: RoomColor, ownerKey?: string) => void; onReject: () => void }) {
+function JoinPanel({ initial, repository, onJoin, onReject }: { initial: { token: string; name: string | null; color?: RoomColor; ownerKey?: string } | null; repository: string | null; onJoin: (token: string, name: string | null, color?: RoomColor, ownerKey?: string) => void; onReject: () => void }) {
   const [value, setValue] = useState(initial ? formatRoomToken(initial.token) : "");
   const [scanning, setScanning] = useState(false);
   const parsed = parseRoomInput(value);
   const name = parsed?.name ?? initial?.name ?? null;
   const [release, setRelease] = useState<AppRelease | null>(null);
   useEffect(() => {
-    const repo = releaseRepository(window.location.hash);
+    const repo = repository ?? releaseRepository(window.location.hash);
     if (!repo) return;
     const controller = new AbortController();
     void latestRelease(repo, controller.signal).then(setRelease).catch(() => {});
