@@ -894,7 +894,7 @@ const PERM_INFO: Record<PermKey, { label: string; hint: string; icon: React.Comp
   location: { label: "Helyzet", hint: "A saját pozíciód a térképen. A hozzávetőleges hely is működik; a „Pontos” jobb.", icon: MapPin },
   backgroundLocation: {
     label: "Helyzet lezárt képernyőnél",
-    hint: "A Private Place alkalmazás adatlapján: Engedélyek → Hely → Mindig engedélyezés. A pontos helyet is kapcsold be.",
+    hint: "A megnyíló beállításokban: Engedélyek → Hely → Mindig engedélyezés.",
     icon: LockKeyhole,
   },
   notifications: { label: "Értesítések", hint: "Jelzi, ha a megosztás a háttérben is fut.", icon: Bell },
@@ -932,14 +932,8 @@ function PermissionsPanel({ native, onDone }: { native: boolean; onDone: () => v
   const askOne = async (key: PermKey) => {
     setBusy(key);
     try {
-      if (key === "backgroundLocation" || (states[key] === "denied" && native)) {
-        await openAppSettings();
-      } else {
-        set(key, await requestPermission(key));
-      }
-    } catch (error) {
-      console.error("Android permission settings could not be opened", error);
-      toast.error("Nem sikerült megnyitni a helyengedélyek beállításait. Nyisd meg kézzel: Alkalmazásinfó → Engedélyek → Hely.");
+      if (states[key] === "denied" && native) await openAppSettings();
+      else set(key, await requestPermission(key));
     } finally {
       setBusy(null);
     }
