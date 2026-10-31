@@ -27,14 +27,17 @@ async function getBackgroundPlugin() {
   return bgPlugin;
 }
 
-/** Android 13+: az állandó értesítéshez engedély kell; ha elutasítják, a követés akkor is fut. */
-async function ensureNotificationPermission() {
+/** Android 13+: háttérkövetéshez látható előtérszolgáltatás-értesítés kell.
+ * Ne induljon el csendben a követés, ha az értesítés engedélye hiányzik.
+ */
+async function ensureNotificationPermission(): Promise<boolean> {
   try {
     const { LocalNotifications } = await import("@capacitor/local-notifications");
-    const status = await LocalNotifications.checkPermissions();
-    if (status.display !== "granted") await LocalNotifications.requestPermissions();
+    let status = await LocalNotifications.checkPermissions();
+    if (status.display !== "granted") status = await LocalNotifications.requestPermissions();
+    return status.display === "granted";
   } catch {
-    // nem kritikus
+    return false;
   }
 }
 
@@ -118,7 +121,10 @@ export function startLocationWatch(opts: {
         if (!stopped && document.visibilityState === "visible" && Date.now() - latestAt > 10000) quickFix();
       }, 12000);
       const plugin = await getBackgroundPlugin();
-      if (opts.background) await ensureNotificationPermission();
+      if (opts.background && !(await ensureNotificationPermission())) {
+        reportError("denied");
+        return;
+      }
       if (stopped) return;
       const id = await plugin.addWatcher({
         ...(opts.background ? {
