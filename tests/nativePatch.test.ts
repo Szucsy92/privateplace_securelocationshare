@@ -23,6 +23,9 @@ test("native stop actions, compass and deep link are applied once in generated A
     expect(service).toContain('putBoolean("stopped", true).commit()');
     expect(service).toContain("stopForeground(true)");
     expect(service).toContain("sharingLock.release()");
+    expect(service.match(/FOREGROUND_SERVICE_TYPE_LOCATION/g)?.length).toBe(1);
+    expect(service).toContain("SDK_INT >= 34");
+    expect(readFileSync(join(dir, java, "PrivateRuntime.java"), "utf8")).toContain("ACTION_APPLICATION_DETAILS_SETTINGS");
     expect(readFileSync(join(dir, java, "MainActivity.java"), "utf8")).toContain("registerPlugin(PrivateCompass.class)");
     expect(readFileSync(join(dir, "android/app/src/main/AndroidManifest.xml"), "utf8")).toContain('android:scheme="privateplace"');
   } finally { rmSync(dir, { recursive: true, force: true }); }
