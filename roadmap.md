@@ -1,11 +1,13 @@
 # Feladatok
 - [x] Indulási hiba javítása: elavult szobatörlési hívás cseréje; 39 teszt sikeres, böngészőben névmegadás, szobalétrehozás és törlés ellenőrizve.
-- [ ] 1. Működés: GPS frissesség, utolsó pont megtartása, háttérfutás, értesítés leállítás/kilépés; közvetlen kapcsolat és később érkező néző friss helyzete.
-- [ ] 2. Számítások: hibrid iránytű 0.8/1.4 m/s és EMA 0.2; akkumulátor; közlekedési mód 20/50 km/h tartós 7 másodperc, megállásvédelem és kézi választás.
-- [ ] 3. Meghívók és felügyelet: QR/APK frissítés, elutasítható csatlakozás, tulajdonosi személyeltávolítás.
-- [ ] 4. Alacsony prioritású felület: kompakt címes térképbuborék idővel, háromsoros kapszulák, lenyíló szobák, közlekedési választó, meleg kőszürke térkép, első kilépési megerősítés.
-- [ ] 5. Legalacsonyabb prioritás: felső kerek play/pause kapcsoló; státuszváltozáskor max. 3 másodperc kiterjedés; menta/sárga/korall pulzálás, szöveg nélküli fejlécpont.
-- [ ] Összevont módosítások és tesztek; valódi böngészős folyamatellenőrzés.
+- [x] GPS-frissesség és eredeti mérési idő megtartása; később érkező nézőnek csak friss pont; natív értesítési leállítás/kilépés és ébrentartás beépítve a CI-előkészítésbe.
+- [x] Számítások: hibrid iránytű 0.8/1.4 m/s és EMA 0.2; natív rotation vector; akkumulátor; közlekedési mód 20/50 km/h tartós 7 másodperc, megállásvédelem és kézi választás.
+- [x] Meghívók: kiadási forrás a hash-ben, APK-verzióadat a kiadásban, elutasítható csatlakozás és alkalmazásmegnyitás; tulajdonosi személyeltávolítás.
+- [x] Felület: kompakt címes térképbuborék idővel (címlekéréshez külön engedély), háromsoros kapszulák, lenyíló szobák, közlekedési választó, kőszürke nappali térkép, első kilépési megerősítés.
+- [x] Felső kerek play/pause kapcsoló; státuszváltozáskor max. 3 másodperc kiterjedés; menta/sárga/korall pulzálás, szöveg nélküli fejlécpont.
+- [x] Tesztek és böngészős helyzetmegjelenítés, megosztáskapcsolás, kézi közlekedési választás, szobalétrehozás/törlés, kilépés-megerősítés és visszatérés ellenőrizve.
+- [ ] Két telefon élő kapcsolata és lezárt képernyős működés: a két böngészős kísérlet időtúllépett, fizikai készülék/új APK szükséges.
+- [ ] QR-letöltés teljes telefonos ellenőrzése: új GitHub kiadás és Android szükséges; böngészős telepítés után a meghívót újra meg kell nyitni, automatikus átvitel nem garantált.
 - [x] Android ikon középre igazítása és biztonságos méretezése.
 - [x] Egyképernyős térkép, kompakt vezérlők, saját helyzet mindig látszik.
 - [x] Független nyílt térkép (OpenStreetMap / MapLibre), kulcs nélkül.
@@ -17,7 +19,7 @@
 - [x] Matt üveg minden felületen (ablakok, értesítések, gombok).
 - [x] Android APK: GitHub Actions gombnyomásos építés.
 - [ ] GitHub összekapcsolása a projekttel (a felhasználó teheti meg a beállításokban).
-- [x] Háttérben (lezárt képernyőnél) futó megosztás az APK-ban, értesítéssel.
+- [ ] Háttérben futó megosztás készüléken ellenőrzése: értesítés/ébrentartás beépítve, megszakításmentesség nincs igazolva.
 - [x] Név: Private Place, saját ikon.
 - [x] Saját továbbító (TURN) támogatása építéskor megadható titkokkal + figyelmeztetés kapcsolódási gondnál.
 - [ ] Továbbító fiók (TURN) beszerzése – a felhasználó döntése, csak szükség esetén.

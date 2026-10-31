@@ -4,20 +4,21 @@ type Runtime = {
   addListener(event: "sharingStopped", callback: (data: { exit: boolean }) => void): Promise<{ remove(): Promise<void> }>;
 };
 /** Native stop actions persist their decision even if JavaScript is suspended. */
-export function watchNativeStop(onStop: (exit: boolean) => void): () => void {
+export function watchNativeStop(onStop: (exit: boolean) => void, onReady: () => void): () => void {
   let cancelled = false;
   let cleanup = () => {};
-  if (!isNativeApp()) return cleanup;
+  if (!isNativeApp()) { onReady(); return cleanup; }
   void (async () => {
     try {
       const { registerPlugin } = await import("@capacitor/core");
       const runtime = registerPlugin<Runtime>("PrivateRuntime");
-      const listener = await runtime.addListener("sharingStopped", ({ exit }) => { if (!cancelled) onStop(exit); });
+      const listener = await runtime.addListener("sharingStopped", ({ exit }) => { if (!cancelled) { onStop(exit); void runtime.consumeStop(); } });
       if (cancelled) { await listener.remove(); return; }
       cleanup = () => { void listener.remove(); };
       const stopped = await runtime.consumeStop();
       if (!cancelled && stopped.stopped) onStop(false);
-    } catch { /* iOS has no Android foreground notification actions. */ }
+      if (!cancelled) onReady();
+    } catch { if (!cancelled) { onStop(false); onReady(); } }
   })();
   return () => { cancelled = true; cleanup(); };
 }
