@@ -40,9 +40,32 @@ if (/android:allowBackup="[^"]*"/.test(appTag)) {
 }
 if (!/<application\b[^>]*android:allowBackup="false"/.test(xml)) fail("Az allowBackup=false nem került be");
 
+// Android 14+ (API 34+) requires the location foreground-service type in BOTH
+// the manifest and startForeground(). The app manifest entry merges with the
+// plugin's service declaration during `npx cap sync android`.
+const locationService = "com.equimaps.capacitor_background_geolocation.BackgroundGeolocationService";
+const escapedServiceName = locationService.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const serviceOpeningTag = new RegExp(`<service\\b(?=[^>]*android:name=["']${escapedServiceName}["'])[^>]*>`);
+if (serviceOpeningTag.test(xml)) {
+  xml = xml.replace(serviceOpeningTag, (tag) => {
+    if (/android:foregroundServiceType=["'][^"']*["']/.test(tag)) {
+      return tag.replace(/android:foregroundServiceType=["'][^"']*["']/, 'android:foregroundServiceType="location"');
+    }
+    const close = tag.endsWith("/>") ? "/>" : ">";
+    return tag.replace(/\s*\/?>$/, ` android:foregroundServiceType="location"${close}`);
+  });
+} else {
+  xml = xml.replace("</application>", `    <service
+        android:name="${locationService}"
+        android:foregroundServiceType="location" />\n</application>`);
+}
+
 writeFileSync(manifestPath, xml);
 for (const e of entries) if (!xml.includes(e)) fail(`Hiányzó engedély: ${e}`);
-console.log("AndroidManifest kiegészítve:", missing.length, "új bejegyzés; allowBackup=false");
+if (!xml.includes(`android:name="${locationService}"`) || !xml.includes('android:foregroundServiceType="location"')) {
+  fail("A háttér-helymeghatározó szolgáltatás location típusa hiányzik az AndroidManifestből");
+}
+console.log("AndroidManifest kiegészítve:", missing.length, "új engedély; location foreground service; allowBackup=false");
 
 // 2) Saját ikon (rétegzett ikon Android 8+ és régi ikonok) + indítókép
 const resDir = "android/app/src/main/res";
