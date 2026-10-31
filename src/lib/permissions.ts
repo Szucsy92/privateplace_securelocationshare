@@ -158,13 +158,6 @@ export async function requestAllPermissions(onUpdate: (key: PermKey, state: Perm
 /** Az alkalmazás rendszerbeállításai (elutasított engedélyhez és a „Mindig engedélyezés”-hez). */
 export async function openAppSettings(): Promise<void> {
   try {
-    const { registerPlugin } = await import("@capacitor/core");
-    await registerPlugin<{ openAppSettings: () => Promise<void> }>("PrivateRuntime").openAppSettings();
-    return;
-  } catch {
-    /* tartalék: a háttér-helymeghatározó bővítmény saját megoldása */
-  }
-  try {
     const plugin = await backgroundPlugin();
     await plugin.openSettings();
   } catch {
