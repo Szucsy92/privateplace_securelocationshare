@@ -1,5 +1,8 @@
 import { isNativeApp } from "./locationSource";
-import { getPrivateRuntime } from "./privateRuntime";
+type Runtime = {
+  consumeStop(): Promise<{ stopped: boolean }>;
+  addListener(event: "sharingStopped", callback: (data: { exit: boolean }) => void): Promise<{ remove(): Promise<void> }>;
+};
 /** Native stop actions persist their decision even if JavaScript is suspended. */
 export function watchNativeStop(onStop: (exit: boolean) => void, onReady: () => void): () => void {
   let cancelled = false;
@@ -7,7 +10,8 @@ export function watchNativeStop(onStop: (exit: boolean) => void, onReady: () => 
   if (!isNativeApp()) { onReady(); return cleanup; }
   void (async () => {
     try {
-      const runtime = await getPrivateRuntime();
+      const { registerPlugin } = await import("@capacitor/core");
+      const runtime = registerPlugin<Runtime>("PrivateRuntime");
       const listener = await runtime.addListener("sharingStopped", ({ exit }) => { if (!cancelled) { onStop(exit); void runtime.consumeStop(); } });
       if (cancelled) { await listener.remove(); return; }
       cleanup = () => { void listener.remove(); };
