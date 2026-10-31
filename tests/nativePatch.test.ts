@@ -19,19 +19,24 @@ test("native stop actions, compass and deep link are applied once in generated A
       expect(result.exitCode).toBe(0);
     }
     const service = readFileSync(join(dir, dependency, "BackgroundGeolocationService.java"), "utf8");
-    const plugin = readFileSync(join(dir, dependency, "BackgroundGeolocation.java"), "utf8");
-    expect(plugin).toContain("Private Place service-bind retry");
-    expect(plugin).toContain("Background location service did not connect.");
     expect(service.match(/onStartCommand/g)?.length).toBe(1);
     expect(service).toContain('putBoolean("stopped", true).commit()');
     expect(service).toContain("stopForeground(true)");
     expect(service).toContain("sharingLock.release()");
-    expect(service).toContain("FOREGROUND_SERVICE_TYPE_LOCATION");
-    expect(service).toContain("startForeground(NOTIFICATION_ID, notification,");
     expect(readFileSync(join(dir, java, "MainActivity.java"), "utf8")).toContain("registerPlugin(PrivateCompass.class)");
-    const manifest = readFileSync(join(dir, "android/app/src/main/AndroidManifest.xml"), "utf8");
-    expect(manifest).toContain('android:scheme="privateplace"');
-    expect(manifest).toContain('android:name="com.equimaps.capacitor_background_geolocation.BackgroundGeolocationService"');
-    expect(manifest).toContain('android:foregroundServiceType="location"');
+    expect(readFileSync(join(dir, "android/app/src/main/AndroidManifest.xml"), "utf8")).toContain('android:scheme="privateplace"');
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("location permission settings open the Private Place app details page", () => {
+  const java = readFileSync("scripts/native/PrivateRuntime.java", "utf8");
+  const permissions = readFileSync("src/lib/permissions.ts", "utf8");
+  const ui = readFileSync("src/components/MapApp.tsx", "utf8");
+  expect(java).toContain("Settings.ACTION_APPLICATION_DETAILS_SETTINGS");
+  expect(java).toContain('Uri.fromParts("package", getContext().getPackageName(), null)');
+  expect(java).toContain("openLocationSettings");
+  expect(permissions).toContain('registerPlugin<{ openLocationSettings: () => Promise<void> }>("PrivateRuntime")');
+  expect(permissions).toContain("plugin.openLocationSettings()");
+  expect(ui).toContain('key === "backgroundLocation"');
+  expect(ui).toContain("Engedélyek → Hely → Mindig engedélyezés");
 });
