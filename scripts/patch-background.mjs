@@ -102,6 +102,29 @@ if (!service.includes("FOREGROUND_SERVICE_TYPE_LOCATION")) {
 const java = "android/app/src/main/java/hu/privateplace/app";
 const manifestPath = "android/app/src/main/AndroidManifest.xml";
 let manifest = readFileSync(manifestPath, "utf8");
+// Android 14+ rejects startForeground(..., LOCATION) unless the service itself
+// declares foregroundServiceType="location" in the final app manifest.
+// The dependency manifest is merged by Gradle, so patch the app manifest explicitly.
+const locationServiceName = "com.equimaps.capacitor_background_geolocation.BackgroundGeolocationService";
+const serviceTagPattern = /<service\b(?=[^>]*android:name=["'][^"']*BackgroundGeolocationService["'])[^>]*\/?\s*>/;
+const existingService = manifest.match(serviceTagPattern)?.[0];
+if (existingService) {
+  let updatedService = existingService;
+  if (/android:foregroundServiceType=["'][^"']*["']/.test(updatedService)) {
+    updatedService = updatedService.replace(/android:foregroundServiceType=["'][^"']*["']/, 'android:foregroundServiceType="location"');
+  } else {
+    updatedService = updatedService.replace(/\s*\/?\s*>$/, ' android:foregroundServiceType="location" />');
+  }
+  manifest = manifest.replace(existingService, updatedService);
+} else {
+  const applicationClose = manifest.lastIndexOf("</application>");
+  if (applicationClose < 0) throw new Error("AndroidManifest.xml: missing </application>; cannot declare location foreground service");
+  const declaration = `    <service android:name="${locationServiceName}" android:exported="false" android:foregroundServiceType="location" />\n`;
+  manifest = manifest.slice(0, applicationClose) + declaration + manifest.slice(applicationClose);
+}
+if (!manifest.includes('android:foregroundServiceType="location"')) {
+  throw new Error("AndroidManifest.xml: location foreground service type was not applied");
+}
 if (!manifest.includes('android:scheme="privateplace"')) {
   manifest = manifest.replace('</activity>', `<intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -109,8 +132,9 @@ if (!manifest.includes('android:scheme="privateplace"')) {
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="privateplace" android:host="join" />
             </intent-filter></activity>`);
-  writeFileSync(manifestPath, manifest);
 }
+// Always persist the manifest: the service type may have changed even when the deep link already existed.
+writeFileSync(manifestPath, manifest);
 mkdirSync(java, { recursive: true });
 for (const name of ["PrivateCompass", "PrivateRuntime"]) cpSync(`scripts/native/${name}.java`, `${java}/${name}.java`);
 patch(`${java}/MainActivity.java`, "public class MainActivity extends BridgeActivity {}", `public class MainActivity extends BridgeActivity {
