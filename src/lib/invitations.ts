@@ -34,15 +34,17 @@ export async function latestRelease(repo: string, signal?: AbortSignal): Promise
   const init = signal ? { signal } : {};
   const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, init);
   if (!response.ok) return null;
-  const data = (await response.json()) as { assets?: { name: string; browser_download_url: string }[] };
+  const data = (await response.json()) as { tag_name?: string; assets?: { name: string; browser_download_url: string }[] };
   const meta = data.assets?.find((a) => a.name === "private-place-release.json");
   const apk = data.assets?.find((a) => a.name === "private-place-latest.apk");
   if (!meta || !apk || !validApkUrl(apk.browser_download_url)) return null;
   const metadata = await fetch(meta.browser_download_url, init).catch(() => null);
-  if (!metadata?.ok) return { versionCode: 0, version: "", apk: apk.browser_download_url };
+  // GitHub release assets may deny browser CORS; the dated tag also ends in the version code.
+  const tagCode = Number(data.tag_name?.match(/-(\d+)$/)?.[1] ?? 0);
+  if (!metadata?.ok) return { versionCode: tagCode, version: "", apk: apk.browser_download_url };
   const values = (await metadata.json().catch(() => ({}))) as Partial<AppRelease>;
   return {
-    versionCode: Number.isInteger(values.versionCode) ? (values.versionCode as number) : 0,
+    versionCode: Number.isInteger(values.versionCode) ? (values.versionCode as number) : tagCode,
     version: typeof values.version === "string" ? values.version.slice(0, 40) : "",
     apk: apk.browser_download_url,
   };
