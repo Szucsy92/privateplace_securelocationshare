@@ -603,7 +603,8 @@ export default function MapApp() {
           onInteractOutside={(e) => dialog === "welcome" && e.preventDefault()}
           onEscapeKeyDown={(e) => dialog === "welcome" && e.preventDefault()}
         >
-          {dialog === "welcome" && (
+          {exitConfirm && dialog === "welcome" && <><PanelHeader title="Kilépsz az alkalmazásból?" description="A helymegosztás leáll. A térkép használatához meg kell adnod a nevedet." /><div className="flex justify-end gap-2 p-5"><Button variant="outline" onClick={() => setExitConfirm(false)}>Mégsem</Button><Button variant="destructive" onClick={() => void exitApp()}><LogOut />Kilépés</Button></div></>}
+          {dialog === "welcome" && !exitConfirm && (
             <ProfileForm
               title="Üdv a Private Place-ben"
               description="Nincs regisztráció és nincs jelszó. A neved és a képed csak ezen a telefonon tárolódik, és csak a szobatársaid látják."
@@ -824,7 +825,6 @@ export default function MapApp() {
           )}
         </DialogContent>
       </Dialog>
-      <Dialog open={exitConfirm} onOpenChange={setExitConfirm}><DialogContent className="glass-dialog"><DialogHeader><DialogTitle>Kilépsz az alkalmazásból?</DialogTitle><DialogDescription>A helymegosztás leáll. A térkép használatához meg kell adnod a nevedet.</DialogDescription></DialogHeader><div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setExitConfirm(false)}>Mégsem</Button><Button variant="destructive" onClick={() => void exitApp()}><LogOut />Kilépés</Button></div></DialogContent></Dialog>
     </div>
   );
 }

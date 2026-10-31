@@ -95,16 +95,16 @@
 --map-dark-park: #28433c;
 --map-dark-label: #eef0fa;
 --map-dark-halo: #171a2a;
---map-light-background: #efe9df;
---map-light-water: #a6d6e0;
---map-light-building: #d6cbb8;
---map-light-building-edge: #a39580;
---map-light-road: #ffffff;
---map-light-road-major: #f5c842;
---map-light-road-casing: #bdb3a0;
---map-light-park: #cde2c0;
---map-light-label: #2c3347;
---map-light-halo: #ffffff;
+--map-light-background: #d6d4cf;
+--map-light-water: #8ba9b1;
+--map-light-building: #b8b8b2;
+--map-light-building-edge: #868f90;
+--map-light-road: #e5e0d5;
+--map-light-road-major: #efe4c6;
+--map-light-road-casing: #949a99;
+--map-light-park: #b6c7b4;
+--map-light-label: #303b3d;
+--map-light-halo: #e5e0d5;
 }
 
 .dark {
@@ -610,6 +610,7 @@
 @keyframes bubble-open { from { opacity: 0; transform: translateY(8px) scale(.9); } to { opacity: 1; transform: none; } }
 .room-name-circle { width: 84px; height: 84px; flex-shrink: 0; padding: 8px; border-radius: 50%; border: 2px solid var(--room-color); background: color-mix(in srgb, var(--room-color) 16%, var(--glass-bg)); }
 .room-name-circle span { white-space: normal; overflow-wrap: anywhere; font-size: 12px; line-height: 1.2; max-height: 56px; overflow: hidden; }
+.room-row > div:first-child > button:last-child svg { width: 32px; height: 32px; }
 .room-expansion { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 240ms ease; }
 .room-expansion[data-open="true"] { grid-template-rows: 1fr; }
 @media (max-width: 430px) {
