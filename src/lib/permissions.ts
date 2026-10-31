@@ -47,9 +47,9 @@ async function browserQuery(name: string): Promise<PermState> {
   }
 }
 
-async function privateRuntimePlugin() {
+async function backgroundPlugin() {
   const { registerPlugin } = await import("@capacitor/core");
-  return registerPlugin<{ openLocationSettings: () => Promise<void> }>("PrivateRuntime");
+  return registerPlugin<{ openSettings: () => Promise<void> }>("BackgroundGeolocation");
 }
 
 export async function checkPermission(key: PermKey): Promise<PermState> {
@@ -155,9 +155,12 @@ export async function requestAllPermissions(onUpdate: (key: PermKey, state: Perm
   }
 }
 
-/** Az alkalmazás saját Android-engedélyoldala; itt állítható a Hely hozzáférés „Mindig” értékre. */
+/** Az alkalmazás rendszerbeállításai (elutasított engedélyhez és a „Mindig engedélyezés”-hez). */
 export async function openAppSettings(): Promise<void> {
-  if (!isNativeApp()) return;
-  const plugin = await privateRuntimePlugin();
-  await plugin.openLocationSettings();
+  try {
+    const plugin = await backgroundPlugin();
+    await plugin.openSettings();
+  } catch {
+    /* böngészőben nincs ilyen */
+  }
 }
