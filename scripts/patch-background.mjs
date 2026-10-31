@@ -16,6 +16,38 @@ patch(root + "BackgroundGeolocation.java", "backgroundNotification = builder.bui
                 builder.addAction(android.R.drawable.ic_media_pause, action.endsWith("EXIT") ? "Kilépés" : "Megosztás leállítása", pending);
             }
             backgroundNotification = builder.build();`);
+// The plugin binds its service asynchronously in load(). On a fast first share tap,
+// addWatcher() could run before onServiceConnected() and reject with "Service not running",
+// which meant no foreground notification was ever created. Retry briefly instead.
+const pluginPath = root + "BackgroundGeolocation.java";
+let pluginSource = readFileSync(pluginPath, "utf8");
+if (!pluginSource.includes("Private Place service-bind retry")) {
+  const needle = `        if (service == null) {
+            call.reject("Service not running.");
+            return;
+        }`;
+  const replacement = `        if (service == null) {
+            // Private Place service-bind retry
+            final android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
+            handler.postDelayed(new Runnable() {
+                int attempts = 0;
+                @Override public void run() {
+                    if (service != null) {
+                        addWatcher(call);
+                    } else if (++attempts < 50) {
+                        handler.postDelayed(this, 100);
+                    } else {
+                        call.reject("Background location service did not connect.");
+                    }
+                }
+            }, 100);
+            return;
+        }`;
+  if (!pluginSource.includes(needle)) throw new Error(`Pinned native source changed: ${pluginPath} (service binding guard not found)`);
+  pluginSource = pluginSource.replace(needle, replacement);
+  writeFileSync(pluginPath, pluginSource);
+}
+
 patch(root + "BackgroundGeolocationService.java", "private final IBinder binder = new LocalBinder();", `// Private Place runtime patch
     private android.os.PowerManager.WakeLock sharingLock;
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
