@@ -19,6 +19,9 @@ test("native stop actions, compass and deep link are applied once in generated A
       expect(result.exitCode).toBe(0);
     }
     const service = readFileSync(join(dir, dependency, "BackgroundGeolocationService.java"), "utf8");
+    const plugin = readFileSync(join(dir, dependency, "BackgroundGeolocation.java"), "utf8");
+    expect(plugin).toContain("Private Place service-bind retry");
+    expect(plugin).toContain("Background location service did not connect.");
     expect(service.match(/onStartCommand/g)?.length).toBe(1);
     expect(service).toContain('putBoolean("stopped", true).commit()');
     expect(service).toContain("stopForeground(true)");
