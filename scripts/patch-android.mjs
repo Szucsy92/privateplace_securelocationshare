@@ -40,32 +40,9 @@ if (/android:allowBackup="[^"]*"/.test(appTag)) {
 }
 if (!/<application\b[^>]*android:allowBackup="false"/.test(xml)) fail("Az allowBackup=false nem került be");
 
-// Android 14+ (API 34+) requires the location foreground-service type in BOTH
-// the manifest and startForeground(). The app manifest entry merges with the
-// plugin's service declaration during `npx cap sync android`.
-const locationService = "com.equimaps.capacitor_background_geolocation.BackgroundGeolocationService";
-const escapedServiceName = locationService.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const serviceOpeningTag = new RegExp(`<service\\b(?=[^>]*android:name=["']${escapedServiceName}["'])[^>]*>`);
-if (serviceOpeningTag.test(xml)) {
-  xml = xml.replace(serviceOpeningTag, (tag) => {
-    if (/android:foregroundServiceType=["'][^"']*["']/.test(tag)) {
-      return tag.replace(/android:foregroundServiceType=["'][^"']*["']/, 'android:foregroundServiceType="location"');
-    }
-    const close = tag.endsWith("/>") ? "/>" : ">";
-    return tag.replace(/\s*\/?>$/, ` android:foregroundServiceType="location"${close}`);
-  });
-} else {
-  xml = xml.replace("</application>", `    <service
-        android:name="${locationService}"
-        android:foregroundServiceType="location" />\n</application>`);
-}
-
 writeFileSync(manifestPath, xml);
 for (const e of entries) if (!xml.includes(e)) fail(`Hiányzó engedély: ${e}`);
-if (!xml.includes(`android:name="${locationService}"`) || !xml.includes('android:foregroundServiceType="location"')) {
-  fail("A háttér-helymeghatározó szolgáltatás location típusa hiányzik az AndroidManifestből");
-}
-console.log("AndroidManifest kiegészítve:", missing.length, "új engedély; location foreground service; allowBackup=false");
+console.log("AndroidManifest kiegészítve:", missing.length, "új bejegyzés; allowBackup=false");
 
 // 2) Saját ikon (rétegzett ikon Android 8+ és régi ikonok) + indítókép
 const resDir = "android/app/src/main/res";
@@ -103,25 +80,8 @@ if (!strings.includes("capacitor_background_geolocation_notification_channel_nam
     "</resources>",
     '    <string name="capacitor_background_geolocation_notification_channel_name">Helymegosztás</string>\n</resources>',
   );
+  writeFileSync(stringsPath, strings);
 }
-if (!strings.includes("capacitor_background_geolocation_notification_icon")) {
-  strings = strings.replace(
-    "</resources>",
-    '    <string name="capacitor_background_geolocation_notification_icon">drawable/ic_tracking</string>\n</resources>',
-  );
-}
-writeFileSync(stringsPath, strings);
-
-// Android status-bar notifications require a dedicated, monochrome small icon.
-// The adaptive launcher icon is not a valid substitute on many Android skins.
-const drawableDir = `${resDir}/drawable`;
-mkdirSync(drawableDir, { recursive: true });
-writeFileSync(`${drawableDir}/ic_tracking.xml`, `<?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-    <path android:fillColor="#FFFFFFFF" android:pathData="M12,2C8.13,2 5,5.13 5,9c0,5.25 7,13 7,13s7,-7.75 7,-13c0,-3.87 -3.13,-7 -7,-7zM12,11.5A2.5,2.5 0,1 1,12 6.5a2.5,2.5 0,0 1,0 5z" />
-</vector>
-`);
 
 // 4) Dátumos verzió (APP_VERSION_NAME pl. 2026.10.23-2336, APP_VERSION_CODE = futás sorszáma)
 const gradlePath = "android/app/build.gradle";
