@@ -27,12 +27,11 @@ async function getBackgroundPlugin() {
   return bgPlugin;
 }
 
-/** Android 13+: az állandó értesítéshez engedély kell; ha elutasítják, a követés akkor is fut. */
+/** Android 13+: a háttérszolgáltatás indítása előtt kérjük el az értesítési engedélyt; ha elutasítják, a követés akkor is fut. */
 async function ensureNotificationPermission() {
   try {
-    const { LocalNotifications } = await import("@capacitor/local-notifications");
-    const status = await LocalNotifications.checkPermissions();
-    if (status.display !== "granted") await LocalNotifications.requestPermissions();
+    const { checkNotificationState, requestNotificationState } = await import("./privateRuntime");
+    if ((await checkNotificationState()) !== "granted") await requestNotificationState();
   } catch {
     // nem kritikus
   }
