@@ -26,22 +26,45 @@ function normalize(state: string | undefined): NotificationState {
   return state === "granted" || state === "denied" ? state : "prompt";
 }
 
+/** Egy natív híváshoz sem szabad örökre várni: ha nem válaszol, a többi engedély és a GPS-indítás nem akadhat el rajta. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timeout")), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
+
+async function legacyNotificationState(request: boolean): Promise<NotificationState> {
+  try {
+    const { LocalNotifications } = await import("@capacitor/local-notifications");
+    const result = request ? await LocalNotifications.requestPermissions() : await LocalNotifications.checkPermissions();
+    return normalize(result.display);
+  } catch {
+    return "prompt";
+  }
+}
+
 export async function checkNotificationState(): Promise<NotificationState> {
   try {
-    return normalize((await (await getPrivateRuntime()).checkNotifications()).display);
+    const runtime = await getPrivateRuntime();
+    return normalize((await withTimeout(runtime.checkNotifications(), 3000)).display);
   } catch {
-    const { LocalNotifications } = await import("@capacitor/local-notifications");
-    return normalize((await LocalNotifications.checkPermissions()).display);
+    return await legacyNotificationState(false);
   }
 }
 
 /** Ha már megadott, nem kérdez újra. Ha a rendszer nem engedi a felugró ablakot, „denied”-et ad (ekkor a Beállítások nyitható). */
 export async function requestNotificationState(): Promise<NotificationState> {
   try {
-    return normalize((await (await getPrivateRuntime()).requestNotifications()).display);
-  } catch {
-    const { LocalNotifications } = await import("@capacitor/local-notifications");
-    return normalize((await LocalNotifications.requestPermissions()).display);
+    const runtime = await getPrivateRuntime();
+    return normalize((await withTimeout(runtime.requestNotifications(), 30000)).display);
+  } catch (err) {
+    // Időtúllépésnél a felugró ablak még látszhat: nem kérünk újra, csak az állapotot nézzük meg.
+    if (err instanceof Error && err.message === "timeout") return await checkNotificationState();
+    return await legacyNotificationState(true);
   }
 }
 
