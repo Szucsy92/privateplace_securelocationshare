@@ -52,20 +52,30 @@ if (!service.includes("sharingLock.acquire")) {
   writeFileSync(servicePath, service);
 }
 // Android 14+ (API 34+): startForeground() gets the explicit "location" service type.
-// Defensive on purpose: any failure is logged and falls back to the plain call, so it can never break location updates.
+// Defensive: any failure is logged and falls back to the plain call, so it can never break location updates.
+// DIAGNOSTIC_TOASTS shows the real outcome on screen (set to false once the notification works).
+const DIAGNOSTIC_TOASTS = true;
 service = readFileSync(servicePath, "utf8");
 if (!service.includes("FOREGROUND_SERVICE_TYPE_LOCATION")) {
   const call = /([ \t]*)startForeground\(\s*NOTIFICATION_ID\s*,\s*notification\s*\);/;
   if (!call.test(service)) throw new Error(`Pinned native source changed: ${servicePath} (startForeground call not found)`);
+  const toast = (i, expr) => DIAGNOSTIC_TOASTS
+    ? `${i}{ final String ppMsg = ${expr}; new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> android.widget.Toast.makeText(getApplicationContext(), ppMsg, android.widget.Toast.LENGTH_LONG).show()); }\n`
+    : "";
+  const enabled = '((android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE)).areNotificationsEnabled()';
   service = service.replace(call, (_m, i) => `${i}try {
 ${i}    if (android.os.Build.VERSION.SDK_INT >= 34) {
 ${i}        startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
 ${i}    } else {
 ${i}        startForeground(NOTIFICATION_ID, notification);
 ${i}    }
-${i}} catch (Exception typedStart) {
+${toast(i + "    ", `"PP: startForeground OK, ertesites engedelyezve=" + ${enabled}`)}${i}} catch (Exception typedStart) {
 ${i}    android.util.Log.e("PrivatePlace", "startForeground(location) failed, retrying without type", typedStart);
-${i}    startForeground(NOTIFICATION_ID, notification);
+${toast(i + "    ", `"PP: startForeground HIBA: " + typedStart`)}${i}    try {
+${i}        startForeground(NOTIFICATION_ID, notification);
+${i}    } catch (Exception plainStart) {
+${i}        android.util.Log.e("PrivatePlace", "plain startForeground failed", plainStart);
+${toast(i + "        ", `"PP: tipus nelkuli hiba is: " + plainStart`)}${i}    }
 ${i}}`);
   writeFileSync(servicePath, service);
 }
