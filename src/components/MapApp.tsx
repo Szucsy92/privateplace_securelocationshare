@@ -15,7 +15,6 @@ import {
   ImagePlus,
   LockKeyhole,
   LogOut,
-  Eye,
   HelpCircle,
   Pause,
   Play,
@@ -69,7 +68,7 @@ import {
   type Prefs,
 } from "@/lib/profile";
 import { SharingControl, type SharingStatus } from "@/components/SharingControl";
-import { TransportControl } from "@/components/TransportControl";
+import { TransportControl, TRANSPORT_DEMO_EVENT } from "@/components/TransportControl";
 import { hybridHeading, type HeadingState } from "@/lib/heading";
 import { watchCompass, watchBattery, requestCompassPermission } from "@/lib/deviceSensors";
 import { watchNativeStop } from "@/lib/nativeRuntime";
@@ -468,17 +467,6 @@ export default function MapApp() {
           <Button
             variant="ghost"
             size="icon"
-            className="indicator rounded-full"
-            data-state={dialog === "viewers" ? "on" : "off"}
-            aria-label="Ki látja a helyzetemet?"
-            title="Ki látja a helyzetemet?"
-            onClick={() => setDialog("viewers")}
-          >
-            <Eye className="h-5 w-5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
             className="indicator relative rounded-full"
             data-state={onlineCount > 0 ? "on" : "off"}
             aria-label="Szobák"
@@ -832,7 +820,7 @@ export default function MapApp() {
 const HINTS_KEY = "privateplace.hints.v1";
 const HINTS: { text: string; place: string }[] = [
   { text: "Ezzel a gombbal egy koppintással indítod vagy leállítod a megosztást. Akkut kímél, ha leállítod.", place: "hint-share" },
-  { text: "A szem ikon mutatja, ki látja most a helyzetedet.", place: "hint-viewers" },
+  { text: "Itt látod, hogyan közlekedsz (gyalog, kerékpárral vagy autóval). A tempód alapján magától vált, de rábökve te is kiválaszthatod.", place: "hint-transport" },
   { text: "Koppints egy személyre a követéshez. Ha nem oszt meg, innen kérheted meg rá.", place: "hint-rail" },
   { text: "Ha valaki megosztást kér, felül üzenet jelenik meg – a „Megosztás” gombbal azonnal bekapcsolod.", place: "hint-share" },
 ];
@@ -855,6 +843,15 @@ function HintBubbles() {
       setStep(HINTS.length);
     }
   }, []);
+  const demoActive = step !== null && HINTS[step]?.place === "hint-transport";
+  useEffect(() => {
+    if (!demoActive) return;
+    const emit = (v: boolean) => window.dispatchEvent(new CustomEvent(TRANSPORT_DEMO_EVENT, { detail: v }));
+    let t: ReturnType<typeof setTimeout>;
+    const cycle = () => { t = setTimeout(() => { emit(true); t = setTimeout(() => { emit(false); cycle(); }, 1000); }, 750); };
+    cycle();
+    return () => { clearTimeout(t); emit(false); };
+  }, [demoActive]);
   if (step === null || step >= HINTS.length) return null;
   const hint = HINTS[step];
   if (!hint) return null;

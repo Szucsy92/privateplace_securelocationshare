@@ -1,17 +1,25 @@
-import { useState } from "react";
-import { Bike, Car, Footprints, RotateCcw } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Bike, Car, Footprints } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { TransportMode } from "@/lib/transport";
 const icons = { walk: Footprints, bike: Bike, car: Car };
 const names = { walk: "Gyalogos", bike: "Kerékpár / roller", car: "Autó" };
+export const TRANSPORT_DEMO_EVENT = "privateplace:transport-demo";
+/** Zárva: egy kerek kör az aktuális ikonnal. Nyitva: csak a 3 ikon. A kijelölt (kézi) újra koppintása visszaállítja az automatikus módot. */
 export function TransportControl({ mode, own, manual, onSelect }: { mode: TransportMode | null; own: boolean; manual: boolean; onSelect: (mode: TransportMode | null) => void }) {
   const [open, setOpen] = useState(false);
-  const Icon = icons[mode ?? "walk"];
-  return <div className="map-overlay glass transport-control absolute bottom-4 left-3" data-open={open && own}>
-    <Button variant="ghost" size="icon" className="rounded-full shrink-0" aria-label={own ? `Közlekedés: ${names[mode ?? "walk"]}` : `Követett személy: ${mode ? names[mode] : "ismeretlen közlekedés"}`} aria-expanded={open && own} onClick={() => own && setOpen(v => !v)}><Icon /></Button>
-    {own && open && <div className="flex gap-1 transport-options">
-      {(Object.keys(icons) as TransportMode[]).map(value => { const Choice = icons[value]; return <Button key={value} variant="ghost" size="icon" className="rounded-full" aria-label={names[value]} title={names[value]} aria-pressed={mode === value} onClick={() => { onSelect(value); setOpen(false); }}><Choice /></Button>; })}
-      <Button variant="ghost" size="icon" className="rounded-full" aria-label="Automatikus közlekedési mód" title="Automatikus" aria-pressed={!manual} onClick={() => { onSelect(null); setOpen(false); }}><RotateCcw /></Button>
-    </div>}
+  const [demo, setDemo] = useState(false);
+  useEffect(() => {
+    const on = (e: Event) => setDemo(Boolean((e as CustomEvent<boolean>).detail));
+    window.addEventListener(TRANSPORT_DEMO_EVENT, on);
+    return () => window.removeEventListener(TRANSPORT_DEMO_EVENT, on);
+  }, []);
+  const current = mode ?? "walk";
+  const Icon = icons[current];
+  const expanded = (open && own) || demo;
+  return <div className="map-overlay glass transport-control absolute bottom-4 left-3" data-open={expanded}>
+    {!expanded
+      ? <Button variant="ghost" size="icon" className="rounded-full shrink-0" aria-label={own ? `Közlekedés: ${names[current]}` : `Követett személy: ${mode ? names[mode] : "ismeretlen közlekedés"}`} aria-expanded={false} onClick={() => own && setOpen(true)}><Icon /></Button>
+      : (Object.keys(icons) as TransportMode[]).map(value => { const Choice = icons[value]; return <Button key={value} variant="ghost" size="icon" className="rounded-full shrink-0" aria-label={names[value]} title={names[value]} aria-pressed={current === value} onClick={() => { onSelect(manual && current === value ? null : value); setOpen(false); }}><Choice /></Button>; })}
   </div>;
 }
