@@ -83,48 +83,62 @@ if (!service.includes("sharingLock.acquire")) {
   service = service.replace("stopForeground(true);\n                    }", "stopForeground(true);\n                        if (sharingLock != null && sharingLock.isHeld()) sharingLock.release();\n                    }");
   writeFileSync(servicePath, service);
 }
-// Android 14+ (API 34+) requires the foreground-service type to be declared
-// in AndroidManifest.xml and passed to startForeground(). The matching service
-// declaration is added by patch-android.mjs before `cap sync`.
+// Android 14+ (API 34+): startForeground() gets the explicit "location" service type.
+// Defensive: any failure is logged and falls back to the plain call, so it can never break location updates.
+// DIAGNOSTICS records what the service really does and shows it as a Toast when the app comes back to the foreground
+// (set to false once the notification works).
+const DIAGNOSTICS = true;
 service = readFileSync(servicePath, "utf8");
 if (!service.includes("FOREGROUND_SERVICE_TYPE_LOCATION")) {
-  const call = /startForeground\(\s*NOTIFICATION_ID\s*,\s*notification\s*\);/;
+  const call = /([ \t]*)startForeground\(\s*NOTIFICATION_ID\s*,\s*notification\s*\);/;
   if (!call.test(service)) throw new Error(`Pinned native source changed: ${servicePath} (startForeground call not found)`);
-  service = service.replace(call, `if (android.os.Build.VERSION.SDK_INT >= 29) {
-                startForeground(NOTIFICATION_ID, notification,
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
-            } else {
-                startForeground(NOTIFICATION_ID, notification);
-            }`);
+  const diag = (i, expr) => (DIAGNOSTICS ? `${i}ppDiag(${expr});\n` : "");
+  const enabled = '((android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE)).areNotificationsEnabled()';
+  service = service.replace(call, (_m, i) => `${i}try {
+${i}    if (android.os.Build.VERSION.SDK_INT >= 34) {
+${i}        startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+${i}    } else {
+${i}        startForeground(NOTIFICATION_ID, notification);
+${i}    }
+${diag(i + "    ", `"startForeground OK, ertesites engedelyezve=" + ${enabled}`)}${i}} catch (Exception typedStart) {
+${i}    android.util.Log.e("PrivatePlace", "startForeground(location) failed, retrying without type", typedStart);
+${diag(i + "    ", `"startForeground HIBA: " + typedStart`)}${i}    try {
+${i}        startForeground(NOTIFICATION_ID, notification);
+${i}    } catch (Exception plainStart) {
+${i}        android.util.Log.e("PrivatePlace", "plain startForeground failed", plainStart);
+${diag(i + "        ", `"tipus nelkuli hiba is: " + plainStart`)}${i}    }
+${i}}`);
+  if (DIAGNOSTICS) {
+    const helpers = `private void ppDiag(String message) {
+        try {
+            android.content.SharedPreferences prefs = getSharedPreferences("privateplace.diag", MODE_PRIVATE);
+            String old = prefs.getString("log", "");
+            prefs.edit().putString("log", old.isEmpty() ? message : old + " | " + message).apply();
+        } catch (Exception ignored) {}
+    }
+    private void ppShowDiag() {
+        try {
+            final android.content.SharedPreferences prefs = getSharedPreferences("privateplace.diag", MODE_PRIVATE);
+            final String log = prefs.getString("log", "");
+            if (log.isEmpty()) return;
+            prefs.edit().remove("log").apply();
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> android.widget.Toast.makeText(getApplicationContext(), "PP: " + log, android.widget.Toast.LENGTH_LONG).show());
+        } catch (Exception ignored) {}
+    }
+    `;
+    const binderNeedle = "private final IBinder binder = new LocalBinder();";
+    if (!service.includes(binderNeedle)) throw new Error(`Pinned native source changed: ${servicePath} (binder field not found)`);
+    service = service.replace(binderNeedle, helpers + binderNeedle);
+    // Optional instrumentation: skipped silently when the pinned source looks different.
+    service = service.replace(/(void\s+onActivityStarted\s*\(\s*\)\s*\{)/, "$1\n            ppShowDiag();\n            ppDiag(\"onActivityStarted\");");
+    service = service.replace(/(void\s+onActivityStopped\s*\(\s*\)\s*\{)/, "$1\n            ppDiag(\"onActivityStopped notification=\" + (notification != null));");
+    service = service.replace(/(void\s+addWatcher\s*\(([^)]*Notification\s+(\w+)[^)]*)\)\s*\{)/, (m, _all, _params, name) => `${m}\n            ppDiag("addWatcher notification=" + (${name} != null));`);
+  }
   writeFileSync(servicePath, service);
 }
-
 const java = "android/app/src/main/java/hu/privateplace/app";
 const manifestPath = "android/app/src/main/AndroidManifest.xml";
 let manifest = readFileSync(manifestPath, "utf8");
-// Android 14+ rejects startForeground(..., LOCATION) unless the service itself
-// declares foregroundServiceType="location" in the final app manifest.
-// The dependency manifest is merged by Gradle, so patch the app manifest explicitly.
-const locationServiceName = "com.equimaps.capacitor_background_geolocation.BackgroundGeolocationService";
-const serviceTagPattern = /<service\b(?=[^>]*android:name=["'][^"']*BackgroundGeolocationService["'])[^>]*\/?\s*>/;
-const existingService = manifest.match(serviceTagPattern)?.[0];
-if (existingService) {
-  let updatedService = existingService;
-  if (/android:foregroundServiceType=["'][^"']*["']/.test(updatedService)) {
-    updatedService = updatedService.replace(/android:foregroundServiceType=["'][^"']*["']/, 'android:foregroundServiceType="location"');
-  } else {
-    updatedService = updatedService.replace(/\s*\/?\s*>$/, ' android:foregroundServiceType="location" />');
-  }
-  manifest = manifest.replace(existingService, updatedService);
-} else {
-  const applicationClose = manifest.lastIndexOf("</application>");
-  if (applicationClose < 0) throw new Error("AndroidManifest.xml: missing </application>; cannot declare location foreground service");
-  const declaration = `    <service android:name="${locationServiceName}" android:exported="false" android:foregroundServiceType="location" />\n`;
-  manifest = manifest.slice(0, applicationClose) + declaration + manifest.slice(applicationClose);
-}
-if (!manifest.includes('android:foregroundServiceType="location"')) {
-  throw new Error("AndroidManifest.xml: location foreground service type was not applied");
-}
 if (!manifest.includes('android:scheme="privateplace"')) {
   manifest = manifest.replace('</activity>', `<intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -132,9 +146,8 @@ if (!manifest.includes('android:scheme="privateplace"')) {
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="privateplace" android:host="join" />
             </intent-filter></activity>`);
+  writeFileSync(manifestPath, manifest);
 }
-// Always persist the manifest: the service type may have changed even when the deep link already existed.
-writeFileSync(manifestPath, manifest);
 mkdirSync(java, { recursive: true });
 for (const name of ["PrivateCompass", "PrivateRuntime"]) cpSync(`scripts/native/${name}.java`, `${java}/${name}.java`);
 patch(`${java}/MainActivity.java`, "public class MainActivity extends BridgeActivity {}", `public class MainActivity extends BridgeActivity {
