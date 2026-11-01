@@ -47,6 +47,17 @@ async function browserQuery(name: string): Promise<PermState> {
   }
 }
 
+type RuntimePermissions = {
+  checkBackgroundLocation(): Promise<{ state: string }>;
+  requestBackgroundLocation(): Promise<{ state: string }>;
+  openSettings(options: { target: "app" | "notifications" | "locationServices" }): Promise<void>;
+};
+
+async function runtimePlugin() {
+  const { registerPlugin } = await import("@capacitor/core");
+  return registerPlugin<RuntimePermissions>("PrivateRuntime");
+}
+
 async function backgroundPlugin() {
   const { registerPlugin } = await import("@capacitor/core");
   return registerPlugin<{ openSettings: () => Promise<void> }>("BackgroundGeolocation");
@@ -64,8 +75,12 @@ export async function checkPermission(key: PermKey): Promise<PermState> {
         return state.location === "granted" || state.coarseLocation === "granted" ? "granted" : normalize(state.location);
       }
       case "backgroundLocation":
-        // Ezt csak a telefon beállításaiban lehet „Mindig engedélyezés”-re állítani.
-        return "manual";
+        // „Mindig engedélyezés”; régebbi alkalmazásverzióban csak kézzel állítható.
+        try {
+          return normalize((await (await runtimePlugin()).checkBackgroundLocation()).state);
+        } catch {
+          return "manual";
+        }
       case "notifications": {
         const { LocalNotifications } = await import("@capacitor/local-notifications");
         return normalize((await LocalNotifications.checkPermissions()).display);
@@ -121,8 +136,12 @@ export async function requestPermission(key: PermKey): Promise<PermState> {
         return state.location === "granted" || state.coarseLocation === "granted" ? "granted" : normalize(state.location);
       }
       case "backgroundLocation":
-        await openAppSettings();
-        return "manual";
+        try {
+          return normalize((await (await runtimePlugin()).requestBackgroundLocation()).state);
+        } catch {
+          await openAppSettings();
+          return "manual";
+        }
       case "notifications": {
         const { LocalNotifications } = await import("@capacitor/local-notifications");
         return normalize((await LocalNotifications.requestPermissions()).display);
@@ -142,9 +161,12 @@ export async function requestPermission(key: PermKey): Promise<PermState> {
   }
 }
 
-/** Sorban elkéri a felugró ablakkal kérhető engedélyeket (a háttér-helyzet kézi beállítás marad). */
+/**
+ * Sorban mindegyik engedély legmagasabb szintjét kéri: pontos helyzet, értesítés, kamera,
+ * majd a „Mindig engedélyezés” (Android 11+ ehhez a beállításoldalt nyitja) és az akkumulátor-mentesség.
+ */
 export async function requestAllPermissions(onUpdate: (key: PermKey, state: PermState) => void): Promise<void> {
-  const order: PermKey[] = ["location", "notifications", "camera", "battery"];
+  const order: PermKey[] = ["location", "notifications", "camera", "backgroundLocation", "battery"];
   for (const key of order) {
     if (!permissionKeys().includes(key)) continue;
     if ((await checkPermission(key)) === "granted") {
@@ -156,11 +178,22 @@ export async function requestAllPermissions(onUpdate: (key: PermKey, state: Perm
 }
 
 /** Az alkalmazás rendszerbeállításai (elutasított engedélyhez és a „Mindig engedélyezés”-hez). */
-export async function openAppSettings(): Promise<void> {
+export async function openAppSettings(target: "app" | "notifications" | "locationServices" = "app"): Promise<void> {
+  try {
+    await (await runtimePlugin()).openSettings({ target });
+    return;
+  } catch {
+    /* régebbi alkalmazásverzió: a háttérkövető saját megnyitója */
+  }
   try {
     const plugin = await backgroundPlugin();
     await plugin.openSettings();
   } catch {
     /* böngészőben nincs ilyen */
   }
+}
+
+/** Elutasított engedélyhez a pontosan hozzá tartozó beállításoldal. */
+export function openPermissionSettings(key: PermKey): Promise<void> {
+  return openAppSettings(key === "notifications" ? "notifications" : "app");
 }

@@ -82,6 +82,7 @@ import {
   checkAllPermissions,
   markPermissionsAsked,
   openAppSettings,
+  openPermissionSettings,
   permissionKeys,
   permissionsAsked,
   requestAllPermissions,
@@ -294,6 +295,12 @@ export default function MapApp() {
         publishRef.current();
       },
       onError: (err) => setGpsStatus(err),
+      onNotificationsBlocked: () =>
+        toast("Az értesítések ki vannak kapcsolva", {
+          description: "A megosztás fut, de a felső sávban nem látszik, és a telefon könnyebben leállíthatja.",
+          duration: 12000,
+          action: { label: "Bekapcsolás", onClick: () => void openPermissionSettings("notifications") },
+        }),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted, profile !== null, stopped, nativeStopReady, gpsRequest, backgroundSharing, dialog === "permissions", dialog === "welcome"]);
@@ -932,7 +939,7 @@ function PermissionsPanel({ native, onDone }: { native: boolean; onDone: () => v
   const askOne = async (key: PermKey) => {
     setBusy(key);
     try {
-      if (states[key] === "denied" && native) await openAppSettings();
+      if (states[key] === "denied" && native) await openPermissionSettings(key);
       else set(key, await requestPermission(key));
     } finally {
       setBusy(null);
