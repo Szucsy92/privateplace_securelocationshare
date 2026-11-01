@@ -3,6 +3,7 @@
  * Az Android-alkalmazásban natív kérésekkel, böngészőben a böngésző saját kérdéseivel.
  */
 import { isNativeApp } from "@/lib/locationSource";
+import { checkNotificationState, requestNotificationState, openNativeAppSettings } from "@/lib/privateRuntime";
 
 export type PermKey = "location" | "backgroundLocation" | "notifications" | "camera" | "battery";
 export type PermState = "granted" | "denied" | "prompt" | "manual" | "unsupported";
@@ -47,11 +48,6 @@ async function browserQuery(name: string): Promise<PermState> {
   }
 }
 
-async function backgroundPlugin() {
-  const { registerPlugin } = await import("@capacitor/core");
-  return registerPlugin<{ openSettings: () => Promise<void> }>("BackgroundGeolocation");
-}
-
 export async function checkPermission(key: PermKey): Promise<PermState> {
   const native = isNativeApp();
   if (!permissionKeys(native).includes(key)) return "unsupported";
@@ -66,10 +62,8 @@ export async function checkPermission(key: PermKey): Promise<PermState> {
       case "backgroundLocation":
         // Ezt csak a telefon beállításaiban lehet „Mindig engedélyezés”-re állítani.
         return "manual";
-      case "notifications": {
-        const { LocalNotifications } = await import("@capacitor/local-notifications");
-        return normalize((await LocalNotifications.checkPermissions()).display);
-      }
+      case "notifications":
+        return await checkNotificationState();
       case "camera": {
         const { Camera } = await import("@capacitor/camera");
         return normalize((await Camera.checkPermissions()).camera);
@@ -123,10 +117,8 @@ export async function requestPermission(key: PermKey): Promise<PermState> {
       case "backgroundLocation":
         await openAppSettings();
         return "manual";
-      case "notifications": {
-        const { LocalNotifications } = await import("@capacitor/local-notifications");
-        return normalize((await LocalNotifications.requestPermissions()).display);
-      }
+      case "notifications":
+        return await requestNotificationState();
       case "camera": {
         const { Camera } = await import("@capacitor/camera");
         return normalize((await Camera.requestPermissions({ permissions: ["camera"] })).camera);
@@ -158,8 +150,7 @@ export async function requestAllPermissions(onUpdate: (key: PermKey, state: Perm
 /** Az alkalmazás rendszerbeállításai (elutasított engedélyhez és a „Mindig engedélyezés”-hez). */
 export async function openAppSettings(): Promise<void> {
   try {
-    const plugin = await backgroundPlugin();
-    await plugin.openSettings();
+    await openNativeAppSettings();
   } catch {
     /* böngészőben nincs ilyen */
   }
