@@ -13,6 +13,9 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { Toaster } from "../components/ui/sonner";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { installChunkReload, isChunkLoadError, reloadOnceForNewVersion } from "../lib/chunkReload";
+
+installChunkReload();
 
 function NotFoundComponent() {
   return (
@@ -40,6 +43,8 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
   console.error(error);
   const router = useRouter();
   useEffect(() => {
+    // Új kiadás után a régi lap hiányzó részei: egy csendes újratöltés megoldja.
+    if (isChunkLoadError(error) && reloadOnceForNewVersion()) return;
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
   }, [error]);
 

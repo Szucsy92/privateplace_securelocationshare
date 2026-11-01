@@ -90,8 +90,11 @@ import {
   type PermMap,
   type PermState,
 } from "@/lib/permissions";
+import { installChunkReload, lazyImportWithReload } from "@/lib/chunkReload";
 
-const LiveMap = lazy(() => import("@/components/LiveMap"));
+installChunkReload();
+
+const LiveMap = lazy(lazyImportWithReload(() => import("@/components/LiveMap")));
 const SELF = "self";
 
 type DialogKind = "welcome" | "permissions" | "viewers" | "rooms" | "settings" | "share" | "join" | null;
