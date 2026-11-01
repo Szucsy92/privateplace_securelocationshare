@@ -81,7 +81,6 @@ import { createRoomAuthority, signRoomControl } from "@/lib/moderation";
 import {
   checkAllPermissions,
   markPermissionsAsked,
-  openAppSettings,
   openPermissionSettings,
   permissionKeys,
   permissionsAsked,
