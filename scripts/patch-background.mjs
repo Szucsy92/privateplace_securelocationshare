@@ -51,6 +51,24 @@ if (!service.includes("sharingLock.acquire")) {
   service = service.replace("stopForeground(true);\n                    }", "stopForeground(true);\n                        if (sharingLock != null && sharingLock.isHeld()) sharingLock.release();\n                    }");
   writeFileSync(servicePath, service);
 }
+// Android 10+: a helyzetkövető szolgáltatás kifejezetten "location" típussal lép előtérbe
+// (Android 14+ enélkül nem mutatja az értesítést), és engedély megadása után újra előtérbe lép.
+service = readFileSync(servicePath, "utf8");
+if (!service.includes("FOREGROUND_SERVICE_TYPE_LOCATION")) {
+  const token = "startForeground(NOTIFICATION_ID, notification);";
+  const grant = "void onPermissionsGranted() {";
+  if (!service.includes(token) || !service.includes(grant)) throw new Error(`Pinned native source changed: ${servicePath}`);
+  service = service.replace(token, `try { startService(new Intent(this, BackgroundGeolocationService.class)); } catch (Exception ignored) {}
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+            } else {
+                startForeground(NOTIFICATION_ID, notification);
+            }`);
+  service = service.replace(grant, `${grant}
+            Notification pendingNotification = getNotification();
+            if (pendingNotification != null) promote(pendingNotification);`);
+  writeFileSync(servicePath, service);
+}
 const java = "android/app/src/main/java/hu/privateplace/app";
 const manifestPath = "android/app/src/main/AndroidManifest.xml";
 let manifest = readFileSync(manifestPath, "utf8");
