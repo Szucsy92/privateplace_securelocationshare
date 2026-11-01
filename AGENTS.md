@@ -24,6 +24,7 @@
 - TURN relays are optional and injected at build time (VITE_TURN_* from GitHub secrets, parsed in src/lib/turn.ts) so the app still needs no server of our own.
 - The launch screen uses the icon's own corner color (#0B1425) as background and a feathered logo, so no icon square shows on startup.
 - First run shows the permissions panel right after the name is saved (reopenable from Settings); one-shot glass hint bubbles are stored in localStorage and reset via Settings → Súgó.
+- Android permission requests and settings pages go through the app-owned PrivateRuntime plugin (background location state, per-permission settings intents), because Capacitor plugins cannot request ACCESS_BACKGROUND_LOCATION or open notification settings.
 - Share requests are a peer 'ask' action (validated by parseShareRequest); they only arrive while the app is running, since there is no server to push them.
 
 - Room customization is local metadata; keep room tokens stable and carry optional palette IDs only in invitation hashes so edits never break peer connections.
