@@ -41,14 +41,27 @@ patch(root + "BackgroundGeolocationService.java", "private final IBinder binder 
 const servicePath = root + "BackgroundGeolocationService.java";
 let service = readFileSync(servicePath, "utf8");
 if (!service.includes("sharingLock.acquire")) {
-  service = service.replace("startForeground(NOTIFICATION_ID, notification);", `startForeground(NOTIFICATION_ID, notification);
+  const foregroundCall = "startForeground(NOTIFICATION_ID, notification);";
+  if (!service.includes(foregroundCall)) console.log("::warning::A startForeground hívás nem található: a wake lock és a szolgáltatástípus nem került be.");
+  service = service.replace(foregroundCall, `// Android 10+: a helyadat-típus kifejezett megadása; ha a manifest nem deklarálja, a típus nélküli hívás a tartalék.
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= 29) {
+                    startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+                } else {
+                    startForeground(NOTIFICATION_ID, notification);
+                }
+            } catch (IllegalArgumentException typeMismatch) {
+                startForeground(NOTIFICATION_ID, notification);
+            }
             if (sharingLock == null) {
                 android.os.PowerManager power = (android.os.PowerManager) getSystemService(POWER_SERVICE);
                 sharingLock = power.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "PrivatePlace:sharing");
                 sharingLock.setReferenceCounted(false);
             }
             if (!sharingLock.isHeld()) sharingLock.acquire();`);
-  service = service.replace("stopForeground(true);\n                    }", "stopForeground(true);\n                        if (sharingLock != null && sharingLock.isHeld()) sharingLock.release();\n                    }");
+  const stopNeedle = "stopForeground(true);\n                    }";
+  if (!service.includes(stopNeedle)) console.log("::warning::A stopForeground hely nem található: a wake lock felengedése itt kimarad (a szolgáltatás leállításakor így is felszabadul).");
+  service = service.replace(stopNeedle, "stopForeground(true);\n                        if (sharingLock != null && sharingLock.isHeld()) sharingLock.release();\n                    }");
   writeFileSync(servicePath, service);
 }
 const java = "android/app/src/main/java/hu/privateplace/app";
