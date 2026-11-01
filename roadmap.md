@@ -31,3 +31,5 @@
 - [x] APK + IPA egy GitHub gombbal, közös kiadásban; README Lovable nélkül.
 - [x] Adatbázis-előzmények üresek (remix ellenőrizve).
 - [ ] Az új APK/IPA kipróbálása telefonon (háttérben futás, ikon).
+- [x] Háttérértesítés Android 10–14+: „hely” típusú előtérbe lépés, engedély után újraindítás, figyelmeztetés kikapcsolt értesítésnél; maximális engedélykérés („Mindig engedélyezés” is) és közvetlen beállításoldalak.
+- [ ] Az új értesítés és engedélykérés kipróbálása telefonon (új APK szükséges).
