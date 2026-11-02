@@ -26,7 +26,15 @@ test("native stop actions, compass and deep link are applied once in generated A
     expect(service.match(/FOREGROUND_SERVICE_TYPE_LOCATION/g)?.length).toBe(1);
     expect(service.match(/sharingLock\.acquire/g)?.length).toBe(1);
     expect(service).toContain("if (pendingNotification != null) promote(pendingNotification);");
+    const plugin = readFileSync(join(dir, dependency, "BackgroundGeolocation.java"), "utf8");
+    // A felső sávban azonnal látszó szolgáltatás-értesítés, egyszer beépítve.
+    expect(plugin.match(/FOREGROUND_SERVICE_IMMEDIATE/g)?.length).toBe(1);
+    expect(plugin.match(/"Megosztás leállítása"/g)?.length).toBe(1);
+    // Hozzávetőleges hellyel is fut, nem kérdez újra minden indításnál.
+    expect(plugin).not.toContain('getPermissionState("location")');
+    expect(plugin.match(/private boolean privateLocationAllowed\(\)/g)?.length).toBe(1);
     expect(readFileSync(join(dir, java, "MainActivity.java"), "utf8")).toContain("registerPlugin(PrivateCompass.class)");
+    expect(readFileSync(join(dir, java, "PrivateRuntime.java"), "utf8")).toContain("requestPreciseLocation");
     expect(readFileSync(join(dir, "android/app/src/main/AndroidManifest.xml"), "utf8")).toContain('android:scheme="privateplace"');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
