@@ -468,6 +468,7 @@ export default function MapApp() {
 
   const sharingStatus: SharingStatus = !prefs.sharing ? "off" : gpsStatus === "error" || gpsStatus === "denied" ? "lost" : !selfFresh ? "search" : "live";
   const windowRef = useRef<HTMLElement | null>(null);
+  const mirrorRef = useRef<HTMLCanvasElement | null>(null);
   const [win, setWin] = useState<MapWindow | null>(null);
   useEffect(() => {
     const el = windowRef.current;
@@ -526,10 +527,13 @@ export default function MapApp() {
             addressAllowed={addressAllowed}
             onAllowAddress={() => { if (window.confirm("A cím lekéréséhez a kijelölt koordinátát elküldjük az OpenStreetMap címszolgáltatásának. Engedélyezed?")) setAddressAllowed(true); }}
             padding={mapPadding}
+            mirrorRef={mirrorRef}
           />
         </Suspense>
       </div>
-      {win && <div className="map-veil" style={veilStyle(win)} aria-hidden="true" />}
+      <div className="map-veil" style={win ? veilStyle(win) : { visibility: "hidden" }} aria-hidden="true">
+        <canvas ref={mirrorRef} className="map-mirror" />
+      </div>
       <header className="glass z-10 flex shrink-0 items-center justify-between gap-2 px-3 py-2">
         <div className="min-w-0 flex-1">
           <h1 className="font-display text-base font-bold">Private Place</h1>
