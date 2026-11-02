@@ -993,7 +993,11 @@ function PermissionsPanel({ native, onDone }: { native: boolean; onDone: () => v
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold">{info.label}</p>
                   <p className="text-xs text-muted-foreground">
-                    {denied && !native ? "Elutasítva – a böngésző címsoránál engedélyezheted." : info.hint}
+                    {denied && !native
+                      ? "Elutasítva – a böngésző címsoránál engedélyezheted."
+                      : state === "limited"
+                        ? "Most csak hozzávetőleges. Koppints a Pontosításra, és kapcsold be a „Pontos hely”-et."
+                        : info.hint}
                   </p>
                 </div>
                 {granted ? (
@@ -1009,7 +1013,13 @@ function PermissionsPanel({ native, onDone }: { native: boolean; onDone: () => v
                     disabled={busy !== null || (denied && !native)}
                     onClick={() => void askOne(key)}
                   >
-                    {state === "manual" || (denied && native) ? "Beállítás" : denied ? "Elutasítva" : "Engedélyezés"}
+                    {state === "limited"
+                      ? "Pontosítás"
+                      : state === "manual" || (denied && native)
+                        ? "Beállítás"
+                        : denied
+                          ? "Elutasítva"
+                          : "Engedélyezés"}
                   </Button>
                 )}
               </div>
