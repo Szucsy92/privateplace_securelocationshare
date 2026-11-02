@@ -27,17 +27,25 @@ async function getBackgroundPlugin() {
   return bgPlugin;
 }
 
-/** Android 13+: az állandó értesítéshez engedély kell; ha elutasítják, a követés akkor is fut, de rejtve. */
+/**
+ * Android 13+: az állandó értesítéshez engedély kell; ha elutasítják (vagy a megosztás
+ * értesítési csatornája némítva van), a követés akkor is fut, de a felső sávban nem látszik.
+ */
 async function ensureNotificationPermission(): Promise<boolean> {
   try {
+    const { checkPermission } = await import("./permissions");
+    const state = await checkPermission("notifications");
+    if (state === "granted") return true;
+    if (state === "denied") return false;
     const { LocalNotifications } = await import("@capacitor/local-notifications");
-    const status = await LocalNotifications.checkPermissions();
-    if (status.display === "granted") return true;
-    return (await LocalNotifications.requestPermissions()).display === "granted";
+    await LocalNotifications.requestPermissions();
+    return (await checkPermission("notifications")) === "granted";
   } catch {
     return true;
   }
 }
+
+let preciseAskedThisRun = false;
 
 export function startLocationWatch(opts: {
   background: boolean;
@@ -45,6 +53,8 @@ export function startLocationWatch(opts: {
   onError: (err: FixError) => void;
   /** A háttérben futó megosztás értesítése le van tiltva a telefonon. */
   onNotificationsBlocked?: () => void;
+  /** Csak hozzávetőleges helyzet engedélyezett (a „Pontos hely” kapcsoló ki van kapcsolva). */
+  onPreciseMissing?: () => void;
 }): () => void {
   let stopped = false;
   let cleanup: () => void = () => undefined;
@@ -96,16 +106,21 @@ export function startLocationWatch(opts: {
   void (async () => {
     try {
       const { Geolocation } = await import("@capacitor/geolocation");
-      let permissions = await Geolocation.checkPermissions();
+      const { checkPermission, requestPreciseLocation } = await import("./permissions");
+      let location = await checkPermission("location");
       if (stopped) return;
-      if (permissions.location !== "granted" && permissions.coarseLocation !== "granted") {
-        permissions = await Geolocation.requestPermissions({ permissions: ["location", "coarseLocation"] });
+      // Pontos helyzetet kér (hozzávetőlegesnél a rendszer „Pontos” frissítő ablakát), alkalmanként
+      // legfeljebb egyszer, és itt soha nem nyit beállításoldalt, hogy ne zavarjon minden visszatéréskor.
+      if ((location === "prompt" || location === "limited") && !preciseAskedThisRun) {
+        preciseAskedThisRun = true;
+        location = await requestPreciseLocation(false);
       }
       if (stopped) return;
-      if (permissions.location !== "granted" && permissions.coarseLocation !== "granted") {
+      if (location !== "granted" && location !== "limited") {
         reportError("denied");
         return;
       }
+      if (location === "limited") opts.onPreciseMissing?.();
       // A hálózati hely elsőként megjelenhet; a műholdas követő pontosítja.
       let quickPending = false;
       const quickFix = () => {

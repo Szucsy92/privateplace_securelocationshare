@@ -5,7 +5,8 @@
 import { isNativeApp } from "@/lib/locationSource";
 
 export type PermKey = "location" | "backgroundLocation" | "notifications" | "camera" | "battery";
-export type PermState = "granted" | "denied" | "prompt" | "manual" | "unsupported";
+/** limited = csak hozzávetőleges helyzet (a „Pontos” kapcsoló ki van kapcsolva). */
+export type PermState = "granted" | "limited" | "denied" | "prompt" | "manual" | "unsupported";
 export type PermMap = Record<PermKey, PermState>;
 
 const ASKED_KEY = "elohely.permissions.v1";
@@ -32,10 +33,18 @@ export function permissionKeys(native = isNativeApp()): PermKey[] {
   return native ? ["location", "backgroundLocation", "notifications", "camera", "battery"] : ["location", "camera"];
 }
 
-function normalize(state: string | undefined): PermState {
+export function normalize(state: string | undefined): PermState {
   if (state === "granted") return "granted";
+  if (state === "limited") return "limited";
   if (state === "denied") return "denied";
   return "prompt";
+}
+
+/** A natív értesítés-állapot: off = alkalmazásszinten tiltva, channelOff = csak a megosztás csatornája némítva. */
+export function notificationStateFrom(native: string, systemPrompt: PermState): PermState {
+  if (native === "granted") return "granted";
+  if (native === "channelOff") return "denied";
+  return systemPrompt === "granted" ? "denied" : systemPrompt;
 }
 
 async function browserQuery(name: string): Promise<PermState> {
@@ -48,8 +57,11 @@ async function browserQuery(name: string): Promise<PermState> {
 }
 
 type RuntimePermissions = {
+  checkLocation(): Promise<{ state: string }>;
+  requestPreciseLocation(options: { openSettings: boolean }): Promise<{ state: string }>;
   checkBackgroundLocation(): Promise<{ state: string }>;
   requestBackgroundLocation(): Promise<{ state: string }>;
+  checkNotifications(): Promise<{ state: string }>;
   openSettings(options: { target: "app" | "notifications" | "locationServices" }): Promise<void>;
 };
 
@@ -63,17 +75,35 @@ async function backgroundPlugin() {
   return registerPlugin<{ openSettings: () => Promise<void> }>("BackgroundGeolocation");
 }
 
+/** Régebbi alkalmazásverzió (saját natív rész nélkül): a Capacitor saját állapota. */
+async function capacitorLocation(request: boolean): Promise<PermState> {
+  const { Geolocation } = await import("@capacitor/geolocation");
+  const state = request
+    ? await Geolocation.requestPermissions({ permissions: ["location", "coarseLocation"] })
+    : await Geolocation.checkPermissions();
+  if (state.location === "granted") return "granted";
+  if (state.coarseLocation === "granted") return "limited";
+  return normalize(state.location);
+}
+
+async function systemNotificationState(request: boolean): Promise<PermState> {
+  const { LocalNotifications } = await import("@capacitor/local-notifications");
+  const status = request ? await LocalNotifications.requestPermissions() : await LocalNotifications.checkPermissions();
+  return normalize(status.display);
+}
+
 export async function checkPermission(key: PermKey): Promise<PermState> {
   const native = isNativeApp();
   if (!permissionKeys(native).includes(key)) return "unsupported";
   try {
     if (!native) return await browserQuery(key === "location" ? "geolocation" : "camera");
     switch (key) {
-      case "location": {
-        const { Geolocation } = await import("@capacitor/geolocation");
-        const state = await Geolocation.checkPermissions();
-        return state.location === "granted" || state.coarseLocation === "granted" ? "granted" : normalize(state.location);
-      }
+      case "location":
+        try {
+          return normalize((await (await runtimePlugin()).checkLocation()).state);
+        } catch {
+          return await capacitorLocation(false);
+        }
       case "backgroundLocation":
         // „Mindig engedélyezés”; régebbi alkalmazásverzióban csak kézzel állítható.
         try {
@@ -82,8 +112,12 @@ export async function checkPermission(key: PermKey): Promise<PermState> {
           return "manual";
         }
       case "notifications": {
-        const { LocalNotifications } = await import("@capacitor/local-notifications");
-        return normalize((await LocalNotifications.checkPermissions()).display);
+        const system = await systemNotificationState(false);
+        try {
+          return notificationStateFrom((await (await runtimePlugin()).checkNotifications()).state, system);
+        } catch {
+          return system;
+        }
       }
       case "camera": {
         const { Camera } = await import("@capacitor/camera");
@@ -106,6 +140,18 @@ export async function checkAllPermissions(): Promise<PermMap> {
   return Object.fromEntries(keys.map((k, i) => [k, states[i]])) as PermMap;
 }
 
+/**
+ * Pontos helyzet kérése. Ha a rendszer már nem kérdez, és `openSettings` igaz,
+ * az alkalmazás beállításoldala nyílik meg (Engedélyek → Hely → Pontos hely).
+ */
+export async function requestPreciseLocation(openSettings: boolean): Promise<PermState> {
+  try {
+    return normalize((await (await runtimePlugin()).requestPreciseLocation({ openSettings })).state);
+  } catch {
+    return await capacitorLocation(true);
+  }
+}
+
 export async function requestPermission(key: PermKey): Promise<PermState> {
   const native = isNativeApp();
   if (!permissionKeys(native).includes(key)) return "unsupported";
@@ -116,7 +162,7 @@ export async function requestPermission(key: PermKey): Promise<PermState> {
           navigator.geolocation.getCurrentPosition(
             () => resolve(),
             () => resolve(),
-            { enableHighAccuracy: false, maximumAge: 0, timeout: 10000 },
+            { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 },
           ),
         );
       } else if (key === "camera" && navigator.mediaDevices?.getUserMedia) {
@@ -130,11 +176,8 @@ export async function requestPermission(key: PermKey): Promise<PermState> {
       return await checkPermission(key);
     }
     switch (key) {
-      case "location": {
-        const { Geolocation } = await import("@capacitor/geolocation");
-        const state = await Geolocation.requestPermissions({ permissions: ["location", "coarseLocation"] });
-        return state.location === "granted" || state.coarseLocation === "granted" ? "granted" : normalize(state.location);
-      }
+      case "location":
+        return await requestPreciseLocation(true);
       case "backgroundLocation":
         try {
           return normalize((await (await runtimePlugin()).requestBackgroundLocation()).state);
@@ -143,8 +186,14 @@ export async function requestPermission(key: PermKey): Promise<PermState> {
           return "manual";
         }
       case "notifications": {
-        const { LocalNotifications } = await import("@capacitor/local-notifications");
-        return normalize((await LocalNotifications.requestPermissions()).display);
+        const before = await checkPermission("notifications");
+        // Tiltott értesítéshez (vagy némított megosztás-csatornához) a rendszer már nem kérdez: beállításoldal.
+        if (before === "denied") {
+          await openAppSettings("notifications");
+          return before;
+        }
+        await systemNotificationState(true);
+        return await checkPermission("notifications");
       }
       case "camera": {
         const { Camera } = await import("@capacitor/camera");
