@@ -303,6 +303,15 @@ export default function MapApp() {
           duration: 12000,
           action: { label: "Bekapcsolás", onClick: () => void openPermissionSettings("notifications") },
         }),
+      onPreciseMissing: () => {
+        if (preciseHintShown) return;
+        preciseHintShown = true;
+        toast("Csak hozzávetőleges a helyzeted", {
+          description: "A „Pontos hely” kapcsoló ki van kapcsolva, ezért a jelölőd akár több száz métert is tévedhet.",
+          duration: 12000,
+          action: { label: "Pontosítás", onClick: () => void requestPermission("location") },
+        });
+      },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted, profile !== null, stopped, nativeStopReady, gpsRequest, backgroundSharing, dialog === "permissions", dialog === "welcome"]);
