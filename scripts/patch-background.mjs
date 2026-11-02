@@ -19,17 +19,25 @@ patch(root + "BackgroundGeolocation.java", "backgroundNotification = builder.bui
             builder.setCategory(Notification.CATEGORY_SERVICE).setOnlyAlertOnce(true).setShowWhen(false);
             if (Build.VERSION.SDK_INT >= 31) builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
             backgroundNotification = builder.build();`);
-// Pontos helyzet nélkül (csak „Hozzávetőleges”) a háttérkövető ne kérdezzen újra minden indításnál:
-// a pontosítást az alkalmazás saját engedélykérője intézi, a követés hozzávetőleges hellyel is fut.
-patch(root + "BackgroundGeolocation.java", `@PermissionCallback
-    private void locationPermissionsCallback(PluginCall call) {
-
-        if (getPermissionState("location") != PermissionState.GRANTED) {`, `@PermissionCallback
-    private void locationPermissionsCallback(PluginCall call) {
-        // Private Place runtime patch
-        boolean coarse = getContext().checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
-        if (coarse && service != null) service.onPermissionsGranted();
-        if (!coarse && getPermissionState("location") != PermissionState.GRANTED) {`);
+// Csak „Hozzávetőleges” helynél is induljon a követés, és ne kérdezzen újra minden indításnál:
+// a pontosítást az alkalmazás saját engedélykérője intézi (PrivateRuntime.requestPreciseLocation).
+const pluginPath = root + "BackgroundGeolocation.java";
+let plugin = readFileSync(pluginPath, "utf8");
+if (!plugin.includes("privateLocationAllowed")) {
+  const denied = 'getPermissionState("location") != PermissionState.GRANTED';
+  const allowed = 'getPermissionState("location") == PermissionState.GRANTED';
+  const anchor = "public class BackgroundGeolocation extends Plugin {";
+  if (plugin.split(denied).length !== 4 || plugin.split(allowed).length !== 2 || !plugin.includes(anchor)) {
+    throw new Error(`Pinned native source changed: ${pluginPath}`);
+  }
+  plugin = plugin.replaceAll(denied, "!privateLocationAllowed()").replaceAll(allowed, "privateLocationAllowed()");
+  plugin = plugin.replace(anchor, `${anchor}
+    private boolean privateLocationAllowed() {
+        return getContext().checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            || getContext().checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }`);
+  writeFileSync(pluginPath, plugin);
+}
 patch(root + "BackgroundGeolocationService.java", "private final IBinder binder = new LocalBinder();", `// Private Place runtime patch
     private android.os.PowerManager.WakeLock sharingLock;
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
