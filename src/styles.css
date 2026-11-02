@@ -211,14 +211,46 @@
 }
 
 /* Lekerekített térképpanel, elmosódó szélekkel */
+/* Teljes képernyős élő térkép a háttérben; csak a térképablakban éles, körülötte matt üveg alatt látszik. */
+.map-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: oklch(0.14 0.02 258);
+}
+
+/* Elmosó fólia: a háttér színe megmarad, de áttetszik; az ablak helyén kivágás van (clip-path, lásd MapApp). */
+.map-veil {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background-color: oklch(0.14 0.02 258 / 0.52);
+  background-image:
+    radial-gradient(120% 60% at 0% 0%, oklch(0.82 0.19 165 / 0.1), transparent 60%),
+    radial-gradient(100% 60% at 100% 100%, oklch(0.6 0.12 250 / 0.14), transparent 60%);
+  backdrop-filter: blur(var(--veil-blur, 18px)) saturate(115%);
+  -webkit-backdrop-filter: blur(var(--veil-blur, 18px)) saturate(115%);
+}
+
+/* Ha a rendszer nem támogatja a kivágást vagy az elmosást, a fólia el sem jelenik (a térkép végig éles marad). */
+@supports (backdrop-filter: blur(1px)) and (clip-path: path(evenodd, "M0 0H1V1Z")) {
+  .map-veil { display: block; }
+}
+
+/* A térképablak: átlátszó keret az éles térkép fölött; csak a rajta lévő gombok kapnak érintést. */
 .map-panel {
   position: relative;
+  z-index: 2;
   overflow: hidden;
   border-radius: 1.75rem;
   border: 1px solid var(--glass-edge);
-  isolation: isolate;
-  background: oklch(0.14 0.02 258);
+  background: transparent;
+  pointer-events: none;
+  box-shadow: 0 10px 40px oklch(0.05 0.01 258 / 0.4);
 }
+
+.map-panel > * { pointer-events: auto; }
 
 .map-panel::after {
   content: "";
@@ -227,17 +259,13 @@
   z-index: 5;
   pointer-events: none;
   border-radius: inherit;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  mask-image: radial-gradient(ellipse 78% 78% at center, transparent 72%, black 100%);
-  -webkit-mask-image: radial-gradient(ellipse 78% 78% at center, transparent 72%, black 100%);
-  box-shadow: inset 0 0 40px 10px oklch(0.17 0.03 258 / 0.75);
+  box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.06), inset 0 0 28px 4px oklch(0.17 0.03 258 / 0.35);
 }
 
 .map-panel > .map-overlay { z-index: 10; }
 
-.map-panel .maplibregl-ctrl-bottom-right { z-index: 10; margin: 0 0.75rem 0.75rem 0; }
-.map-panel .maplibregl-ctrl-attrib {
+.map-bg .maplibregl-ctrl-bottom-right { z-index: 10; margin: 0 calc(var(--win-r, 0px) + 0.75rem) calc(var(--win-b, 0px) + 0.75rem) 0; }
+.map-bg .maplibregl-ctrl-attrib {
   background: var(--glass-bg) !important;
   backdrop-filter: blur(14px);
   color: var(--muted-foreground);
@@ -245,8 +273,8 @@
   border-radius: 9999px !important;
   font-size: 10px;
 }
-.map-panel .maplibregl-ctrl-attrib a { color: var(--muted-foreground); }
-.map-panel .maplibregl-ctrl-attrib-button { filter: invert(0.85); }
+.map-bg .maplibregl-ctrl-attrib a { color: var(--muted-foreground); }
+.map-bg .maplibregl-ctrl-attrib-button { filter: invert(0.85); }
 
 /* Profilképes jelölő a térképen */
 .map-avatar {
@@ -287,6 +315,7 @@
 /* Alsó, vízszintes személysáv: kapszulák, lágy szélső elmosással */
 .people-rail-wrap {
   position: relative;
+  z-index: 2;
   margin: 0 -0.5rem;
 }
 
