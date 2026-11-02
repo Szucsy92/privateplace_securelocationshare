@@ -93,6 +93,8 @@ import {
 import { installChunkReload, lazyImportWithReload } from "@/lib/chunkReload";
 
 installChunkReload();
+/** A „csak hozzávetőleges helyzet” figyelmeztetés alkalmanként egyszer jelenik meg. */
+let preciseHintShown = false;
 
 const LiveMap = lazy(lazyImportWithReload(() => import("@/components/LiveMap")));
 const SELF = "self";
