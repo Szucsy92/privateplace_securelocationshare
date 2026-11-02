@@ -126,10 +126,6 @@ export default function MapApp() {
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [profile, setProfile] = useState<LocalProfile | null>(null);
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
-  useEffect(() => {
-    document.documentElement.setAttribute("data-map-theme", prefs.mapTheme);
-    return () => document.documentElement.removeAttribute("data-map-theme");
-  }, [prefs.mapTheme]);
   const [rooms, setRooms] = useState<SavedRoom[]>([]);
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [shareToken, setShareToken] = useState<string | null>(null);
@@ -510,101 +506,14 @@ export default function MapApp() {
     [win],
   );
 
-  if (stopped) return <div className={`map-workspace glass-shell items-center justify-center gap-4 ${prefs.mapTheme === "light" ? "theme-light" : "theme-dark"}`}><h1 className="font-display text-lg">Private Place</h1><p className="text-sm text-muted-foreground">A helymegosztás leállítva.</p><Button onClick={() => setStopped(false)}><Play />Vissza a térképhez</Button></div>;
-  if (!mounted) return <div className={`map-workspace glass-shell ${prefs.mapTheme === "light" ? "theme-light" : "theme-dark"}`} />;
+  if (stopped) return <div className="map-workspace glass-shell items-center justify-center gap-4"><h1 className="font-display text-lg">Private Place</h1><p className="text-sm text-muted-foreground">A helymegosztás leállítva.</p><Button onClick={() => setStopped(false)}><Play />Vissza a térképhez</Button></div>;
+  if (!mounted) return <div className="map-workspace glass-shell" />;
 
   return (
     <div
-      className={`map-workspace glass-shell ${prefs.mapTheme === "light" ? "theme-light" : "theme-dark"}`}
+      className="map-workspace glass-shell"
       style={mapPadding ? ({ "--win-r": `${mapPadding.right}px`, "--win-b": `${mapPadding.bottom}px` } as CSSProperties) : undefined}
     >
-      <style>{`
-        .map-workspace.theme-dark {
-          color-scheme: dark;
-          --glass-panel-bg: rgba(15, 20, 31, 0.18);
-          --glass-panel-border: rgba(255, 255, 255, 0.24);
-          --glass-text: #f8fafc;
-        }
-        .map-workspace.theme-light {
-          color-scheme: light;
-          --glass-panel-bg: rgba(255, 255, 255, 0.16);
-          --glass-panel-border: rgba(255, 255, 255, 0.52);
-          --glass-text: #172033;
-          color: var(--glass-text);
-        }
-        /* Glass first: keep the map visible through controls instead of painting opaque capsules. */
-        .map-workspace .glass,
-        .map-workspace .glass-button,
-        .map-workspace .capsule,
-        .map-workspace .indicator,
-        .map-workspace .map-overlay,
-        .map-workspace header,
-        .map-workspace .people-rail,
-        .map-workspace .people-rail-wrap {
-          background-color: var(--glass-panel-bg) !important;
-          -webkit-backdrop-filter: blur(18px) saturate(145%);
-          backdrop-filter: blur(18px) saturate(145%);
-          border-color: var(--glass-panel-border);
-          color: var(--glass-text);
-        }
-        .map-workspace .glass-button,
-        .map-workspace .capsule,
-        .map-workspace .indicator,
-        .map-workspace button.rounded-full {
-          box-shadow: 0 4px 18px rgba(0, 0, 0, 0.08);
-          transition: background-color 180ms ease, border-color 180ms ease, transform 180ms ease;
-        }
-        .map-workspace .glass-button:hover,
-        .map-workspace .capsule:hover,
-        .map-workspace .indicator:hover {
-          background-color: rgba(255, 255, 255, 0.24) !important;
-        }
-        .map-workspace.theme-light .glass,
-        .map-workspace.theme-light .glass-button,
-        .map-workspace.theme-light .capsule,
-        .map-workspace.theme-light .indicator,
-        .map-workspace.theme-light .map-overlay,
-        .map-workspace.theme-light header,
-        .map-workspace.theme-light .people-rail,
-        .map-workspace.theme-light .people-rail-wrap {
-          --glass-panel-bg: rgba(255, 255, 255, 0.24);
-          --glass-panel-border: rgba(255, 255, 255, 0.62);
-          color: #172033;
-        }
-        .map-workspace.theme-light [role="dialog"],
-        .map-workspace.theme-light .dialog-content,
-        .map-workspace.theme-light [data-radix-dialog-content] {
-          background: rgba(250, 252, 255, 0.82) !important;
-          color: #172033 !important;
-          border-color: rgba(100, 116, 139, 0.28) !important;
-          -webkit-backdrop-filter: blur(24px) saturate(150%);
-          backdrop-filter: blur(24px) saturate(150%);
-        }
-        .map-workspace.theme-light input,
-        .map-workspace.theme-light textarea,
-        .map-workspace.theme-light select {
-          background: rgba(255, 255, 255, 0.55);
-          color: #172033;
-        }
-        .map-workspace.theme-light .text-muted-foreground { color: #536174 !important; }
-        html[data-map-theme="light"] [role="dialog"],
-        html[data-map-theme="light"] [data-radix-dialog-content],
-        html[data-map-theme="light"] [data-sonner-toaster] [data-sonner-toast] {
-          background: rgba(250, 252, 255, 0.84) !important;
-          color: #172033 !important;
-          border-color: rgba(100, 116, 139, 0.28) !important;
-          -webkit-backdrop-filter: blur(24px) saturate(150%);
-          backdrop-filter: blur(24px) saturate(150%);
-        }
-        html[data-map-theme="light"] input,
-        html[data-map-theme="light"] textarea,
-        html[data-map-theme="light"] select {
-          background-color: rgba(255, 255, 255, 0.58);
-          color: #172033;
-        }
-        .map-veil { opacity: 0.75; }
-        .map-mirror { filter: blur(12px) saturate(125%); }
-      `}</style>
       <div className="map-bg">
         <Suspense fallback={<div className="h-full" />}>
           <LiveMap
@@ -622,7 +531,7 @@ export default function MapApp() {
           />
         </Suspense>
       </div>
-      <div className="map-veil" style={{ ...(win ? veilStyle(win) : { visibility: "hidden" }), opacity: 0.75 }} aria-hidden="true">
+      <div className="map-veil" style={win ? veilStyle(win) : { visibility: "hidden" }} aria-hidden="true">
         <canvas ref={mirrorRef} className="map-mirror" />
       </div>
       <header className="glass z-10 flex shrink-0 items-center justify-between gap-2 px-3 py-2">
