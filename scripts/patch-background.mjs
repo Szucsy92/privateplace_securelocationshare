@@ -15,7 +15,29 @@ patch(root + "BackgroundGeolocation.java", "backgroundNotification = builder.bui
                     control, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
                 builder.addAction(android.R.drawable.ic_media_pause, action.endsWith("EXIT") ? "Kilépés" : "Megosztás leállítása", pending);
             }
+            // Szolgáltatás-értesítés: azonnal látszik (Android 12+ különben akár 10 mp-et késleltet), nem csörög újra.
+            builder.setCategory(Notification.CATEGORY_SERVICE).setOnlyAlertOnce(true).setShowWhen(false);
+            if (Build.VERSION.SDK_INT >= 31) builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
             backgroundNotification = builder.build();`);
+// Csak „Hozzávetőleges” helynél is induljon a követés, és ne kérdezzen újra minden indításnál:
+// a pontosítást az alkalmazás saját engedélykérője intézi (PrivateRuntime.requestPreciseLocation).
+const pluginPath = root + "BackgroundGeolocation.java";
+let plugin = readFileSync(pluginPath, "utf8");
+if (!plugin.includes("privateLocationAllowed")) {
+  const denied = 'getPermissionState("location") != PermissionState.GRANTED';
+  const allowed = 'getPermissionState("location") == PermissionState.GRANTED';
+  const anchor = "public class BackgroundGeolocation extends Plugin {";
+  if (plugin.split(denied).length !== 4 || plugin.split(allowed).length !== 2 || !plugin.includes(anchor)) {
+    throw new Error(`Pinned native source changed: ${pluginPath}`);
+  }
+  plugin = plugin.replaceAll(denied, "!privateLocationAllowed()").replaceAll(allowed, "privateLocationAllowed()");
+  plugin = plugin.replace(anchor, `${anchor}
+    private boolean privateLocationAllowed() {
+        return getContext().checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            || getContext().checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }`);
+  writeFileSync(pluginPath, plugin);
+}
 patch(root + "BackgroundGeolocationService.java", "private final IBinder binder = new LocalBinder();", `// Private Place runtime patch
     private android.os.PowerManager.WakeLock sharingLock;
     @Override public int onStartCommand(Intent intent, int flags, int startId) {

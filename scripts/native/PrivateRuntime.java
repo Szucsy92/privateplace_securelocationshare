@@ -1,5 +1,7 @@
 package hu.privateplace.app;
 
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -11,6 +13,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import androidx.core.app.ActivityCompat;
+import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 import com.getcapacitor.JSObject;
@@ -33,27 +36,55 @@ public class PrivateRuntime extends Plugin {
         LocalBroadcastManager.getInstance(getContext()).registerReceiver(receiver, new IntentFilter("hu.privateplace.STOPPED"));
     }
     @PluginMethod public void consumeStop(PluginCall call) {
-        android.content.SharedPreferences prefs = getContext().getSharedPreferences("privateplace.runtime", Context.MODE_PRIVATE);
+        android.content.SharedPreferences prefs = prefs();
         JSObject data = new JSObject();
         data.put("stopped", prefs.getBoolean("stopped", false));
         prefs.edit().remove("stopped").apply();
         call.resolve(data);
     }
-    // Engedélyek: háttérbeli helyzet ("Mindig engedélyezés") és a megfelelő rendszerbeállítás-oldalak.
+
+    // Engedélyek: pontos helyzet, háttérbeli helyzet ("Mindig engedélyezés"), értesítések
+    // és a hozzájuk tartozó rendszerbeállítás-oldalak.
+    private static final String FINE = android.Manifest.permission.ACCESS_FINE_LOCATION;
+    private static final String COARSE = android.Manifest.permission.ACCESS_COARSE_LOCATION;
     private static final String BACKGROUND = "android.permission.ACCESS_BACKGROUND_LOCATION";
-    private PluginCall pendingBackground;
+    // A háttérkövető értesítési csatornája (a háttérkövető csomagnevével azonos azonosító).
+    private static final String CHANNEL = "com.equimaps.capacitor_background_geolocation";
+    private PluginCall pendingCall;
+    private String pendingKind;
     private boolean paused;
+
+    private android.content.SharedPreferences prefs() {
+        return getContext().getSharedPreferences("privateplace.runtime", Context.MODE_PRIVATE);
+    }
     private boolean granted(String permission) {
         return ContextCompat.checkSelfPermission(getContext(), permission) == PackageManager.PERMISSION_GRANTED;
     }
     private boolean foregroundLocation() {
-        return granted(android.Manifest.permission.ACCESS_FINE_LOCATION) || granted(android.Manifest.permission.ACCESS_COARSE_LOCATION);
+        return granted(FINE) || granted(COARSE);
+    }
+    /** granted = pontos; limited = csak hozzávetőleges; denied = a rendszer már nem kérdez. */
+    private String locationState() {
+        if (granted(FINE)) return "granted";
+        if (granted(COARSE)) return "limited";
+        if (!prefs().getBoolean("locationAsked", false) || getActivity() == null) return "prompt";
+        return ActivityCompat.shouldShowRequestPermissionRationale(getActivity(), FINE) ? "prompt" : "denied";
     }
     private String backgroundState() {
         if (!foregroundLocation()) return "prompt";
         if (Build.VERSION.SDK_INT < 29) return "granted";
         if (granted(BACKGROUND)) return "granted";
-        return getContext().getSharedPreferences("privateplace.runtime", Context.MODE_PRIVATE).getBoolean("backgroundAsked", false) ? "denied" : "prompt";
+        return prefs().getBoolean("backgroundAsked", false) ? "denied" : "prompt";
+    }
+    /** off = az alkalmazás értesítései tiltva; channelOff = csak a helymegosztás csatornája némítva. */
+    private String notificationState() {
+        if (!NotificationManagerCompat.from(getContext()).areNotificationsEnabled()) return "off";
+        if (Build.VERSION.SDK_INT >= 26) {
+            NotificationManager manager = (NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
+            NotificationChannel channel = manager != null ? manager.getNotificationChannel(CHANNEL) : null;
+            if (channel != null && channel.getImportance() == NotificationManager.IMPORTANCE_NONE) return "channelOff";
+        }
+        return "granted";
     }
     private boolean open(Intent intent) {
         try {
@@ -67,34 +98,69 @@ public class PrivateRuntime extends Plugin {
     private boolean openAppDetails() {
         return open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", getContext().getPackageName(), null)));
     }
-    @PluginMethod public void checkBackgroundLocation(PluginCall call) {
+    private void resolveState(PluginCall call, String kind) {
         JSObject data = new JSObject();
-        data.put("state", backgroundState());
+        data.put("state", "location".equals(kind) ? locationState() : backgroundState());
         call.resolve(data);
+    }
+    /**
+     * Rendszerablakot kér; ha 1,5 mp alatt nem jelenik meg (a rendszer már nem kérdez),
+     * az alkalmazás beállításoldalát nyitja meg, ha ezt a hívó engedi.
+     */
+    private void ask(PluginCall call, String kind, String[] permissions, int code, boolean settingsFallback) {
+        if (pendingCall != null) resolveState(pendingCall, pendingKind);
+        pendingCall = call;
+        pendingKind = kind;
+        paused = false;
+        prefs().edit().putBoolean(kind + "Asked", true).apply();
+        ActivityCompat.requestPermissions(getActivity(), permissions, code);
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            if (pendingCall != call || paused) return;
+            if (!settingsFallback || !openAppDetails()) {
+                pendingCall = null;
+                resolveState(call, kind);
+            }
+        }, 1500);
+    }
+
+    @PluginMethod public void checkLocation(PluginCall call) {
+        resolveState(call, "location");
+    }
+    /** Pontos helyzet: Android 12+ a „Pontos” kapcsolóval kérdez, hozzávetőlegesnél a frissítő ablakot mutatja. */
+    @PluginMethod public void requestPreciseLocation(PluginCall call) {
+        if (granted(FINE) || getActivity() == null) {
+            resolveState(call, "location");
+            return;
+        }
+        ask(call, "location", new String[]{FINE, COARSE}, 28361, call.getBoolean("openSettings", true));
+    }
+    @PluginMethod public void checkBackgroundLocation(PluginCall call) {
+        resolveState(call, "background");
     }
     @PluginMethod public void requestBackgroundLocation(PluginCall call) {
         if (Build.VERSION.SDK_INT < 29 || granted(BACKGROUND) || !foregroundLocation() || getActivity() == null) {
-            checkBackgroundLocation(call);
+            resolveState(call, "background");
             return;
         }
-        if (pendingBackground != null) checkBackgroundLocation(pendingBackground);
-        pendingBackground = call;
-        paused = false;
-        getContext().getSharedPreferences("privateplace.runtime", Context.MODE_PRIVATE).edit().putBoolean("backgroundAsked", true).apply();
         // Android 10: rendszerablak; Android 11+: közvetlenül a hely-engedély oldala nyílik meg.
-        ActivityCompat.requestPermissions(getActivity(), new String[]{BACKGROUND}, 28360);
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            if (pendingBackground == null || paused) return;
-            // A rendszer már nem kérdez újra: az alkalmazás beállításait nyitjuk meg.
-            if (!openAppDetails()) { checkBackgroundLocation(pendingBackground); pendingBackground = null; }
-        }, 1500);
+        ask(call, "background", new String[]{BACKGROUND}, 28360, true);
+    }
+    @PluginMethod public void checkNotifications(PluginCall call) {
+        JSObject data = new JSObject();
+        data.put("state", notificationState());
+        call.resolve(data);
     }
     @PluginMethod public void openSettings(PluginCall call) {
         String target = call.getString("target", "app");
         String pkg = getContext().getPackageName();
         boolean opened = false;
         if ("notifications".equals(target) && Build.VERSION.SDK_INT >= 26) {
-            opened = open(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, pkg));
+            // Ha csak a helymegosztás csatornája némított, egyenesen annak az oldalát nyitjuk meg.
+            if ("channelOff".equals(notificationState())) {
+                opened = open(new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, pkg).putExtra(Settings.EXTRA_CHANNEL_ID, CHANNEL));
+            }
+            if (!opened) opened = open(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, pkg));
         } else if ("locationServices".equals(target)) {
             opened = open(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
         }
@@ -107,10 +173,11 @@ public class PrivateRuntime extends Plugin {
     }
     @Override protected void handleOnResume() {
         super.handleOnResume();
-        if (pendingBackground != null && paused) {
-            PluginCall call = pendingBackground;
-            pendingBackground = null;
-            checkBackgroundLocation(call);
+        if (pendingCall != null && paused) {
+            PluginCall call = pendingCall;
+            String kind = pendingKind;
+            pendingCall = null;
+            resolveState(call, kind);
         }
     }
     @Override protected void handleOnDestroy() {

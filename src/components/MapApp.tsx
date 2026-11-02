@@ -93,6 +93,8 @@ import {
 import { installChunkReload, lazyImportWithReload } from "@/lib/chunkReload";
 
 installChunkReload();
+/** A „csak hozzávetőleges helyzet” figyelmeztetés alkalmanként egyszer jelenik meg. */
+let preciseHintShown = false;
 
 const LiveMap = lazy(lazyImportWithReload(() => import("@/components/LiveMap")));
 const SELF = "self";
@@ -303,6 +305,15 @@ export default function MapApp() {
           duration: 12000,
           action: { label: "Bekapcsolás", onClick: () => void openPermissionSettings("notifications") },
         }),
+      onPreciseMissing: () => {
+        if (preciseHintShown) return;
+        preciseHintShown = true;
+        toast("Csak hozzávetőleges a helyzeted", {
+          description: "A „Pontos hely” kapcsoló ki van kapcsolva, ezért a jelölőd akár több száz métert is tévedhet.",
+          duration: 12000,
+          action: { label: "Pontosítás", onClick: () => void requestPermission("location") },
+        });
+      },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted, profile !== null, stopped, nativeStopReady, gpsRequest, backgroundSharing, dialog === "permissions", dialog === "welcome"]);
@@ -900,7 +911,7 @@ async function notifyShareRequest(who: string) {
 }
 
 const PERM_INFO: Record<PermKey, { label: string; hint: string; icon: React.ComponentType<{ className?: string }> }> = {
-  location: { label: "Helyzet", hint: "A saját pozíciód a térképen. A hozzávetőleges hely is működik; a „Pontos” jobb.", icon: MapPin },
+  location: { label: "Pontos helyzet", hint: "A saját pozíciód a térképen. A rendszerablakban válaszd a „Pontos” lehetőséget.", icon: MapPin },
   backgroundLocation: {
     label: "Helyzet lezárt képernyőnél",
     hint: "A megnyíló beállításokban: Engedélyek → Hely → Mindig engedélyezés.",
@@ -982,7 +993,11 @@ function PermissionsPanel({ native, onDone }: { native: boolean; onDone: () => v
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold">{info.label}</p>
                   <p className="text-xs text-muted-foreground">
-                    {denied && !native ? "Elutasítva – a böngésző címsoránál engedélyezheted." : info.hint}
+                    {denied && !native
+                      ? "Elutasítva – a böngésző címsoránál engedélyezheted."
+                      : state === "limited"
+                        ? "Most csak hozzávetőleges. Koppints a Pontosításra, és kapcsold be a „Pontos hely”-et."
+                        : info.hint}
                   </p>
                 </div>
                 {granted ? (
@@ -998,7 +1013,13 @@ function PermissionsPanel({ native, onDone }: { native: boolean; onDone: () => v
                     disabled={busy !== null || (denied && !native)}
                     onClick={() => void askOne(key)}
                   >
-                    {state === "manual" || (denied && native) ? "Beállítás" : denied ? "Elutasítva" : "Engedélyezés"}
+                    {state === "limited"
+                      ? "Pontosítás"
+                      : state === "manual" || (denied && native)
+                        ? "Beállítás"
+                        : denied
+                          ? "Elutasítva"
+                          : "Engedélyezés"}
                   </Button>
                 )}
               </div>
