@@ -911,7 +911,7 @@ async function notifyShareRequest(who: string) {
 }
 
 const PERM_INFO: Record<PermKey, { label: string; hint: string; icon: React.ComponentType<{ className?: string }> }> = {
-  location: { label: "Helyzet", hint: "A saját pozíciód a térképen. A hozzávetőleges hely is működik; a „Pontos” jobb.", icon: MapPin },
+  location: { label: "Pontos helyzet", hint: "A saját pozíciód a térképen. A rendszerablakban válaszd a „Pontos” lehetőséget.", icon: MapPin },
   backgroundLocation: {
     label: "Helyzet lezárt képernyőnél",
     hint: "A megnyíló beállításokban: Engedélyek → Hely → Mindig engedélyezés.",
