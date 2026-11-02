@@ -74,8 +74,11 @@
   --live: #14B8A6;
   --warn: #FBBF24;
   --dialog-backdrop: oklch(0.08 0.02 258 / 0.5);
-  --glass-bg: oklch(0.315 0.03 258 / 0.72);
-  --glass-strong: oklch(0.252 0.032 258 / 0.92);
+  --glass-bg: oklch(0.3 0.03 258 / 0.9);
+  --glass-strong: oklch(0.252 0.032 258 / 0.97);
+  --frost-bg: oklch(0.31 0.03 258 / 0.88);
+  --frost-hover: oklch(0.38 0.035 258 / 0.92);
+  --frost-blur: blur(18px) saturate(140%);
   --glass-inset: oklch(1 0 0 / 0.045);
   --glass-edge: oklch(1 0 0 / 0.1);
   --glow: oklch(0.82 0.19 165 / 0.5);
@@ -191,7 +194,7 @@
 }
 
 .glass-inset {
-  background: var(--glass-inset);
+  background: oklch(0.27 0.03 258 / 0.82);
   border: 1px solid oklch(1 0 0 / 0.07);
   box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.05);
   backdrop-filter: blur(24px) saturate(120%);
@@ -199,13 +202,16 @@
 }
 
 .glass-button {
-  background: oklch(1 0 0 / 0.05);
+  background: var(--frost-bg);
   border-color: oklch(1 0 0 / 0.12);
-  backdrop-filter: blur(12px);
+  backdrop-filter: var(--frost-blur);
+  -webkit-backdrop-filter: var(--frost-blur);
 }
 
 .glass-input {
-  background: oklch(0.12 0.02 258 / 0.45);
+  background: oklch(0.16 0.025 258 / 0.85);
+  backdrop-filter: blur(16px) saturate(130%);
+  -webkit-backdrop-filter: blur(16px) saturate(130%);
   border-color: oklch(1 0 0 / 0.12);
   box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.25);
 }
@@ -219,22 +225,36 @@
   background: oklch(0.14 0.02 258);
 }
 
-/* Elmosó fólia: a háttér színe megmarad, de áttetszik; az ablak helyén kivágás van (clip-path, lásd MapApp). */
+/* Elmosott térkép a térképablakon kívül. A veil egy kis tükör-canvast tartalmaz, amibe a LiveMap minden
+ * képkockát átmásol; ezt sima CSS filter mossa el (a WebGL-vászon backdrop-filterrel nem mosható megbízhatóan).
+ * Az ablak helyén kivágás van (clip-path, lásd MapApp). */
 .map-veil {
   display: none;
   position: absolute;
   inset: 0;
   z-index: 1;
-  background-color: oklch(0.14 0.02 258 / 0.52);
+  overflow: hidden;
+}
+.map-mirror {
+  position: absolute;
+  left: -24px;
+  top: -24px;
+  width: calc(100% + 48px);
+  height: calc(100% + 48px);
+  filter: blur(12px) saturate(115%);
+}
+.map-veil::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-color: oklch(0.14 0.02 258 / 0.5);
   background-image:
     radial-gradient(120% 60% at 0% 0%, oklch(0.82 0.19 165 / 0.1), transparent 60%),
     radial-gradient(100% 60% at 100% 100%, oklch(0.6 0.12 250 / 0.14), transparent 60%);
-  backdrop-filter: blur(var(--veil-blur, 18px)) saturate(115%);
-  -webkit-backdrop-filter: blur(var(--veil-blur, 18px)) saturate(115%);
 }
 
-/* Ha a rendszer nem támogatja a kivágást vagy az elmosást, a fólia el sem jelenik (a térkép végig éles marad). */
-@supports (backdrop-filter: blur(1px)) and (clip-path: path(evenodd, "M0 0H1V1Z")) {
+/* Ha a rendszer nem támogatja a kivágást, a fólia el sem jelenik (a térkép végig éles marad). */
+@supports (clip-path: path(evenodd, "M0 0H1V1Z")) {
   .map-veil { display: block; }
 }
 
@@ -268,6 +288,7 @@
 .map-bg .maplibregl-ctrl-attrib {
   background: var(--glass-bg) !important;
   backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   color: var(--muted-foreground);
   border: 1px solid var(--glass-edge);
   border-radius: 9999px !important;
@@ -385,12 +406,12 @@
 }
 .indicator[data-state="on"] {
   color: var(--primary);
-  background-color: oklch(0.82 0.19 165 / 0.16);
+  background-color: color-mix(in oklch, var(--live) 18%, var(--frost-bg));
   box-shadow: 0 0 0 1px oklch(0.82 0.19 165 / 0.55), 0 0 14px oklch(0.82 0.19 165 / 0.4);
 }
 .capsule.indicator[data-state="on"] {
   color: var(--foreground);
-  background-color: oklch(0.82 0.19 165 / 0.12);
+  background-color: color-mix(in oklch, var(--live) 14%, var(--glass-bg));
 }
 .indicator[data-state="off"] { opacity: 0.72; }
 .capsule.indicator[data-state="off"] { opacity: 1; }
@@ -442,8 +463,8 @@
 /* Felugró ablakok: matt üveg */
 .dialog-backdrop {
   background-color: var(--dialog-backdrop);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(14px) saturate(120%);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
 }
 
 [role="dialog"].dialog-surface,
@@ -515,13 +536,14 @@
   font-size: 0.75rem;
   font-weight: 600;
   white-space: nowrap;
-  background: oklch(1 0 0 / 0.05);
+  background: var(--frost-bg);
   border: 1px solid oklch(1 0 0 / 0.12);
-  backdrop-filter: blur(12px);
+  backdrop-filter: var(--frost-blur);
+  -webkit-backdrop-filter: var(--frost-blur);
   transition: background-color 200ms, border-color 200ms, box-shadow 200ms;
 }
 .share-pill[data-state="on"] {
-  background: oklch(0.82 0.19 165 / 0.14);
+  background: color-mix(in oklch, var(--live) 16%, var(--frost-bg));
   border-color: oklch(0.82 0.19 165 / 0.45);
   color: var(--live);
 }
@@ -623,7 +645,7 @@
 .sharing-control[data-expanded="true"] { width: 164px; gap: 6px; }
 .sharing-label { display: block; width: 0; opacity: 0; overflow: hidden; font-size: 11px; white-space: nowrap; }
 .sharing-control[data-expanded="true"] .sharing-label { width: 124px; opacity: 1; }
-.sharing-control:not([data-status="off"]) { animation: signal-pulse 1.8s ease-out infinite; background: color-mix(in srgb, var(--room-mint) 18%, var(--glass-bg)); color: var(--room-mint); }
+.sharing-control:not([data-status="off"]) { animation: signal-pulse 1.8s ease-out infinite; background: color-mix(in srgb, var(--room-mint) 18%, var(--glass-bg)); color: var(--room-mint); backdrop-filter: var(--frost-blur); -webkit-backdrop-filter: var(--frost-blur); }
 .header-signal { display: block; width: 5px; height: 5px; margin: 4px auto 0 2px; border-radius: 50%; background: var(--signal-color); }
 .header-signal:not([data-status="off"]) { animation: signal-pulse 1.8s ease-out infinite; }
 @keyframes signal-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal-color) 45%, transparent); } 85%,100% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--signal-color) 0%, transparent); } }
@@ -638,7 +660,7 @@
 .person-bubble { min-width: 144px; width: max-content; max-width: min(320px, calc(100vw - 48px)); border-radius: 12px; padding: 8px 10px; text-align: center; animation: bubble-open 160ms ease-out; }
 .bubble-address { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.35; padding: 3px 0; }
 @keyframes bubble-open { from { opacity: 0; transform: translateY(8px) scale(.9); } to { opacity: 1; transform: none; } }
-.room-name-circle { width: 84px; height: 84px; flex-shrink: 0; padding: 8px; border-radius: 50%; border: 2px solid var(--room-color); background: color-mix(in srgb, var(--room-color) 16%, var(--glass-bg)); }
+.room-name-circle { width: 84px; height: 84px; flex-shrink: 0; padding: 8px; border-radius: 50%; border: 2px solid var(--room-color); background: color-mix(in srgb, var(--room-color) 16%, var(--glass-bg)); backdrop-filter: var(--frost-blur); -webkit-backdrop-filter: var(--frost-blur); }
 .room-name-circle span { white-space: normal; overflow-wrap: anywhere; font-size: 12px; line-height: 1.2; max-height: 56px; overflow: hidden; }
 .room-row > div:first-child > button:last-child svg { width: 32px; height: 32px; }
 .room-expansion { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 240ms ease; }
@@ -655,3 +677,48 @@
   .sharing-control, .header-signal, .person-bubble, .transport-options { animation: none !important; }
   .room-expansion, .sharing-control { transition: none; }
 }
+
+/*
+ * Matt üveg mindenhol, a térképablak kivételével:
+ * minden gomb, kapszula és panel kap blurt és tömör (nem átlátszó) hátteret.
+ * A :where() miatt a specificitás nulla, így a konkrét osztályok (.capsule,
+ * .indicator[data-state], .room-name-circle stb.) és a tömör színű gombok
+ * (bg-primary / bg-secondary / bg-destructive) változatlanul felülírják.
+ */
+:where(.map-workspace, [role="dialog"], .glass-toast)
+  :where(button:not([class*="bg-primary"]):not([class*="bg-secondary"]):not([class*="bg-destructive"]):not(.room-swatch)) {
+  background-color: var(--frost-bg);
+  backdrop-filter: var(--frost-blur);
+  -webkit-backdrop-filter: var(--frost-blur);
+}
+:where(.map-workspace, [role="dialog"], .glass-toast)
+  :where(button:not([class*="bg-primary"]):not([class*="bg-secondary"]):not([class*="bg-destructive"]):not(.room-swatch)):hover {
+  background-color: var(--frost-hover);
+}
+
+/* Térképablak fölötti vezérlők (iránytű, téma, közlekedés) és buborékok */
+.map-overlay,
+.transport-control,
+.transport-options,
+.person-bubble {
+  backdrop-filter: var(--frost-blur);
+  -webkit-backdrop-filter: var(--frost-blur);
+}
+.transport-control,
+.transport-options,
+.person-bubble {
+  background-color: var(--glass-strong);
+  border: 1px solid var(--glass-edge);
+}
+
+/* Fejléc, személysáv és a sáv kapszulái: tömör matt üveg */
+.map-workspace > header,
+.capsule {
+  background-color: var(--glass-bg);
+  backdrop-filter: var(--frost-blur);
+  -webkit-backdrop-filter: var(--frost-blur);
+}
+
+/* Térképablak fölötti vezérlők: a gomb alatt éles a térkép, ezért ott szinte tömör a háttér */
+.map-overlay { background-color: var(--glass-strong); }
+.map-overlay.indicator[data-state="on"] { background-color: color-mix(in oklch, var(--live) 18%, var(--glass-strong)); }
