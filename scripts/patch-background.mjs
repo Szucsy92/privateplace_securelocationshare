@@ -15,7 +15,21 @@ patch(root + "BackgroundGeolocation.java", "backgroundNotification = builder.bui
                     control, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
                 builder.addAction(android.R.drawable.ic_media_pause, action.endsWith("EXIT") ? "Kilépés" : "Megosztás leállítása", pending);
             }
+            // Szolgáltatás-értesítés: azonnal látszik (Android 12+ különben akár 10 mp-et késleltet), nem csörög újra.
+            builder.setCategory(Notification.CATEGORY_SERVICE).setOnlyAlertOnce(true).setShowWhen(false);
+            if (Build.VERSION.SDK_INT >= 31) builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
             backgroundNotification = builder.build();`);
+// Pontos helyzet nélkül (csak „Hozzávetőleges”) a háttérkövető ne kérdezzen újra minden indításnál:
+// a pontosítást az alkalmazás saját engedélykérője intézi, a követés hozzávetőleges hellyel is fut.
+patch(root + "BackgroundGeolocation.java", `@PermissionCallback
+    private void locationPermissionsCallback(PluginCall call) {
+
+        if (getPermissionState("location") != PermissionState.GRANTED) {`, `@PermissionCallback
+    private void locationPermissionsCallback(PluginCall call) {
+        // Private Place runtime patch
+        boolean coarse = getContext().checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        if (coarse && service != null) service.onPermissionsGranted();
+        if (!coarse && getPermissionState("location") != PermissionState.GRANTED) {`);
 patch(root + "BackgroundGeolocationService.java", "private final IBinder binder = new LocalBinder();", `// Private Place runtime patch
     private android.os.PowerManager.WakeLock sharingLock;
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
