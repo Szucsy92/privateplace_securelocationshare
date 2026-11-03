@@ -1,107 +1,37 @@
-// src/lib/tracking.ts
-import { stationaryDetector, PositionCoordinates } from './stationary';
+type TrackPoint = { lat: number; lng: number; t: number };
 
-export interface TrackingCallback {
-  (position: PositionCoordinates, isStationary: boolean): void;
+/** A nyomvonalban ennyi ideig és legfeljebb ennyi pont marad. */
+const TRAIL_WINDOW_MS = 30 * 60 * 1000;
+const TRAIL_MAX_POINTS = 600;
+/** A megosztás legfeljebb másodpercenként küld. */
+const PUBLISH_INTERVAL_MS = 1000;
+
+/** Saját követés: megosztás nélkül nem küldünk helyadatot, bekapcsolva legfeljebb másodpercenként. */
+export function shouldPublishLocation(sharing: boolean, now: number, lastSent: number): boolean {
+  return sharing && now - lastSent >= PUBLISH_INTERVAL_MS;
 }
 
-// Belső útvonal-történet a MapApp és PeerNetwork számára
-let trackHistory: PositionCoordinates[] = [];
-
-class GPSWalkerTracker {
-  private watchId: number | null = null;
-  private lastProcessedPos: PositionCoordinates | null = null;
-
-  public startTracking(onPositionUpdate: TrackingCallback, onError?: (error: GeolocationPositionError) => void) {
-    if (!navigator.geolocation) {
-      console.error('A böngésző nem támogatja a helymeghatározást.');
-      return;
-    }
-
-    const options: PositionOptions = {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 0,
-    };
-
-    this.watchId = navigator.geolocation.watchPosition(
-      (pos: GeolocationPosition) => {
-        const rawCoords: PositionCoordinates = {
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-          speed: pos.coords.speed,
-          accuracy: pos.coords.accuracy,
-          timestamp: pos.timestamp,
-        };
-
-        const { position: filteredPosition, isStationary } = stationaryDetector.processPosition(rawCoords);
-        const smoothedPosition = this.applySmoothing(filteredPosition, isStationary);
-
-        this.lastProcessedPos = smoothedPosition;
-        
-        // Automatikusan mentjük a történetbe is
-        appendTrackPoint(smoothedPosition);
-
-        onPositionUpdate(smoothedPosition, isStationary);
-      },
-      (err) => {
-        if (onError) onError(err);
-      },
-      options
-    );
+/**
+ * Új pont a nyomvonalhoz (mindig új tömböt ad vissza). Ha a koordináta megegyezik az utolsóval (álló helyzet,
+ * drift-szűrő), csak az időbélyeg frissül, így a nyomvonal nem telik meg azonos pontokkal.
+ */
+export function appendTrackPoint(points: TrackPoint[] | null | undefined, point: TrackPoint, now: number): TrackPoint[] {
+  const list = Array.isArray(points) ? points : [];
+  const last = list[list.length - 1];
+  let next: TrackPoint[];
+  if (last && point.t < last.t) {
+    next = list; // elkésett, régebbi mérés: nem tesszük a nyomvonal végére
+  } else if (last && last.lat === point.lat && last.lng === point.lng) {
+    next = [...list.slice(0, -1), { ...point }];
+  } else {
+    next = [...list, { ...point }];
   }
-
-  public stopTracking() {
-    if (this.watchId !== null) {
-      navigator.geolocation.clearWatch(this.watchId);
-      this.watchId = null;
-    }
-  }
-
-  private applySmoothing(newPos: PositionCoordinates, isStationary: boolean): PositionCoordinates {
-    if (isStationary || !this.lastProcessedPos) {
-      return newPos;
-    }
-
-    const alpha = 0.7; 
-    const smoothedLat = alpha * newPos.latitude + (1 - alpha) * this.lastProcessedPos.latitude;
-    const smoothedLon = alpha * newPos.longitude + (1 - alpha) * this.lastProcessedPos.longitude;
-
-    return {
-      ...newPos,
-      latitude: smoothedLat,
-      longitude: smoothedLon,
-    };
-  }
+  const cutoff = now - TRAIL_WINDOW_MS;
+  const trimmed = next.filter((p, i) => p.t >= cutoff || i === next.length - 1);
+  return trimmed.length > TRAIL_MAX_POINTS ? trimmed.slice(-TRAIL_MAX_POINTS) : trimmed;
 }
 
-export const gpsTracker = new GPSWalkerTracker();
-
-// Kompatibilitás a MapApp és usePeerNetwork által elvárt függvényekkel
-export function appendTrackPoint(position: PositionCoordinates): void {
-  if (!position) return;
-  trackHistory.push(position);
-  if (trackHistory.length > 500) {
-    trackHistory.shift(); // Ne nőjön végtelenre a memória
-  }
-}
-
-export function clearTrackHistory(): void {
-  trackHistory = [];
-}
-
-export function shouldPublishLocation(newPos: PositionCoordinates, lastPublishedPos: PositionCoordinates | null): boolean {
-  if (!lastPublishedPos) return true;
-  // Ha 3 méternél többet mozdult, küldjük frissítésként a peer hálózatnak
-  const R = 6371e3;
-  const dLat = (newPos.latitude - lastPublishedPos.latitude) * (Math.PI / 180);
-  const dLon = (newPos.longitude - lastPublishedPos.longitude) * (Math.PI / 180);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lastPublishedPos.latitude * (Math.PI / 180)) * Math.cos(newPos.latitude * (Math.PI / 180)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  const distance = R * c;
-  
-  return distance > 3.0;
+/** Előzmények törlése: a saját aktuális pozíció továbbra is látszik. */
+export function clearTrackHistory(points: TrackPoint[] | null | undefined): TrackPoint[] {
+  return Array.isArray(points) ? points.slice(-1) : [];
 }
