@@ -36,7 +36,11 @@ type Props = {
   compassRef?: RefObject<HTMLElement | null>;
   addressAllowed: boolean;
   onAllowAddress: () => void;
+  /** Az éles térképablak távolsága a képernyő széleitől: a középpont és a ráközelítés ehhez igazodik. */
+  padding?: MapPadding;
 };
+
+export type MapPadding = { top: number; right: number; bottom: number; left: number };
 
 type MarkerState = {
   marker: MlMarker;
@@ -124,7 +128,7 @@ function applyMapContrast(map: MlMap, theme: "dark" | "light") {
   }
 }
 
-export default function LiveMap({ people, follow, showTrails, orientation, theme, onUserPan, compassRef, addressAllowed, onAllowAddress }: Props) {
+export default function LiveMap({ people, follow, showTrails, orientation, theme, onUserPan, compassRef, addressAllowed, onAllowAddress, padding }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MlMap | null>(null);
   const markerCtorRef = useRef<typeof MlMarker | null>(null);
@@ -132,8 +136,8 @@ export default function LiveMap({ people, follow, showTrails, orientation, theme
   const headingsRef = useRef(new Map<string, number>());
   const flyingRef = useRef(false);
   const didCenterRef = useRef(false);
-  const propsRef = useRef({ follow, orientation, onUserPan });
-  propsRef.current = { follow, orientation, onUserPan };
+  const propsRef = useRef({ follow, orientation, onUserPan, padding });
+  propsRef.current = { follow, orientation, onUserPan, padding };
   const compassElRef = useRef(compassRef);
   compassElRef.current = compassRef;
   const [ready, setReady] = useState(false);
@@ -175,8 +179,11 @@ export default function LiveMap({ people, follow, showTrails, orientation, theme
         const point = m.project([personMarker.pos.lng, personMarker.pos.lat]);
         const width = bubble.el.getBoundingClientRect().width;
         const available = m.getContainer().clientWidth;
-        const offset = Math.max(8 + width / 2, Math.min(available - 8 - width / 2, point.x)) - point.x;
-        bubble.marker.setOffset([offset, point.y < 110 ? 32 + bubble.el.getBoundingClientRect().height : -32]);
+        const pad = propsRef.current.padding ?? { top: 0, right: 0, bottom: 0, left: 0 };
+        const minX = pad.left + 8 + width / 2;
+        const maxX = available - pad.right - 8 - width / 2;
+        const offset = Math.max(minX, Math.min(maxX, point.x)) - point.x;
+        bubble.marker.setOffset([offset, point.y < pad.top + 110 ? 32 + bubble.el.getBoundingClientRect().height : -32]);
       }
       if (flyingRef.current || m.isZooming()) return;
       const { follow: f, orientation: o } = propsRef.current;
@@ -211,6 +218,7 @@ export default function LiveMap({ people, follow, showTrails, orientation, theme
           pitchWithRotate: false,
           touchPitch: false,
         });
+        if (propsRef.current.padding) map.setPadding(propsRef.current.padding);
         map.touchZoomRotate.disableRotation();
         map.keyboard.disableRotation();
         map.on("dragstart", () => propsRef.current.onUserPan());
@@ -262,6 +270,12 @@ export default function LiveMap({ people, follow, showTrails, orientation, theme
     const map = mapRef.current;
     if (map && ready) applyMapContrast(map, theme);
   }, [ready, theme]);
+
+  // Az éles térképablak helye: a térkép középpontja az ablak közepe marad.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map && padding) map.setPadding(padding);
+  }, [padding?.top, padding?.right, padding?.bottom, padding?.left, ready]);
 
   // Jelölők, irányok, nyomvonalak
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
 import {
@@ -80,6 +80,7 @@ import { isNativeApp, startLocationWatch } from "@/lib/locationSource";
 import { createRoomAuthority, signRoomControl } from "@/lib/moderation";
 import {
   checkAllPermissions,
+  permissionDiagnostics,
   markPermissionsAsked,
   openPermissionSettings,
   permissionKeys,
@@ -101,6 +102,21 @@ const SELF = "self";
 
 type DialogKind = "welcome" | "permissions" | "viewers" | "rooms" | "settings" | "share" | "join" | null;
 type GpsStatus = "waiting" | "live" | "denied" | "error";
+
+/** Az éles térképablak helye és mérete a teljes képernyőhöz képest (képpontban). */
+type MapWindow = { x: number; y: number; w: number; h: number; vw: number; vh: number; radius: number };
+
+/** A teljes képernyős elmosó fólia kivágása: lekerekített téglalap az ablak helyén (even-odd szabállyal). */
+function holePath(win: MapWindow): string {
+  const { x, y, w, h, vw, vh } = win;
+  const r = Math.max(0, Math.min(win.radius, w / 2, h / 2));
+  return `M0 0H${vw}V${vh}H0Z M${x + r} ${y}H${x + w - r}A${r} ${r} 0 0 1 ${x + w} ${y + r}V${y + h - r}A${r} ${r} 0 0 1 ${x + w - r} ${y + h}H${x + r}A${r} ${r} 0 0 1 ${x} ${y + h - r}V${y + r}A${r} ${r} 0 0 1 ${x + r} ${y}Z`;
+}
+
+function veilStyle(win: MapWindow): CSSProperties {
+  const clip = `path(evenodd, "${holePath(win)}")`;
+  return { clipPath: clip, WebkitClipPath: clip };
+}
 
 function shareBase(): string | null {
   const configured = import.meta.env["VITE_PUBLIC_APP_URL"] as string | undefined;
@@ -472,11 +488,69 @@ export default function MapApp() {
   const selfFresh = selfMeta ? clock - selfMeta.at < 15000 : false;
 
   const sharingStatus: SharingStatus = !prefs.sharing ? "off" : gpsStatus === "error" || gpsStatus === "denied" ? "lost" : !selfFresh ? "search" : "live";
+  const windowRef = useRef<HTMLElement | null>(null);
+  const [win, setWin] = useState<MapWindow | null>(null);
+  useEffect(() => {
+    const el = windowRef.current;
+    const shell = el?.parentElement;
+    if (!el || !shell) {
+      setWin(null);
+      return;
+    }
+    const update = () => {
+      const r = el.getBoundingClientRect();
+      const sh = shell.getBoundingClientRect();
+      const next: MapWindow = {
+        x: Math.round(r.left - sh.left),
+        y: Math.round(r.top - sh.top),
+        w: Math.round(r.width),
+        h: Math.round(r.height),
+        vw: Math.round(sh.width),
+        vh: Math.round(sh.height),
+        radius: parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0,
+      };
+      setWin((prev) => (prev && prev.x === next.x && prev.y === next.y && prev.w === next.w && prev.h === next.h && prev.vw === next.vw && prev.vh === next.vh && prev.radius === next.radius ? prev : next));
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(shell);
+    Array.from(shell.children).forEach((child) => observer.observe(child));
+    window.addEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [mounted, stopped]);
+  const mapPadding = useMemo(
+    () => (win ? { top: win.y, left: win.x, right: Math.max(0, win.vw - win.x - win.w), bottom: Math.max(0, win.vh - win.y - win.h) } : undefined),
+    [win],
+  );
+
   if (stopped) return <div className="map-workspace glass-shell items-center justify-center gap-4"><h1 className="font-display text-lg">Private Place</h1><p className="text-sm text-muted-foreground">A helymegosztás leállítva.</p><Button onClick={() => setStopped(false)}><Play />Vissza a térképhez</Button></div>;
   if (!mounted) return <div className="map-workspace glass-shell" />;
 
   return (
-    <div className="map-workspace glass-shell">
+    <div
+      className="map-workspace glass-shell"
+      style={mapPadding ? ({ "--win-r": `${mapPadding.right}px`, "--win-b": `${mapPadding.bottom}px` } as CSSProperties) : undefined}
+    >
+      <div className="map-bg">
+        <Suspense fallback={<div className="h-full" />}>
+          <LiveMap
+            people={mapPeople}
+            follow={follow}
+            showTrails={prefs.showTrails}
+            orientation={prefs.orientation}
+            theme={prefs.mapTheme}
+            onUserPan={() => setFollow(null)}
+            compassRef={compassRef}
+            addressAllowed={addressAllowed}
+            onAllowAddress={() => { if (window.confirm("A cím lekéréséhez a kijelölt koordinátát elküldjük az OpenStreetMap címszolgáltatásának. Engedélyezed?")) setAddressAllowed(true); }}
+            padding={mapPadding}
+          />
+        </Suspense>
+      </div>
+      {win && <div className="map-veil" style={veilStyle(win)} aria-hidden="true" />}
       <header className="glass z-10 flex shrink-0 items-center justify-between gap-2 px-3 py-2">
         <div className="min-w-0 flex-1">
           <h1 className="font-display text-base font-bold">Private Place</h1>
@@ -509,21 +583,7 @@ export default function MapApp() {
         </div>
       </header>
 
-      <main className="map-panel min-h-0 flex-1" aria-label="Térkép">
-        <Suspense fallback={<div className="h-full" />}>
-          <LiveMap
-            people={mapPeople}
-            follow={follow}
-            showTrails={prefs.showTrails}
-            orientation={prefs.orientation}
-            theme={prefs.mapTheme}
-            onUserPan={() => setFollow(null)}
-            compassRef={compassRef}
-            addressAllowed={addressAllowed}
-            onAllowAddress={() => { if (window.confirm("A cím lekéréséhez a kijelölt koordinátát elküldjük az OpenStreetMap címszolgáltatásának. Engedélyezed?")) setAddressAllowed(true); }}
-          />
-        </Suspense>
-
+      <main ref={windowRef} className="map-panel min-h-0 flex-1" aria-label="Térkép">
         <button
           className="map-overlay indicator glass compass-btn absolute right-3 top-3"
           data-state={prefs.orientation === "heading" ? "on" : "off"}
@@ -930,6 +990,7 @@ function PermissionsPanel({ native, onDone }: { native: boolean; onDone: () => v
   const keys = permissionKeys(native);
   const [states, setStates] = useState<Partial<PermMap>>({});
   const [busy, setBusy] = useState<PermKey | "all" | null>(null);
+  const [diagnostics, setDiagnostics] = useState<string | null>(null);
 
   const refresh = useCallback(async () => setStates(await checkAllPermissions()), []);
   useEffect(() => {
@@ -1027,6 +1088,21 @@ function PermissionsPanel({ native, onDone }: { native: boolean; onDone: () => v
           })}
         </div>
       </ElasticScroll>
+      {native && (
+        <div className="px-5 pb-1 text-center">
+          <button
+            type="button"
+            className="text-[11px] text-muted-foreground underline underline-offset-2"
+            onClick={() => {
+              setDiagnostics("Mérés…");
+              void permissionDiagnostics().then(setDiagnostics);
+            }}
+          >
+            Diagnosztika
+          </button>
+          {diagnostics && <pre className="mt-2 max-h-40 select-text overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/30 p-3 text-left text-[10px] leading-snug">{diagnostics}</pre>}
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-2 p-5 pt-4">
         <Button className="rounded-full" disabled={busy !== null || allGranted} onClick={() => void askAll()}>
           <ShieldCheck className="mr-1.5 h-4 w-4" />
