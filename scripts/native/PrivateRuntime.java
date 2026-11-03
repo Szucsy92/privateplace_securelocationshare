@@ -53,6 +53,7 @@ public class PrivateRuntime extends Plugin {
     private PluginCall pendingCall;
     private String pendingKind;
     private boolean paused;
+    private boolean dialogSeen;
 
     private android.content.SharedPreferences prefs() {
         return getContext().getSharedPreferences("privateplace.runtime", Context.MODE_PRIVATE);
@@ -104,23 +105,52 @@ public class PrivateRuntime extends Plugin {
         call.resolve(data);
     }
     /**
-     * Rendszerablakot kér; ha 1,5 mp alatt nem jelenik meg (a rendszer már nem kérdez),
-     * az alkalmazás beállításoldalát nyitja meg, ha ezt a hívó engedi.
+     * Rendszerablakot kér, és megvárja a felhasználó döntését. Beállításoldalt csak akkor nyit (ha a hívó engedi),
+     * ha 3 mp után sem jelent meg ablak (a rendszer már nem kérdez). Amíg rendszerablak takarja az alkalmazást,
+     * türelmesen vár (legfeljebb 5 percig); a döntés után a handleOnResume válaszol.
      */
     private void ask(PluginCall call, String kind, String[] permissions, int code, boolean settingsFallback) {
         if (pendingCall != null) resolveState(pendingCall, pendingKind);
         pendingCall = call;
         pendingKind = kind;
         paused = false;
+        dialogSeen = false;
         prefs().edit().putBoolean(kind + "Asked", true).apply();
         ActivityCompat.requestPermissions(getActivity(), permissions, code);
+        watchPending(call, kind, settingsFallback, 0);
+    }
+
+    /** 250 ms-onként figyeli, hogy takarja-e rendszerablak az alkalmazást (szünet vagy elvesztett ablak-fókusz). */
+    private void watchPending(PluginCall call, String kind, boolean settingsFallback, int tick) {
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            if (pendingCall != call || paused) return;
+            if (pendingCall != call) return; // már megválaszolva, vagy újabb kérés váltotta le
+            android.app.Activity activity = getActivity();
+            boolean covered = paused || (activity != null && !activity.hasWindowFocus());
+            if (covered) dialogSeen = true;
+            if (dialogSeen) {
+                if (!covered) {
+                    // Az ablak eltűnt, de életciklus-esemény nem érkezett: a jelenlegi állapottal válaszolunk.
+                    pendingCall = null;
+                    resolveState(call, kind);
+                } else if (tick < 1200) {
+                    watchPending(call, kind, settingsFallback, tick + 1);
+                } else {
+                    pendingCall = null;
+                    resolveState(call, kind);
+                }
+                return;
+            }
+            if (tick < 12) {
+                // Lassú készüléken a rendszerablak nyitása 1,5 mp-nél is tovább tarthat: türelmi idő.
+                watchPending(call, kind, settingsFallback, tick + 1);
+                return;
+            }
+            // 3 mp után sem jelent meg ablak: a rendszer már nem kérdez.
             if (!settingsFallback || !openAppDetails()) {
                 pendingCall = null;
                 resolveState(call, kind);
             }
-        }, 1500);
+        }, 250);
     }
 
     @PluginMethod public void checkLocation(PluginCall call) {
