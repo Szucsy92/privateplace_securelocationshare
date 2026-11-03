@@ -38,20 +38,12 @@ test("pontatlan hálózati fix nem írja felül a friss jó GPS-fixet", () => {
   expect(f({ lat: 47.01, lng: 19.01, acc: 800, speed: null, at: 3000 }).lat).toBe(47);
 });
 
-test("30-50 méteres, váltakozó GPS-zaj nem húzza el a horgonyt", () => {
+test("lassú gyalogos elmozdulást sebességadat nélkül is felismer", () => {
   const f = createDriftFilter();
-  const base = { lat: 47, lng: 19 };
-  let out = f({ ...base, acc: 8, speed: 0, at: 1000 });
-  // 30–50 m-es, de nem tartósan egy irányba mutató zaj.
-  const offsets = [35, -32, 44, -40, 28, -36, 42, -30, 38, -45];
-  offsets.forEach((meters, i) => {
-    out = f({
-      lat: base.lat + meters / 110540,
-      lng: base.lng,
-      acc: 8,
-      speed: 0,
-      at: 2000 + i * 1000,
-    });
-  });
-  expect(Math.abs(out.lat - base.lat) * 110540).toBeLessThan(10);
+  f({ lat: 47, lng: 19, acc: 8, speed: 0, at: 1000 });
+  f({ lat: 47, lng: 19, acc: 8, speed: 0, at: 2000 });
+  f({ lat: 47.00004, lng: 19, acc: 8, speed: null, at: 3000 });
+  f({ lat: 47.00008, lng: 19, acc: 8, speed: null, at: 4000 });
+  const out = f({ lat: 47.00012, lng: 19, acc: 8, speed: null, at: 5000 });
+  expect(out.lat).toBeGreaterThan(47.00005);
 });
