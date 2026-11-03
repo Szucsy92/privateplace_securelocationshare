@@ -73,7 +73,7 @@ import { hybridHeading, type HeadingState } from "@/lib/heading";
 import { watchCompass, watchBattery, requestCompassPermission } from "@/lib/deviceSensors";
 import { watchNativeStop } from "@/lib/nativeRuntime";
 import { updateTransport, type TransportMode, type TransportState } from "@/lib/transport";
-import { updateStop, type StopState } from "@/lib/stationary";
+import { createDriftFilter, updateStop, type StopState } from "@/lib/stationary";
 import { latestRelease, releaseRepository, needsUpdate, appLink, isAndroidBrowser, type AppRelease } from "@/lib/invitations";
 import { headingFromTrack } from "@/lib/mapMath";
 import { isNativeApp, prepareSharing, startLocationWatch } from "@/lib/locationSource";
@@ -240,6 +240,15 @@ export default function MapApp() {
     return () => window.clearInterval(t);
   }, []);
 
+  // A sötét/világos kapcsoló az egész felületre hat (panelek, ablakok, kapszulák, beállítások), nem csak a térképre.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.theme = prefs.mapTheme;
+    root.classList.toggle("dark", prefs.mapTheme === "dark");
+    root.style.colorScheme = prefs.mapTheme;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", prefs.mapTheme === "dark" ? "#12161f" : "#d9d1bf");
+  }, [prefs.mapTheme]);
+
   const updatePrefs = (patch: Partial<Prefs>) => {
     setPrefs((prev) => {
       const next = { ...prev, ...patch };
@@ -294,9 +303,12 @@ export default function MapApp() {
   useEffect(() => {
     if (!mounted || !profile || stopped || !nativeStopReady || dialog === "welcome" || dialog === "permissions") return;
     setGpsStatus((s) => (s === "live" ? s : "waiting"));
+    // Drift-szűrő: álló helyzetben a jelölő nem vándorol, a pontatlan hálózati fix nem ront a jó GPS-en.
+    const driftFilter = createDriftFilter();
     return startLocationWatch({
       background: backgroundSharing,
-      onFix: (fix) => {
+      onFix: (rawFix) => {
+        const fix = driftFilter(rawFix);
         const now = Date.now();
         const at = fix.at ?? now;
         const point = { lat: fix.lat, lng: fix.lng, t: at };
@@ -608,8 +620,8 @@ export default function MapApp() {
         </button>
 
         <Button size="icon" variant="ghost" className="map-overlay glass compass-btn absolute right-3 top-16"
-          aria-label={prefs.mapTheme === "dark" ? "Nappali térkép" : "Éjszakai térkép"}
-          title={prefs.mapTheme === "dark" ? "Nappali térkép" : "Éjszakai térkép"}
+          aria-label={prefs.mapTheme === "dark" ? "Váltás világos módra" : "Váltás sötét módra"}
+          title={prefs.mapTheme === "dark" ? "Világos mód" : "Sötét mód"}
           onClick={() => updatePrefs({ mapTheme: prefs.mapTheme === "dark" ? "light" : "dark" })}>
           {prefs.mapTheme === "dark" ? <Sun /> : <Moon />}
         </Button>
@@ -1111,7 +1123,7 @@ function PermissionsPanel({ native, onDone }: { native: boolean; onDone: () => v
           >
             Diagnosztika
           </button>
-          {diagnostics && <pre className="mt-2 max-h-40 select-text overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/30 p-3 text-left text-[10px] leading-snug">{diagnostics}</pre>}
+          {diagnostics && <pre className="mt-2 max-h-40 select-text overflow-auto whitespace-pre-wrap break-words rounded-xl bg-foreground/10 p-3 text-left text-[10px] leading-snug">{diagnostics}</pre>}
         </div>
       )}
       <div className="grid grid-cols-2 gap-2 p-5 pt-4">
