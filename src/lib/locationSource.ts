@@ -31,7 +31,7 @@ async function getBackgroundPlugin() {
  * Android 13+: az állandó értesítéshez engedély kell; ha elutasítják (vagy a megosztás
  * értesítési csatornája némítva van), a követés akkor is fut, de a felső sávban nem látszik.
  */
-async function ensureNotificationPermission(): Promise<boolean> {
+async function askNotificationPermission(): Promise<boolean> {
   try {
     const { checkPermission } = await import("./permissions");
     const state = await checkPermission("notifications");
@@ -42,6 +42,38 @@ async function ensureNotificationPermission(): Promise<boolean> {
     return (await checkPermission("notifications")) === "granted";
   } catch {
     return true;
+  }
+}
+
+let notificationPrompt: Promise<boolean> | null = null;
+
+/**
+ * Egyetlen közös kérés: a megosztás gombra azonnal indulhat (prepareSharing), a követés indítása pedig
+ * ugyanarra a függő válaszra vár, így nem jön két rendszerablak, és nem várunk feleslegesen.
+ */
+export function ensureNotificationPermission(): Promise<boolean> {
+  if (!isNativeApp()) return Promise.resolve(true);
+  if (!notificationPrompt) {
+    notificationPrompt = askNotificationPermission().finally(() => {
+      notificationPrompt = null;
+    });
+  }
+  return notificationPrompt;
+}
+
+/**
+ * A megosztás gombjának koppintásakor hívjuk: ha a helyzet már engedélyezett, az értesítés-engedélyt azonnal
+ * kéri, hogy a felső sáv a bekapcsolás után rögtön megjelenhessen. Ha a helyzet-engedély még hiányzik, nem
+ * kérünk semmit: azt a követés indítása kéri el elsőként, és két rendszerablak nem nyílhat egyszerre.
+ */
+export async function prepareSharing(): Promise<void> {
+  if (!isNativeApp()) return;
+  try {
+    const { checkPermission } = await import("./permissions");
+    const location = await checkPermission("location");
+    if (location === "granted" || location === "limited") await ensureNotificationPermission();
+  } catch {
+    /* a követés indítása úgyis újra ellenőrzi */
   }
 }
 
@@ -107,6 +139,9 @@ export function startLocationWatch(opts: {
     try {
       const { Geolocation } = await import("@capacitor/geolocation");
       const { checkPermission, requestPreciseLocation } = await import("./permissions");
+      // A háttérkövető betöltése az engedély-ellenőrzéssel párhuzamosan indul, hogy a figyelő minél előbb elinduljon.
+      const pluginPromise = getBackgroundPlugin();
+      pluginPromise.catch(() => undefined);
       let location = await checkPermission("location");
       if (stopped) return;
       // Pontos helyzetet kér (hozzávetőlegesnél a rendszer „Pontos” frissítő ablakát), alkalmanként
@@ -121,6 +156,8 @@ export function startLocationWatch(opts: {
         return;
       }
       if (location === "limited") opts.onPreciseMissing?.();
+      // Az értesítés-engedély kérése a helyzet-engedély után, de rögtön indul (a gombkoppintáskor indított kérést átveszi).
+      const notificationsReady = opts.background ? ensureNotificationPermission() : Promise.resolve(true);
       // A hálózati hely elsőként megjelenhet; a műholdas követő pontosítja.
       let quickPending = false;
       const quickFix = () => {
@@ -135,8 +172,8 @@ export function startLocationWatch(opts: {
       retryTimer = setInterval(() => {
         if (!stopped && document.visibilityState === "visible" && Date.now() - latestAt > 10000) quickFix();
       }, 12000);
-      const plugin = await getBackgroundPlugin();
-      if (opts.background && !(await ensureNotificationPermission()) && !stopped) opts.onNotificationsBlocked?.();
+      const plugin = await pluginPromise;
+      if (!(await notificationsReady) && !stopped) opts.onNotificationsBlocked?.();
       if (stopped) return;
       const id = await plugin.addWatcher({
         ...(opts.background ? {
