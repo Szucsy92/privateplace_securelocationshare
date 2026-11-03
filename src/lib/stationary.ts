@@ -64,8 +64,8 @@ const GO_SPEED = 1.0;          // m/s: két egymást követő fix ennél gyorsab
 const GO_SPEED_NOW = 2.0;      // m/s: egyetlen ennél gyorsabb fix is elég
 const ENTER_MS = 5000;         // ennyi ideig kell „állónak” látszania a belépéshez
 const ENTER_FIXES = 4;         // és legalább ennyi fixből
-const GATE_MIN = 10, GATE_MAX = 80; // m: a megtartási sugár határai
-const GATE_K = 2.2;            // a megtartási sugár = ennyiszer a mért szórás (RMS)
+const GATE_MIN = 8, GATE_MAX = 15; // m: álló helyzetben szigorú, fix megtartási sugár
+const GATE_K = 2.0;            // a megtartási sugár = ennyiszer a kezdeti zajbecslés
 const ANCHOR_WEIGHT_CAP = 0.8; // a horgony „memóriája” (kb. 40 jó fix): lassan követi a valódi helyet
 const SHOW_STEP = 4;           // m: a megjelenített pont csak ekkora horgonymozdulásnál lép (nincs mikro-remegés)
 const SIGMA_A_MIN = 0.8, SIGMA_A_MAX = 4; // m/s²: a Kalman-szűrő folyamatzaja (gyalogos … autó)
@@ -197,13 +197,10 @@ export function createDriftFilter() {
         return last;
       }
 
-      // Marad: csak a gate-en belüli fix finomítja a horgonyt (súlyozott, korlátos memóriával).
-      if (d <= g) {
-        const tot = anchorW + w, k = w / tot;
-        anchor = { x: anchor.x + (z.x - anchor.x) * k, y: anchor.y + (z.y - anchor.y) * k };
-        anchorW = Math.min(tot, ANCHOR_WEIGHT_CAP);
-        rms2 = 0.97 * rms2 + 0.03 * Math.min(d * d, (GATE_MAX) ** 2); // a valódi szórást tanulja
-      }
+      // Álló helyzetben a horgonyt nem tanítjuk a beérkező GPS-fixekkel.
+      // A 30–50 m-es lassú drift így nem tudja fokozatosan elhúzni a markert,
+      // és a gate sem tágulhat a zaj miatt. A tartós, koherens elmozdulást
+      // a fenti kilépési logika továbbra is mozgásként kezeli.
       if (Math.hypot(anchor.x - shown.x, anchor.y - shown.y) >= SHOW_STEP) shown = { ...anchor };
       lastAt = at;
       last = { ...fix, ...toLL(shown), speed: 0, bearing: lastBearing, at };
