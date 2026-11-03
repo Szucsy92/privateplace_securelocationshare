@@ -32,4 +32,5 @@
 - [x] Adatbázis-előzmények üresek (remix ellenőrizve).
 - [ ] Az új APK/IPA kipróbálása telefonon (háttérben futás, ikon).
 - [x] Háttérértesítés Android 10–14+: „hely” típusú előtérbe lépés, engedély után újraindítás, figyelmeztetés kikapcsolt értesítésnél; maximális engedélykérés („Mindig engedélyezés” is) és közvetlen beállításoldalak.
+- [x] Értesítés: egyszínű ikon, azonnali megjelenés, némított csatorna felismerése; pontos helyzet külön kérése, hozzávetőlegesnél „Pontosítás”.
 - [ ] Az új értesítés és engedélykérés kipróbálása telefonon (új APK szükséges).
