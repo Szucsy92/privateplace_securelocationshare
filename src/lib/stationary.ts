@@ -9,9 +9,9 @@ export interface PositionCoordinates {
 }
 
 export interface StationaryStateOptions {
-  speedThreshold: number; // m/s alatt állónak tekinti (pl. 0.6 m/s ~ 2.1 km/h)
-  maxAcceptableAccuracy: number; // Ennél rosszabb pontosságú pontokat szűr (pl. 25 méter)
-  stationaryTimeMs?: number; // Opcionális: mennyi ideig kell a küszöb alatt lenni
+  speedThreshold: number;
+  maxAcceptableAccuracy: number;
+  stationaryTimeMs?: number;
 }
 
 export class StationaryDetector {
@@ -19,10 +19,9 @@ export class StationaryDetector {
   private stationaryAnchor: PositionCoordinates | null = null;
   private stationarySince: number | null = null;
 
-  // Alapértelmezett beállítások
   private options: StationaryStateOptions = {
-    speedThreshold: 0.6, // ~2.1 km/h alatt állónak számít
-    maxAcceptableAccuracy: 25, // 25 méternél rosszabb GPS pontosság elvetése
+    speedThreshold: 0.6,
+    maxAcceptableAccuracy: 25,
   };
 
   constructor(options?: Partial<StationaryStateOptions>) {
@@ -31,15 +30,10 @@ export class StationaryDetector {
     }
   }
 
-  /**
-   * Megvizsgálja, hogy az új pozíció alapján az eszköz áll-e,
-   * és visszatér a stabilizált (vagy rögzített) koordinátával.
-   */
   public processPosition(newPos: PositionCoordinates): {
     position: PositionCoordinates;
     isStationary: boolean;
   } {
-    // 1. Ha a GPS pontosság túl rossz
     if (newPos.accuracy > this.options.maxAcceptableAccuracy) {
       if (this.stationaryAnchor) {
         return { position: this.stationaryAnchor, isStationary: true };
@@ -117,8 +111,26 @@ export class StationaryDetector {
 
 export const stationaryDetector = new StationaryDetector();
 
-// Kompatibilitás a komponensek számára
-export function updateStop(...args: any[]): void {}
-export function stopLabel(...args: any[]): string {
-  return '';
+// Eredeti projekt által elvárt segédfüggvények implementációja
+let currentStopInfo: { startTime: number; latitude: number; longitude: number } | null = null;
+
+export function updateStop(position: PositionCoordinates, isStationary: boolean): void {
+  if (isStationary) {
+    if (!currentStopInfo) {
+      currentStopInfo = {
+        startTime: Date.now(),
+        latitude: position.latitude,
+        longitude: position.longitude,
+      };
+    }
+  } else {
+    currentStopInfo = null;
+  }
+}
+
+export function stopLabel(): string {
+  if (!currentStopInfo) return "";
+  const durationMinutes = Math.floor((Date.now() - currentStopInfo.startTime) / 60000);
+  if (durationMinutes < 1) return "Nemrég állt meg";
+  return `Áll: ${durationMinutes} perce`;
 }

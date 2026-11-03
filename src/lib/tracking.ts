@@ -5,6 +5,9 @@ export interface TrackingCallback {
   (position: PositionCoordinates, isStationary: boolean): void;
 }
 
+// Belső útvonal-történet a MapApp és PeerNetwork számára
+let trackHistory: PositionCoordinates[] = [];
+
 class GPSWalkerTracker {
   private watchId: number | null = null;
   private lastProcessedPos: PositionCoordinates | null = null;
@@ -35,6 +38,10 @@ class GPSWalkerTracker {
         const smoothedPosition = this.applySmoothing(filteredPosition, isStationary);
 
         this.lastProcessedPos = smoothedPosition;
+        
+        // Automatikusan mentjük a történetbe is
+        appendTrackPoint(smoothedPosition);
+
         onPositionUpdate(smoothedPosition, isStationary);
       },
       (err) => {
@@ -70,7 +77,31 @@ class GPSWalkerTracker {
 
 export const gpsTracker = new GPSWalkerTracker();
 
-// Kompatibilitás a MapApp.tsx és usePeerNetwork.ts által elvárt exportokkal:
-export function appendTrackPoint(...args: any[]): void {}
-export function clearTrackHistory(...args: any[]): void {}
-export function shouldPublishLocation(...args: any[]): boolean { return true; }
+// Kompatibilitás a MapApp és usePeerNetwork által elvárt függvényekkel
+export function appendTrackPoint(position: PositionCoordinates): void {
+  if (!position) return;
+  trackHistory.push(position);
+  if (trackHistory.length > 500) {
+    trackHistory.shift(); // Ne nőjön végtelenre a memória
+  }
+}
+
+export function clearTrackHistory(): void {
+  trackHistory = [];
+}
+
+export function shouldPublishLocation(newPos: PositionCoordinates, lastPublishedPos: PositionCoordinates | null): boolean {
+  if (!lastPublishedPos) return true;
+  // Ha 3 méternél többet mozdult, küldjük frissítésként a peer hálózatnak
+  const R = 6371e3;
+  const dLat = (newPos.latitude - lastPublishedPos.latitude) * (Math.PI / 180);
+  const dLon = (newPos.longitude - lastPublishedPos.longitude) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lastPublishedPos.latitude * (Math.PI / 180)) * Math.cos(newPos.latitude * (Math.PI / 180)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const distance = R * c;
+  
+  return distance > 3.0;
+}
