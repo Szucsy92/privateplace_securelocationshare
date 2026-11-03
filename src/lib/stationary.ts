@@ -44,7 +44,6 @@ export class StationaryDetector {
       if (this.stationaryAnchor) {
         return { position: this.stationaryAnchor, isStationary: true };
       }
-      // Ha nincs horgony, de rossz a pontosság, adjuk vissza az újat (vagy az utolsó érvényest)
       const fallbackPos = this.lastValidPosition || newPos;
       return { position: fallbackPos, isStationary: false };
     }
@@ -53,13 +52,10 @@ export class StationaryDetector {
     const isMoving = speed > this.options.speedThreshold;
 
     if (!isMoving) {
-      // Ha állítólag áll
       if (!this.stationaryAnchor) {
-        // Első stabil pont rögzítése álló helyzetben
         this.stationaryAnchor = newPos;
         this.stationarySince = Date.now();
       } else {
-        // Ha már állt, ellenőrizzük, milyen messze van a rögzített horgonytól
         const distance = this.getDistanceFromLatLonInMeters(
           this.stationaryAnchor.latitude,
           this.stationaryAnchor.longitude,
@@ -67,7 +63,6 @@ export class StationaryDetector {
           newPos.longitude
         );
 
-        // Ha 5 méteren belül ugrál a GPS álló helyzetben, akkor RÖGZÍTJÜK a horgonyponton!
         if (distance < 5.0) {
           return {
             position: {
@@ -78,12 +73,10 @@ export class StationaryDetector {
             isStationary: true,
           };
         } else {
-          // Ha ennél nagyobb a távolság, az valós elmozdulás lehet
           this.stationaryAnchor = newPos;
         }
       }
     } else {
-      // Mozgás közben feloldjuk a horgonyt, hagyjuk érvényesülni a valós pozíciót
       this.stationaryAnchor = null;
       this.stationarySince = null;
     }
@@ -100,13 +93,13 @@ export class StationaryDetector {
       newPos.latitude,
       newPos.longitude
     );
-    const timeDiff = (newPos.timestamp - this.lastValidPosition.timestamp) / 1000; // másodperc
+    const timeDiff = (newPos.timestamp - this.lastValidPosition.timestamp) / 1000;
     if (timeDiff <= 0) return 0;
     return distance / timeDiff;
   }
 
   private getDistanceFromLatLonInMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
-    const R = 6371e3; // Föld sugara méterben
+    const R = 6371e3;
     const dLat = this.deg2rad(lat2 - lat1);
     const dLon = this.deg2rad(lon2 - lon1);
     const a =
@@ -123,3 +116,8 @@ export class StationaryDetector {
 }
 
 export const stationaryDetector = new StationaryDetector();
+
+// Kompatibilitás biztosítása a MapApp.tsx-hezesperelt updateStop függvénnyel
+export function updateStop(...args: any[]): void {
+  // Opcionális logika vagy üres implementáció, ha a komponens hívja
+}

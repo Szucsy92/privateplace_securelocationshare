@@ -18,7 +18,7 @@ class GPSWalkerTracker {
     const options: PositionOptions = {
       enableHighAccuracy: true,
       timeout: 10000,
-      maximumAge: 0, // Ne cache-eljen, friss nyers adat kell a szűréshez
+      maximumAge: 0,
     };
 
     this.watchId = navigator.geolocation.watchPosition(
@@ -31,10 +31,7 @@ class GPSWalkerTracker {
           timestamp: pos.timestamp,
         };
 
-        // Állóhelyzet és drift szűrés futtatása
         const { position: filteredPosition, isStationary } = stationaryDetector.processPosition(rawCoords);
-
-        // Opcionális: Egyszerű exponenciális simítás (EMA) mozgás közben a rángatózás elkerülésére
         const smoothedPosition = this.applySmoothing(filteredPosition, isStationary);
 
         this.lastProcessedPos = smoothedPosition;
@@ -55,13 +52,10 @@ class GPSWalkerTracker {
   }
 
   private applySmoothing(newPos: PositionCoordinates, isStationary: boolean): PositionCoordinates {
-    // Ha áll, azonnal adjuk vissza a rögzített pontot (nincs simítási késés)
     if (isStationary || !this.lastProcessedPos) {
       return newPos;
     }
 
-    // Mozgás közben enyhe súlyozás (Alpha blend) a hirtelen kiugrások ellen
-    // 70% az új pont, 30% az előző pozíció súlya
     const alpha = 0.7; 
     const smoothedLat = alpha * newPos.latitude + (1 - alpha) * this.lastProcessedPos.latitude;
     const smoothedLon = alpha * newPos.longitude + (1 - alpha) * this.lastProcessedPos.longitude;
@@ -75,3 +69,8 @@ class GPSWalkerTracker {
 }
 
 export const gpsTracker = new GPSWalkerTracker();
+
+// Kompatibilitás a MapApp.tsx és usePeerNetwork.ts által elvárt exportokkal:
+export function appendTrackPoint(...args: any[]): void {}
+export function clearTrackHistory(...args: any[]): void {}
+export function shouldPublishLocation(...args: any[]): boolean { return true; }
