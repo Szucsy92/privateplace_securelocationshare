@@ -76,7 +76,7 @@ import { updateTransport, type TransportMode, type TransportState } from "@/lib/
 import { updateStop, type StopState } from "@/lib/stationary";
 import { latestRelease, releaseRepository, needsUpdate, appLink, isAndroidBrowser, type AppRelease } from "@/lib/invitations";
 import { headingFromTrack } from "@/lib/mapMath";
-import { isNativeApp, startLocationWatch } from "@/lib/locationSource";
+import { isNativeApp, prepareSharing, startLocationWatch } from "@/lib/locationSource";
 import { createRoomAuthority, signRoomControl } from "@/lib/moderation";
 import {
   checkAllPermissions,
@@ -96,6 +96,7 @@ import { installChunkReload, lazyImportWithReload } from "@/lib/chunkReload";
 installChunkReload();
 /** A „csak hozzávetőleges helyzet” figyelmeztetés alkalmanként egyszer jelenik meg. */
 let preciseHintShown = false;
+let notificationHintShown = false;
 
 const LiveMap = lazy(lazyImportWithReload(() => import("@/components/LiveMap")));
 const SELF = "self";
@@ -315,12 +316,16 @@ export default function MapApp() {
         publishRef.current();
       },
       onError: (err) => setGpsStatus(err),
-      onNotificationsBlocked: () =>
+      onNotificationsBlocked: () => {
+        // Minden újraindításnál (pl. a háttérből visszatérve) ne ugorjon fel újra.
+        if (notificationHintShown) return;
+        notificationHintShown = true;
         toast("Az értesítések ki vannak kapcsolva", {
           description: "A megosztás fut, de a felső sávban nem látszik, és a telefon könnyebben leállíthatja.",
           duration: 12000,
           action: { label: "Bekapcsolás", onClick: () => void openPermissionSettings("notifications") },
-        }),
+        });
+      },
       onPreciseMissing: () => {
         if (preciseHintShown) return;
         preciseHintShown = true;
@@ -371,6 +376,8 @@ export default function MapApp() {
     prefsRef.current = { ...prefsRef.current, sharing: value };
     sinceRef.current = value ? sinceRef.current ?? Date.now() : null;
     updatePrefs({ sharing: value });
+    // Koppintásra azonnal kérjük az értesítés-engedélyt, hogy a felső sáv a bekapcsolás után rögtön látszódjon.
+    if (value && nativeApp) void prepareSharing();
     if (!value) {
       prefsRef.current = { ...prefsRef.current, sharing: false };
       net.sendLocation(null);
@@ -489,6 +496,7 @@ export default function MapApp() {
 
   const sharingStatus: SharingStatus = !prefs.sharing ? "off" : gpsStatus === "error" || gpsStatus === "denied" ? "lost" : !selfFresh ? "search" : "live";
   const windowRef = useRef<HTMLElement | null>(null);
+  const mirrorRef = useRef<HTMLCanvasElement | null>(null);
   const [win, setWin] = useState<MapWindow | null>(null);
   useEffect(() => {
     const el = windowRef.current;
@@ -547,10 +555,13 @@ export default function MapApp() {
             addressAllowed={addressAllowed}
             onAllowAddress={() => { if (window.confirm("A cím lekéréséhez a kijelölt koordinátát elküldjük az OpenStreetMap címszolgáltatásának. Engedélyezed?")) setAddressAllowed(true); }}
             padding={mapPadding}
+            mirrorRef={mirrorRef}
           />
         </Suspense>
       </div>
-      {win && <div className="map-veil" style={veilStyle(win)} aria-hidden="true" />}
+      <div className="map-veil" style={win ? veilStyle(win) : { visibility: "hidden" }} aria-hidden="true">
+        <canvas ref={mirrorRef} className="map-mirror" />
+      </div>
       <header className="glass z-10 flex shrink-0 items-center justify-between gap-2 px-3 py-2">
         <div className="min-w-0 flex-1">
           <h1 className="font-display text-base font-bold">Private Place</h1>

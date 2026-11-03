@@ -38,6 +38,8 @@ type Props = {
   onAllowAddress: () => void;
   /** Az éles térképablak távolsága a képernyő széleitől: a középpont és a ráközelítés ehhez igazodik. */
   padding?: MapPadding;
+  /** Kis tükör-canvas: minden renderelt képkockát ide másolunk, a MapApp ezt mossa el a térképablakon kívül. */
+  mirrorRef?: RefObject<HTMLCanvasElement | null>;
 };
 
 export type MapPadding = { top: number; right: number; bottom: number; left: number };
@@ -128,7 +130,7 @@ function applyMapContrast(map: MlMap, theme: "dark" | "light") {
   }
 }
 
-export default function LiveMap({ people, follow, showTrails, orientation, theme, onUserPan, compassRef, addressAllowed, onAllowAddress, padding }: Props) {
+export default function LiveMap({ people, follow, showTrails, orientation, theme, onUserPan, compassRef, addressAllowed, onAllowAddress, padding, mirrorRef }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MlMap | null>(null);
   const markerCtorRef = useRef<typeof MlMarker | null>(null);
@@ -136,8 +138,8 @@ export default function LiveMap({ people, follow, showTrails, orientation, theme
   const headingsRef = useRef(new Map<string, number>());
   const flyingRef = useRef(false);
   const didCenterRef = useRef(false);
-  const propsRef = useRef({ follow, orientation, onUserPan, padding });
-  propsRef.current = { follow, orientation, onUserPan, padding };
+  const propsRef = useRef({ follow, orientation, onUserPan, padding, mirrorRef });
+  propsRef.current = { follow, orientation, onUserPan, padding, mirrorRef };
   const compassElRef = useRef(compassRef);
   compassElRef.current = compassRef;
   const [ready, setReady] = useState(false);
@@ -221,6 +223,24 @@ export default function LiveMap({ people, follow, showTrails, orientation, theme
         if (propsRef.current.padding) map.setPadding(propsRef.current.padding);
         map.touchZoomRotate.disableRotation();
         map.keyboard.disableRotation();
+        // A WebGL-vászon alatt a backdrop-filter nem mos megbízhatóan (WebKit/WebView), ezért minden kép után
+        // lekicsinyítve átmásoljuk egy 2D-canvasra, amit sima CSS filter mos el (lásd .map-mirror).
+        // A másolásnak a render eseményben kell történnie, amíg a képkocka még érvényes.
+        const MIRROR_PAD = 24;
+        const MIRROR_STEP = 3;
+        map.on("render", () => {
+          const dst = propsRef.current.mirrorRef?.current;
+          const src = map?.getCanvas();
+          if (!dst || !src || !src.width || !src.clientWidth) return;
+          const w = Math.max(1, Math.round((src.clientWidth + MIRROR_PAD * 2) / MIRROR_STEP));
+          const h = Math.max(1, Math.round((src.clientHeight + MIRROR_PAD * 2) / MIRROR_STEP));
+          if (dst.width !== w || dst.height !== h) { dst.width = w; dst.height = h; }
+          const ctx = dst.getContext("2d");
+          if (!ctx) return;
+          const p = MIRROR_PAD / MIRROR_STEP;
+          ctx.drawImage(src, 0, 0, w, h);
+          ctx.drawImage(src, p, p, w - p * 2, h - p * 2);
+        });
         map.on("dragstart", () => propsRef.current.onUserPan());
         map.on("click", () => setSelected(null));
         map.on("moveend", () => {
