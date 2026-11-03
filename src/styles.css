@@ -219,22 +219,36 @@
   background: oklch(0.14 0.02 258);
 }
 
-/* Elmosó fólia: a háttér színe megmarad, de áttetszik; az ablak helyén kivágás van (clip-path, lásd MapApp). */
+/* Elmosott térkép a térképablakon kívül. A veil egy kis tükör-canvast tartalmaz, amibe a LiveMap minden
+ * képkockát átmásol; ezt sima CSS filter mossa el (a backdrop-filter a térkép fölött nem megbízható).
+ * Az ablak helyén kivágás van (clip-path, lásd MapApp). */
 .map-veil {
   display: none;
   position: absolute;
   inset: 0;
   z-index: 1;
+  overflow: hidden;
+}
+.map-mirror {
+  position: absolute;
+  left: -24px;
+  top: -24px;
+  width: calc(100% + 48px);
+  height: calc(100% + 48px);
+  filter: blur(var(--veil-blur, 14px)) saturate(var(--veil-saturate, 130%));
+}
+.map-veil::after {
+  content: "";
+  position: absolute;
+  inset: 0;
   background-color: oklch(0.14 0.02 258 / var(--veil-tint, 0.38));
   background-image:
     radial-gradient(120% 60% at 0% 0%, oklch(0.82 0.19 165 / 0.1), transparent 60%),
     radial-gradient(100% 60% at 100% 100%, oklch(0.6 0.12 250 / 0.14), transparent 60%);
-  backdrop-filter: blur(var(--veil-blur, 14px)) saturate(var(--veil-saturate, 130%));
-  -webkit-backdrop-filter: blur(var(--veil-blur, 14px)) saturate(var(--veil-saturate, 130%));
 }
 
-/* Ha a rendszer nem támogatja a kivágást vagy az elmosást, a fólia el sem jelenik (a térkép végig éles marad). */
-@supports (backdrop-filter: blur(1px)) and (clip-path: path(evenodd, "M0 0H1V1Z")) {
+/* Ha a rendszer nem támogatja a kivágást, a fólia el sem jelenik (a térkép végig éles marad). */
+@supports (clip-path: path(evenodd, "M0 0H1V1Z")) {
   .map-veil { display: block; }
 }
 
