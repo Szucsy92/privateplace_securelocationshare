@@ -60,8 +60,8 @@ const GOOD_FIX_MS = 20000;     // ennyi ideig számít frissnek az utolsó jó f
 const ACC_FLOOR = 6;           // m: a jelentett pontosságot ennél jobbnak nem hisszük el
 const ACC_TRUST = 1.3;         // a jelentett pontosság szorzója (a telefon többnyire túl optimista)
 const STILL_SPEED = 0.5;       // m/s: ennél lassabb Doppler-sebesség „áll” bizonyíték
-const GO_SPEED = 1.0;          // m/s: két egymást követő fix ennél gyorsabb -> mozgás
-const GO_SPEED_NOW = 2.0;      // m/s: egyetlen ennél gyorsabb fix is elég
+const GO_SPEED = 1.8;          // m/s: Doppler önmagában csak két magasabb fixnél számít
+const GO_SPEED_NOW = 3.0;      // m/s: egyetlen nagyon gyors fix is elég
 const ENTER_MS = 5000;         // ennyi ideig kell „állónak” látszania a belépéshez
 const ENTER_FIXES = 4;         // és legalább ennyi fixből
 const GATE_MIN = 3, GATE_MAX = 5; // m: álló helyzetben kis zajtűrés
@@ -69,6 +69,7 @@ const GATE_K = 1.5;
 const ANCHOR_WEIGHT_CAP = 0.8;
 const SHOW_STEP = 1.5;          // m: gyalogos mozgásnál ne kelljen 4 m-t várni
 const WALK_EXIT_METERS = 3.5;   // m: tartós pozícióeltérés lassú gyaloglásnál
+const SPEED_NOISE_FLOOR = 1.2; // m/s: ennél kisebb becsült sebességet GPS-zajnak tekintünk
 const WALK_MAX_ACC = 20;        // m: rossz pontosságú fixből ne következtessünk gyaloglásra
 const SIGMA_A_MIN = 0.8, SIGMA_A_MAX = 4; // m/s²: a Kalman-szűrő folyamatzaja (gyalogos … autó)
 
@@ -253,8 +254,20 @@ export function createDriftFilter() {
     lastAt = at;
     const pos = toLL({ x: kxx.p, y: kyy.p });
     const spd = Math.hypot(kxx.v, kyy.v);
-    const bearing = spd >= 1 ? ((Math.atan2(kxx.v, kyy.v) * 180) / Math.PI + 360) % 360 : fix.bearing ?? lastBearing;
-    last = { ...fix, ...pos, speed: sp ?? spd, bearing, at };
+    // A Kalman velocity can become nonzero from GPS jitter alone. Confirm it
+    // against displacement across recent fixes before exposing it as speed.
+    const speedWindow = recent.slice(-4);
+    let confirmedMove = false;
+    if (speedWindow.length >= 3) {
+      const a = speedWindow[0].p, b = speedWindow[speedWindow.length - 1].p;
+      const displacement = Math.hypot(b.x - a.x, b.y - a.y);
+      const elapsed = Math.max(0.5, (speedWindow[speedWindow.length - 1].at - speedWindow[0].at) / 1000);
+      confirmedMove = displacement >= Math.max(2.5, elapsed * 0.65);
+    }
+    const dopplerSpeed = sp !== null && sp >= GO_SPEED && (fix.acc ?? 999) <= WALK_MAX_ACC;
+    const displaySpeed = dopplerSpeed ? sp : (confirmedMove && spd >= SPEED_NOISE_FLOOR ? spd : 0);
+    const bearing = displaySpeed >= 0.8 ? ((Math.atan2(kxx.v, kyy.v) * 180) / Math.PI + 360) % 360 : fix.bearing ?? lastBearing;
+    last = { ...fix, ...pos, speed: displaySpeed, bearing, at };
     return last;
   };
 }
