@@ -33,6 +33,23 @@ export function permissionKeys(native = isNativeApp()): PermKey[] {
   return native ? ["location", "backgroundLocation", "notifications", "camera", "battery"] : ["location", "camera"];
 }
 
+/** Időkorláttal: ha a hívás nem válaszol, hibát dob (a hívó dönt a tartalékról). */
+function within<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`időtúllépés (${ms} ms)`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 export function normalize(state: string | undefined): PermState {
   if (state === "granted") return "granted";
   if (state === "limited") return "limited";
@@ -92,18 +109,32 @@ async function systemNotificationState(request: boolean): Promise<PermState> {
   return normalize(status.display);
 }
 
+/** Egyetlen natív hívás sem akaszthatja meg az engedély-panelt: 4 mp után „prompt”-nak vesszük. */
 export async function checkPermission(key: PermKey): Promise<PermState> {
+  try {
+    return await within(checkPermissionNow(key), 4000);
+  } catch {
+    return "prompt";
+  }
+}
+
+async function checkPermissionNow(key: PermKey): Promise<PermState> {
   const native = isNativeApp();
   if (!permissionKeys(native).includes(key)) return "unsupported";
   try {
     if (!native) return await browserQuery(key === "location" ? "geolocation" : "camera");
     switch (key) {
-      case "location":
-        try {
-          return normalize((await (await runtimePlugin()).checkLocation()).state);
-        } catch {
-          return await capacitorLocation(false);
-        }
+      case "location": {
+        const [capacitor, runtime] = await Promise.all([
+          within(capacitorLocation(false), 3000).catch(() => null),
+          within(runtimePlugin().then((plugin) => plugin.checkLocation()), 3000)
+            .then((result) => normalize(result.state))
+            .catch(() => null),
+        ]);
+        if (capacitor === "granted" || runtime === "granted") return "granted";
+        if (capacitor === "limited" || runtime === "limited") return "limited";
+        return capacitor ?? runtime ?? "prompt";
+      }
       case "backgroundLocation":
         // „Mindig engedélyezés”; régebbi alkalmazásverzióban csak kézzel állítható.
         try {
@@ -145,14 +176,33 @@ export async function checkAllPermissions(): Promise<PermMap> {
  * az alkalmazás beállításoldala nyílik meg (Engedélyek → Hely → Pontos hely).
  */
 export async function requestPreciseLocation(openSettings: boolean): Promise<PermState> {
+  const startedAt = Date.now();
+  let state: PermState = "prompt";
   try {
-    return normalize((await (await runtimePlugin()).requestPreciseLocation({ openSettings })).state);
+    // A Capacitor saját kérése megvárja a felhasználó döntését (nincs időzítéses találgatás).
+    state = await capacitorLocation(true);
   } catch {
-    return await capacitorLocation(true);
+    try {
+      state = normalize((await (await runtimePlugin()).requestPreciseLocation({ openSettings: false })).state);
+    } catch {
+      /* nincs több tartalék */
+    }
+  }
+  // Ha a rendszer azonnal „elutasítva”-t ad (nem is jelent meg ablak), csak a beállítások segítenek.
+  if (openSettings && state === "denied" && Date.now() - startedAt < 700) await openAppSettings();
+  return state;
+}
+
+/** A felugró rendszerablakra várhat, de 30 mp után a panel újra használható, és az aktuális állapotot olvassuk. */
+export async function requestPermission(key: PermKey): Promise<PermState> {
+  try {
+    return await within(requestPermissionNow(key), 30000);
+  } catch {
+    return await checkPermission(key);
   }
 }
 
-export async function requestPermission(key: PermKey): Promise<PermState> {
+async function requestPermissionNow(key: PermKey): Promise<PermState> {
   const native = isNativeApp();
   if (!permissionKeys(native).includes(key)) return "unsupported";
   try {
@@ -245,4 +295,26 @@ export async function openAppSettings(target: "app" | "notifications" | "locatio
 /** Elutasított engedélyhez a pontosan hozzá tartozó beállításoldal. */
 export function openPermissionSettings(key: PermKey): Promise<void> {
   return openAppSettings(key === "notifications" ? "notifications" : "app");
+}
+
+/** Nyers állapotok és válaszidők: hibakereséshez, a panelen másolható szövegként. */
+export async function permissionDiagnostics(): Promise<string> {
+  const lines: string[] = [`natív app: ${isNativeApp()}`];
+  const probe = async (name: string, call: () => Promise<unknown>) => {
+    const started = Date.now();
+    try {
+      lines.push(`${name}: ${JSON.stringify(await within(call(), 4000))} (${Date.now() - started} ms)`);
+    } catch (error) {
+      lines.push(`${name}: HIBA ${error instanceof Error ? error.message : String(error)} (${Date.now() - started} ms)`);
+    }
+  };
+  await probe("Geolocation.check", async () => (await import("@capacitor/geolocation")).Geolocation.checkPermissions());
+  await probe("Runtime.checkLocation", async () => (await runtimePlugin()).checkLocation());
+  await probe("Runtime.checkBackground", async () => (await runtimePlugin()).checkBackgroundLocation());
+  await probe("Runtime.checkNotifications", async () => (await runtimePlugin()).checkNotifications());
+  await probe("LocalNotifications.check", async () => (await import("@capacitor/local-notifications")).LocalNotifications.checkPermissions());
+  await probe("Battery.enabled", async () =>
+    (await import("@capawesome-team/capacitor-android-battery-optimization")).BatteryOptimization.isBatteryOptimizationEnabled(),
+  );
+  return lines.join("\n");
 }
