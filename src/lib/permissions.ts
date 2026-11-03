@@ -2,6 +2,7 @@
  * Engedélyek egy helyen: helyzet, háttér-helyzet, értesítés, kamera, akkumulátor-kímélés alóli mentesség.
  * Az Android-alkalmazásban natív kérésekkel, böngészőben a böngésző saját kérdéseivel.
  */
+import { registerPlugin } from "@capacitor/core";
 import { isNativeApp } from "@/lib/locationSource";
 
 export type PermKey = "location" | "backgroundLocation" | "notifications" | "camera" | "battery";
@@ -117,14 +118,17 @@ type RuntimePermissions = {
   openSettings(options: { target: "app" | "notifications" | "locationServices" }): Promise<void>;
 };
 
-async function runtimePlugin() {
-  const { registerPlugin } = await import("@capacitor/core");
-  return registerPlugin<RuntimePermissions>("PrivateRuntime");
+// FONTOS: a Capacitor-plugin Proxy, amelynek minden tulajdonsága (a `then` is) natív hívás.
+// Ezért sosem szabad `await`-elni, Promise-ból visszaadni vagy `async` függvényből visszaadni:
+// az `await plugin` ilyenkor a `plugin.then`-t hívná, és a művelet soha nem fejeződne be.
+// A pluginokat ezért szinkron módon, közvetlenül hívjuk.
+const runtime = registerPlugin<RuntimePermissions>("PrivateRuntime");
+const backgroundGeolocation = registerPlugin<{ openSettings: () => Promise<void> }>("BackgroundGeolocation");
+function runtimePlugin() {
+  return runtime;
 }
-
-async function backgroundPlugin() {
-  const { registerPlugin } = await import("@capacitor/core");
-  return registerPlugin<{ openSettings: () => Promise<void> }>("BackgroundGeolocation");
+function backgroundPlugin() {
+  return backgroundGeolocation;
 }
 
 /** Régebbi alkalmazásverzió (saját natív rész nélkül): a Capacitor saját állapota. */
@@ -162,7 +166,7 @@ async function checkPermissionNow(key: PermKey): Promise<PermState> {
       case "location": {
         const [capacitor, runtime] = await Promise.all([
           within(capacitorLocation(false), 3000).catch(() => null),
-          within(runtimePlugin().then((plugin) => plugin.checkLocation()), 3000)
+          within(runtimePlugin().checkLocation(), 3000)
             .then((result) => normalize(result.state))
             .catch(() => null),
         ]);
@@ -173,14 +177,14 @@ async function checkPermissionNow(key: PermKey): Promise<PermState> {
       case "backgroundLocation":
         // „Mindig engedélyezés”; régebbi alkalmazásverzióban csak kézzel állítható.
         try {
-          return normalize((await (await runtimePlugin()).checkBackgroundLocation()).state);
+          return normalize((await runtimePlugin().checkBackgroundLocation()).state);
         } catch {
           return "manual";
         }
       case "notifications": {
         const system = await systemNotificationState(false);
         try {
-          return notificationStateFrom((await (await runtimePlugin()).checkNotifications()).state, system);
+          return notificationStateFrom((await runtimePlugin().checkNotifications()).state, system);
         } catch {
           return system;
         }
@@ -220,7 +224,7 @@ export async function requestPreciseLocation(openSettings: boolean): Promise<Per
     state = await capacitorLocation(true);
   } catch {
     try {
-      state = normalize((await (await runtimePlugin()).requestPreciseLocation({ openSettings: false })).state);
+      state = normalize((await runtimePlugin().requestPreciseLocation({ openSettings: false })).state);
     } catch {
       /* nincs több tartalék */
     }
@@ -269,7 +273,7 @@ async function requestPermissionNow(key: PermKey): Promise<PermState> {
         return await requestPreciseLocation(true);
       case "backgroundLocation":
         try {
-          return normalize((await (await runtimePlugin()).requestBackgroundLocation()).state);
+          return normalize((await runtimePlugin().requestBackgroundLocation()).state);
         } catch {
           await openAppSettings();
           return "manual";
@@ -322,13 +326,13 @@ export async function requestAllPermissions(onUpdate: (key: PermKey, state: Perm
 /** Az alkalmazás rendszerbeállításai (elutasított engedélyhez és a „Mindig engedélyezés”-hez). */
 export async function openAppSettings(target: "app" | "notifications" | "locationServices" = "app"): Promise<void> {
   try {
-    await (await runtimePlugin()).openSettings({ target });
+    await runtimePlugin().openSettings({ target });
     return;
   } catch {
     /* régebbi alkalmazásverzió: a háttérkövető saját megnyitója */
   }
   try {
-    const plugin = await backgroundPlugin();
+    const plugin = backgroundPlugin();
     await plugin.openSettings();
   } catch {
     /* böngészőben nincs ilyen */
@@ -352,9 +356,9 @@ export async function permissionDiagnostics(): Promise<string> {
     }
   };
   await probe("Geolocation.check", async () => (await import("@capacitor/geolocation")).Geolocation.checkPermissions());
-  await probe("Runtime.checkLocation", async () => (await runtimePlugin()).checkLocation());
-  await probe("Runtime.checkBackground", async () => (await runtimePlugin()).checkBackgroundLocation());
-  await probe("Runtime.checkNotifications", async () => (await runtimePlugin()).checkNotifications());
+  await probe("Runtime.checkLocation", async () => runtimePlugin().checkLocation());
+  await probe("Runtime.checkBackground", async () => runtimePlugin().checkBackgroundLocation());
+  await probe("Runtime.checkNotifications", async () => runtimePlugin().checkNotifications());
   await probe("LocalNotifications.check", async () => (await import("@capacitor/local-notifications")).LocalNotifications.checkPermissions());
   await probe("Battery.enabled", async () =>
     (await import("@capawesome-team/capacitor-android-battery-optimization")).BatteryOptimization.isBatteryOptimizationEnabled(),

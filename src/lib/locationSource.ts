@@ -4,6 +4,7 @@
  * - Az Android-alkalmazásban: natív háttér-helymeghatározás. Ha a megosztás be van kapcsolva,
  *   egy állandó értesítés mellett lezárt képernyőnél is folytatódik.
  */
+import { registerPlugin } from "@capacitor/core";
 import type { BackgroundGeolocationPlugin } from "@capacitor-community/background-geolocation";
 
 export type Fix = { lat: number; lng: number; acc: number | null; speed: number | null; bearing?: number | null; at?: number };
@@ -19,11 +20,9 @@ export function isNativeApp(): boolean {
 
 let bgPlugin: BackgroundGeolocationPlugin | null = null;
 
-async function getBackgroundPlugin() {
-  if (!bgPlugin) {
-    const { registerPlugin } = await import("@capacitor/core");
-    bgPlugin = registerPlugin<BackgroundGeolocationPlugin>("BackgroundGeolocation");
-  }
+// Szinkron: a Capacitor-plugin Proxy-t nem szabad await-elni vagy async függvényből visszaadni (a `then` natív hívásnak számítana, és soha nem térne vissza).
+function getBackgroundPlugin(): BackgroundGeolocationPlugin {
+  if (!bgPlugin) bgPlugin = registerPlugin<BackgroundGeolocationPlugin>("BackgroundGeolocation");
   return bgPlugin;
 }
 
@@ -140,8 +139,7 @@ export function startLocationWatch(opts: {
       const { Geolocation } = await import("@capacitor/geolocation");
       const { checkPermission, requestPreciseLocation } = await import("./permissions");
       // A háttérkövető betöltése az engedély-ellenőrzéssel párhuzamosan indul, hogy a figyelő minél előbb elinduljon.
-      const pluginPromise = getBackgroundPlugin();
-      pluginPromise.catch(() => undefined);
+      const plugin = getBackgroundPlugin();
       let location = await checkPermission("location");
       if (stopped) return;
       // Pontos helyzetet kér (hozzávetőlegesnél a rendszer „Pontos” frissítő ablakát), alkalmanként
@@ -172,7 +170,6 @@ export function startLocationWatch(opts: {
       retryTimer = setInterval(() => {
         if (!stopped && document.visibilityState === "visible" && Date.now() - latestAt > 10000) quickFix();
       }, 12000);
-      const plugin = await pluginPromise;
       if (!(await notificationsReady) && !stopped) opts.onNotificationsBlocked?.();
       if (stopped) return;
       const id = await plugin.addWatcher({
