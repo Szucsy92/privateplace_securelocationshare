@@ -163,6 +163,9 @@ export function createDriftFilter() {
     if (mode === "still") {
       const d = Math.hypot(z.x - anchor.x, z.y - anchor.y);
       const g = gate(sigma);
+      // A horgony körüli ismételt kilépést ténylegesen számlálni kell.
+      // Enélkül a lentebbi „nagy, tartós ugrás” ág soha nem aktiválódik.
+      outside = d > g ? outside + 1 : 0;
       recent.push({ p: z, w, at, speed: sp });
       if (recent.length > 4) recent.shift();
 
