@@ -64,10 +64,12 @@ const GO_SPEED = 1.0;          // m/s: két egymást követő fix ennél gyorsab
 const GO_SPEED_NOW = 2.0;      // m/s: egyetlen ennél gyorsabb fix is elég
 const ENTER_MS = 5000;         // ennyi ideig kell „állónak” látszania a belépéshez
 const ENTER_FIXES = 4;         // és legalább ennyi fixből
-const GATE_MIN = 8, GATE_MAX = 15; // m: álló helyzetben szigorú, fix megtartási sugár
-const GATE_K = 2.0;            // a megtartási sugár = ennyiszer a kezdeti zajbecslés
-const ANCHOR_WEIGHT_CAP = 0.8; // a horgony „memóriája” (kb. 40 jó fix): lassan követi a valódi helyet
-const SHOW_STEP = 4;           // m: a megjelenített pont csak ekkora horgonymozdulásnál lép (nincs mikro-remegés)
+const GATE_MIN = 3, GATE_MAX = 5; // m: álló helyzetben kis zajtűrés
+const GATE_K = 1.5;
+const ANCHOR_WEIGHT_CAP = 0.8;
+const SHOW_STEP = 1.5;          // m: gyalogos mozgásnál ne kelljen 4 m-t várni
+const WALK_EXIT_METERS = 3.5;   // m: tartós pozícióeltérés lassú gyaloglásnál
+const WALK_MAX_ACC = 20;        // m: rossz pontosságú fixből ne következtessünk gyaloglásra
 const SIGMA_A_MIN = 0.8, SIGMA_A_MAX = 4; // m/s²: a Kalman-szűrő folyamatzaja (gyalogos … autó)
 
 type Vec = { x: number; y: number };
@@ -168,21 +170,26 @@ export function createDriftFilter() {
       else if (sp !== null && sp >= GO_SPEED) fastCount += 1;
       else fastCount = 0;
 
-      // Lassú kilépés: tartós, egy irányba mutató elmozdulás (a szórás nem ilyen).
+      // Lassú gyalogos kilépés: a horgonyhoz képesti elmozdulás több fix
+      // súlyozott középértékén és iránykonzisztenciáján alapul. GPS-sebesség
+      // hiányában is működik, de gyenge (20 m feletti) pontosságot nem használ.
       let leave = fastCount >= 2;
-      if (!leave) {
-        // Doppler nélkül (pl. böngésző) a sugár 70%-ánál már számolunk: a tartós, egyirányú elmozdulás nem szórás.
-        const g2 = sp === null ? 0.7 * g : g;
-        if (d > g2) outside += 1; else outside = 0;
-        if (outside >= 3 && recent.length >= 3) {
-          const c = wmean(recent.slice(-3));
+      if (!leave && (sp === null || sp < GO_SPEED)) {
+        const goodRecent = recent.slice(-4).filter((r) => r.speed === null || r.speed < GO_SPEED);
+        if ((fix.acc ?? 999) <= WALK_MAX_ACC && goodRecent.length >= 3) {
+          const c = wmean(goodRecent);
           const dir = { x: c.x - anchor.x, y: c.y - anchor.y };
-          const dl = Math.hypot(dir.x, dir.y) || 1;
-          const consistent = recent.slice(-3).every((r) => ((r.p.x - anchor.x) * dir.x + (r.p.y - anchor.y) * dir.y) / dl > 0.5 * g2);
-          leave = dl > g2 && consistent;
+          const dl = Math.hypot(dir.x, dir.y);
+          if (dl >= WALK_EXIT_METERS) {
+            const consistent = goodRecent.slice(-3).every((r) => {
+              const rx = r.p.x - anchor.x, ry = r.p.y - anchor.y;
+              return (rx * dir.x + ry * dir.y) / Math.max(dl, 1) >= WALK_EXIT_METERS * 0.35;
+            });
+            leave = consistent;
+          }
         }
-        if (!leave && d > 4 * g && outside >= 2) leave = true; // nagy, tartós ugrás
       }
+      if (!leave && d > 4 * g && outside >= 2) leave = true; // nagy, tartós ugrás
       if (leave) {
         const c = wmean(recent.slice(-3));
         toMoving(fastCount >= 2 ? z : c, at);
@@ -197,10 +204,9 @@ export function createDriftFilter() {
         return last;
       }
 
-      // Álló helyzetben a horgonyt nem tanítjuk a beérkező GPS-fixekkel.
-      // A 30–50 m-es lassú drift így nem tudja fokozatosan elhúzni a markert,
-      // és a gate sem tágulhat a zaj miatt. A tartós, koherens elmozdulást
-      // a fenti kilépési logika továbbra is mozgásként kezeli.
+      // Álló helyzetben a horgony fix: a GPS-zaj/drift nem taníthatja el.
+      // A tartós, iránykonzisztens gyalogos elmozdulást a fenti detektor
+      // külön kezeli, és csak mozgás módba lépéskor követjük az új pozíciót.
       if (Math.hypot(anchor.x - shown.x, anchor.y - shown.y) >= SHOW_STEP) shown = { ...anchor };
       lastAt = at;
       last = { ...fix, ...toLL(shown), speed: 0, bearing: lastBearing, at };
