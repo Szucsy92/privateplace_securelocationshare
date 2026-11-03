@@ -44,7 +44,7 @@
   --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
   --shadow-glow: 0 0 0 1px oklch(0.82 0.19 165 / 0.25), 0 12px 40px -12px oklch(0.82 0.19 165 / 0.45);
-  --shadow-panel: 0 24px 60px -24px oklch(0.05 0.03 260 / 0.9);
+  --shadow-panel: 0 24px 60px -24px color-mix(in oklch, var(--shade) 80%, transparent);
   --animate-pulse-ring: pulse-ring 1.6s ease-out infinite;
 }
 
@@ -76,10 +76,17 @@
   --dialog-backdrop: oklch(0.08 0.02 258 / 0.5);
   --glass-bg: oklch(0.315 0.03 258 / 0.72);
   --glass-strong: oklch(0.252 0.032 258 / 0.92);
-  --glass-inset: oklch(1 0 0 / 0.045);
-  --glass-edge: oklch(1 0 0 / 0.1);
+  --glass-inset: color-mix(in oklch, var(--tint) 4.5%, transparent);
+  --glass-edge: color-mix(in oklch, var(--tint) 10%, transparent);
   --glow: oklch(0.82 0.19 165 / 0.5);
   --qr-background: #ffffff;
+  --tint: oklch(1 0 0);
+  --shade: oklch(0.05 0.01 258);
+  --field-bg: oklch(0.12 0.02 258 / 0.45);
+  --map-fallback: oklch(0.14 0.02 258);
+  --veil-color: oklch(0.14 0.02 258);
+  --attrib-invert: 0.85;
+  color-scheme: dark;
   --room-mint: #14B8A6;
   --room-violet: #818CF8;
   --room-rose: #FB7185;
@@ -95,21 +102,62 @@
 --map-dark-park: #28433c;
 --map-dark-label: #eef0fa;
 --map-dark-halo: #171a2a;
---map-light-background: #efe9df;
---map-light-water: #a6d6e0;
---map-light-building: #d6cbb8;
+--map-light-background: #e4dccb;
+--map-light-water: #9ccbd6;
+--map-light-building: #cfc2aa;
 --map-light-building-edge: #a39580;
---map-light-road: #ffffff;
+--map-light-road: #f6f0e2;
 --map-light-road-major: #f5c842;
 --map-light-road-casing: #bdb3a0;
---map-light-park: #cde2c0;
+--map-light-park: #c3d9b3;
 --map-light-label: #2c3347;
---map-light-halo: #ffffff;
+--map-light-halo: #f1eadb;
 }
 
 .dark {
   --background: oklch(0.1785 0.03 258);
   --foreground: oklch(0.96 0.008 250);
+}
+
+
+/* Világos mód: mélyebb, meleg homok/bézs tónusok (az épületek és a térkép színeihez igazítva), nem vakít. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --background: oklch(0.855 0.02 82);
+  --foreground: oklch(0.24 0.03 258);
+  --surface: oklch(0.895 0.018 82);
+  --surface-strong: oklch(0.86 0.022 80);
+  --card: oklch(0.905 0.017 82);
+  --card-foreground: oklch(0.24 0.03 258);
+  --popover: oklch(0.915 0.016 82);
+  --popover-foreground: oklch(0.24 0.03 258);
+  --primary: #0d8f84;
+  --primary-foreground: oklch(0.985 0.008 180);
+  --secondary: oklch(0.82 0.022 80);
+  --secondary-foreground: oklch(0.26 0.03 258);
+  --muted: oklch(0.83 0.02 80);
+  --muted-foreground: oklch(0.42 0.03 258);
+  --accent: oklch(0.74 0.14 75);
+  --accent-foreground: oklch(0.22 0.04 70);
+  --destructive: #d63d5c;
+  --destructive-foreground: oklch(0.985 0.005 250);
+  --border: oklch(0.75 0.022 80);
+  --input: oklch(0.77 0.022 80);
+  --ring: oklch(0.6 0.12 185);
+  --live: #0d8f84;
+  --warn: #c98206;
+  --dialog-backdrop: oklch(0.32 0.03 70 / 0.38);
+  --glass-bg: oklch(0.885 0.018 82 / 0.8);
+  --glass-strong: oklch(0.91 0.016 82 / 0.96);
+  --glass-inset: oklch(0.3 0.03 80 / 0.05);
+  --glass-edge: oklch(0.35 0.03 80 / 0.2);
+  --glow: oklch(0.6 0.12 185 / 0.38);
+  --tint: oklch(0.28 0.03 70);
+  --shade: oklch(0.38 0.04 70);
+  --field-bg: oklch(0.95 0.012 84 / 0.65);
+  --map-fallback: #e4dccb;
+  --veil-color: oklch(0.82 0.02 82);
+  --attrib-invert: 0;
 }
 
 @keyframes pulse-ring {
@@ -186,28 +234,28 @@
   backdrop-filter: blur(22px) saturate(140%);
   -webkit-backdrop-filter: blur(22px) saturate(140%);
   border: 1px solid var(--glass-edge);
-  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08), 0 10px 30px oklch(0.05 0.01 258 / 0.45);
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08), 0 10px 30px color-mix(in oklch, var(--shade) 45%, transparent);
   border-radius: 1.25rem;
 }
 
 .glass-inset {
   background: var(--glass-inset);
-  border: 1px solid oklch(1 0 0 / 0.07);
+  border: 1px solid color-mix(in oklch, var(--tint) 7%, transparent);
   box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.05);
   backdrop-filter: blur(24px) saturate(120%);
   -webkit-backdrop-filter: blur(24px) saturate(120%);
 }
 
 .glass-button {
-  background: oklch(1 0 0 / 0.05);
-  border-color: oklch(1 0 0 / 0.12);
+  background: color-mix(in oklch, var(--tint) 5%, transparent);
+  border-color: color-mix(in oklch, var(--tint) 12%, transparent);
   backdrop-filter: blur(12px);
 }
 
 .glass-input {
-  background: oklch(0.12 0.02 258 / 0.45);
-  border-color: oklch(1 0 0 / 0.12);
-  box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.25);
+  background: var(--field-bg);
+  border-color: color-mix(in oklch, var(--tint) 12%, transparent);
+  box-shadow: inset 0 1px 2px color-mix(in oklch, var(--shade) 30%, transparent);
 }
 
 /* Lekerekített térképpanel, elmosódó szélekkel */
@@ -216,7 +264,7 @@
   position: absolute;
   inset: 0;
   z-index: 0;
-  background: oklch(0.14 0.02 258);
+  background: var(--map-fallback);
 }
 
 /* Elmosott térkép a térképablakon kívül. A veil egy kis tükör-canvast tartalmaz, amibe a LiveMap minden
@@ -237,11 +285,17 @@
   height: calc(100% + 48px);
   filter: blur(var(--veil-blur, 10.5px)) saturate(var(--veil-saturate, 130%));
 }
+.map-veil::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-color: var(--veil-color);
+  opacity: var(--veil-tint, 0.38);
+}
 .map-veil::after {
   content: "";
   position: absolute;
   inset: 0;
-  background-color: oklch(0.14 0.02 258 / var(--veil-tint, 0.38));
   background-image:
     radial-gradient(120% 60% at 0% 0%, oklch(0.82 0.19 165 / 0.1), transparent 60%),
     radial-gradient(100% 60% at 100% 100%, oklch(0.6 0.12 250 / 0.14), transparent 60%);
@@ -261,7 +315,7 @@
   border: 1px solid var(--glass-edge);
   background: transparent;
   pointer-events: none;
-  box-shadow: 0 10px 40px oklch(0.05 0.01 258 / 0.4);
+  box-shadow: 0 10px 40px color-mix(in oklch, var(--shade) 40%, transparent);
 }
 
 .map-panel > * { pointer-events: auto; }
@@ -273,7 +327,7 @@
   z-index: 5;
   pointer-events: none;
   border-radius: inherit;
-  box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.06), inset 0 0 28px 4px oklch(0.17 0.03 258 / 0.35);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--tint) 6%, transparent), inset 0 0 28px 4px color-mix(in oklch, var(--shade) 30%, transparent);
 }
 
 .map-panel > .map-overlay { z-index: 10; }
@@ -288,7 +342,7 @@
   font-size: 10px;
 }
 .map-bg .maplibregl-ctrl-attrib a { color: var(--muted-foreground); }
-.map-bg .maplibregl-ctrl-attrib-button { filter: invert(0.85); }
+.map-bg .maplibregl-ctrl-attrib-button { filter: invert(var(--attrib-invert)); }
 
 /* Profilképes jelölő a térképen */
 .map-avatar {
@@ -298,7 +352,7 @@
   padding: 3px;
   background: var(--glass-strong);
   border: 3px solid var(--person-color, var(--primary));
-  box-shadow: 0 6px 18px oklch(0.05 0.01 258 / 0.6), 0 0 0 1px oklch(1 0 0 / 0.12);
+  box-shadow: 0 6px 18px color-mix(in oklch, var(--shade) 60%, transparent), 0 0 0 1px color-mix(in oklch, var(--tint) 12%, transparent);
   display: grid;
   place-items: center;
   overflow: visible;
@@ -308,12 +362,12 @@
   will-change: transform;
 }
 .map-avatar img { width: 100%; height: 100%; border-radius: 9999px; object-fit: cover; }
-.map-avatar.is-self { box-shadow: 0 0 0 0 var(--glow), 0 6px 18px oklch(0.05 0.01 258 / 0.6); animation: avatar-pulse 2.2s ease-out infinite; }
+.map-avatar.is-self { box-shadow: 0 0 0 0 var(--glow), 0 6px 18px color-mix(in oklch, var(--shade) 60%, transparent); animation: avatar-pulse 2.2s ease-out infinite; }
 
 @keyframes avatar-pulse {
-  0% { box-shadow: 0 0 0 0 oklch(0.82 0.19 165 / 0.5), 0 6px 18px oklch(0.05 0.01 258 / 0.6); }
-  70% { box-shadow: 0 0 0 14px oklch(0.82 0.19 165 / 0), 0 6px 18px oklch(0.05 0.01 258 / 0.6); }
-  100% { box-shadow: 0 0 0 0 oklch(0.82 0.19 165 / 0), 0 6px 18px oklch(0.05 0.01 258 / 0.6); }
+  0% { box-shadow: 0 0 0 0 oklch(0.82 0.19 165 / 0.5), 0 6px 18px color-mix(in oklch, var(--shade) 60%, transparent); }
+  70% { box-shadow: 0 0 0 14px oklch(0.82 0.19 165 / 0), 0 6px 18px color-mix(in oklch, var(--shade) 60%, transparent); }
+  100% { box-shadow: 0 0 0 0 oklch(0.82 0.19 165 / 0), 0 6px 18px color-mix(in oklch, var(--shade) 60%, transparent); }
 }
 
 /* Iránytű */
@@ -366,7 +420,7 @@
   backdrop-filter: blur(20px) saturate(140%);
   -webkit-backdrop-filter: blur(20px) saturate(140%);
   border: 1px solid var(--glass-edge);
-  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08), 0 8px 22px oklch(0.05 0.01 258 / 0.45);
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08), 0 8px 22px color-mix(in oklch, var(--shade) 45%, transparent);
   color: var(--foreground);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -467,7 +521,7 @@
   -webkit-backdrop-filter: blur(30px) saturate(150%);
   border: 1px solid var(--glass-edge);
   border-radius: 1.75rem;
-  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.1), 0 30px 80px -20px oklch(0.03 0.01 258 / 0.9);
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.1), 0 30px 80px -20px color-mix(in oklch, var(--shade) 90%, transparent);
   color: var(--foreground);
   overflow: hidden;
 }
@@ -483,7 +537,7 @@
   padding: 14px;
   border-radius: 1.5rem;
   background: var(--qr-background);
-  box-shadow: 0 0 0 6px oklch(1 0 0 / 0.08), 0 18px 40px -12px oklch(0.82 0.19 165 / 0.35);
+  box-shadow: 0 0 0 6px color-mix(in oklch, var(--tint) 8%, transparent), 0 18px 40px -12px oklch(0.82 0.19 165 / 0.35);
 }
 
 .qr-scanner {
@@ -500,7 +554,7 @@
   inset: 18%;
   border-radius: 1.25rem;
   border: 2px solid var(--primary);
-  box-shadow: 0 0 0 999px oklch(0.05 0.01 258 / 0.45), 0 0 18px var(--glow);
+  box-shadow: 0 0 0 999px color-mix(in oklch, var(--shade) 45%, transparent), 0 0 18px var(--glow);
 }
 
 /* Értesítések: matt üveg */
@@ -511,7 +565,7 @@
   border: 1px solid var(--glass-edge) !important;
   border-radius: 1.25rem !important;
   color: var(--foreground) !important;
-  box-shadow: 0 16px 40px -12px oklch(0.03 0.01 258 / 0.8) !important;
+  box-shadow: 0 16px 40px -12px color-mix(in oklch, var(--shade) 80%, transparent) !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -529,8 +583,8 @@
   font-size: 0.75rem;
   font-weight: 600;
   white-space: nowrap;
-  background: oklch(1 0 0 / 0.05);
-  border: 1px solid oklch(1 0 0 / 0.12);
+  background: color-mix(in oklch, var(--tint) 5%, transparent);
+  border: 1px solid color-mix(in oklch, var(--tint) 12%, transparent);
   backdrop-filter: blur(12px);
   transition: background-color 200ms, border-color 200ms, box-shadow 200ms;
 }
