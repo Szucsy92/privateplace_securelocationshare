@@ -39,11 +39,14 @@ export class StationaryDetector {
     position: PositionCoordinates;
     isStationary: boolean;
   } {
-    // 1. Ha a GPS pontosság túl rossz, elvetjük vagy a régivel dolgozunk
+    // 1. Ha a GPS pontosság túl rossz
     if (newPos.accuracy > this.options.maxAcceptableAccuracy) {
       if (this.stationaryAnchor) {
         return { position: this.stationaryAnchor, isStationary: true };
       }
+      // Ha nincs horgony, de rossz a pontosság, adjuk vissza az újat (vagy az utolsó érvényest)
+      const fallbackPos = this.lastValidPosition || newPos;
+      return { position: fallbackPos, isStationary: false };
     }
 
     const speed = newPos.speed !== null ? newPos.speed : this.calculateSpeed(newPos);
@@ -64,7 +67,7 @@ export class StationaryDetector {
           newPos.longitude
         );
 
-        // Ha 4-5 méteren belül ugrál a GPS álló helyzetben, akkor RÖGZÍTJÜK a horgonyponton!
+        // Ha 5 méteren belül ugrál a GPS álló helyzetben, akkor RÖGZÍTJÜK a horgonyponton!
         if (distance < 5.0) {
           return {
             position: {
