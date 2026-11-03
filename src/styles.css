@@ -235,7 +235,7 @@
   top: -24px;
   width: calc(100% + 48px);
   height: calc(100% + 48px);
-  filter: blur(var(--veil-blur, 14px)) saturate(var(--veil-saturate, 130%));
+  filter: blur(var(--veil-blur, 10.5px)) saturate(var(--veil-saturate, 130%));
 }
 .map-veil::after {
   content: "";
