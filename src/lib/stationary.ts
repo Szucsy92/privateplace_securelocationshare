@@ -117,7 +117,8 @@ export class StationaryDetector {
 
 export const stationaryDetector = new StationaryDetector();
 
-// Kompatibilitás biztosítása a MapApp.tsx-hezesperelt updateStop függvénnyel
-export function updateStop(...args: any[]): void {
-  // Opcionális logika vagy üres implementáció, ha a komponens hívja
+// Kompatibilitás a komponensek számára
+export function updateStop(...args: any[]): void {}
+export function stopLabel(...args: any[]): string {
+  return '';
 }
