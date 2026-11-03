@@ -28,9 +28,44 @@ export function markPermissionsAsked() {
   }
 }
 
-/** Mely engedélyek értelmezhetők ezen az eszközön (a webes változatban kevesebb). */
-export function permissionKeys(native = isNativeApp()): PermKey[] {
-  return native ? ["location", "backgroundLocation", "notifications", "camera", "battery"] : ["location", "camera"];
+/** "android" | "ios" | "web": a Capacitor saját platformneve. */
+export function nativePlatform(): string {
+  if (typeof window === "undefined") return "web";
+  const cap = (window as unknown as { Capacitor?: { getPlatform?: () => string } }).Capacitor;
+  return cap?.getPlatform?.() ?? "web";
+}
+
+/**
+ * Mely engedélyek értelmezhetők ezen az eszközön. A „Mindig engedélyezés” és az akkumulátor-mentesség
+ * Android-specifikus (saját natív résszel), iOS-en nincs rájuk ablak, ezért ott nem kérjük őket.
+ */
+export function permissionKeys(native = isNativeApp(), platform = nativePlatform()): PermKey[] {
+  if (!native) return ["location", "camera"];
+  return platform === "ios" ? ["location", "notifications", "camera"] : ["location", "backgroundLocation", "notifications", "camera", "battery"];
+}
+
+/** A rendszerablakra várhat: a felhasználó nincs időhöz kötve, de a panel 2 perc után akkor is újra használható. */
+const REQUEST_WAIT_MS = 120_000;
+
+/** Két rendszerablak között megvárja, hogy az alkalmazás újra előtérben legyen (különben a következő kérés elveszhet). */
+function waitForForeground(maxMs = 15_000): Promise<void> {
+  const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 350));
+  if (typeof document === "undefined" || document.visibilityState === "visible") return settle();
+  return new Promise<void>((resolve) => {
+    let finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onChange);
+      void settle().then(resolve);
+    };
+    const onChange = () => {
+      if (document.visibilityState === "visible") done();
+    };
+    const timer = setTimeout(done, maxMs);
+    document.addEventListener("visibilitychange", onChange);
+  });
 }
 
 /** Időkorláttal: ha a hívás nem válaszol, hibát dob (a hívó dönt a tartalékról). */
@@ -176,8 +211,10 @@ export async function checkAllPermissions(): Promise<PermMap> {
  * az alkalmazás beállításoldala nyílik meg (Engedélyek → Hely → Pontos hely).
  */
 export async function requestPreciseLocation(openSettings: boolean): Promise<PermState> {
+  const before = await checkPermission("location");
+  if (before === "granted") return before;
   const startedAt = Date.now();
-  let state: PermState = "prompt";
+  let state: PermState = before;
   try {
     // A Capacitor saját kérése megvárja a felhasználó döntését (nincs időzítéses találgatás).
     state = await capacitorLocation(true);
@@ -188,15 +225,17 @@ export async function requestPreciseLocation(openSettings: boolean): Promise<Per
       /* nincs több tartalék */
     }
   }
-  // Ha a rendszer azonnal „elutasítva”-t ad (nem is jelent meg ablak), csak a beállítások segítenek.
-  if (openSettings && state === "denied" && Date.now() - startedAt < 700) await openAppSettings();
+  // Ha a rendszer azonnal válaszol (nem is jelent meg ablak), csak a beállítások segítenek:
+  // „elutasítva” esetén, és ha a hozzávetőleges helyzet mellé a rendszer már nem kínálja a „Pontos” ablakot.
+  const answeredAtOnce = Date.now() - startedAt < 700;
+  if (openSettings && answeredAtOnce && (state === "denied" || (before === "limited" && state === "limited"))) await openAppSettings();
   return state;
 }
 
-/** A felugró rendszerablakra várhat, de 30 mp után a panel újra használható, és az aktuális állapotot olvassuk. */
+/** A felugró rendszerablakra megvárja a döntést; 2 perc után a panel újra használható, és az aktuális állapotot olvassuk. */
 export async function requestPermission(key: PermKey): Promise<PermState> {
   try {
-    return await within(requestPermissionNow(key), 30000);
+    return await within(requestPermissionNow(key), REQUEST_WAIT_MS);
   } catch {
     return await checkPermission(key);
   }
@@ -266,12 +305,16 @@ async function requestPermissionNow(key: PermKey): Promise<PermState> {
  */
 export async function requestAllPermissions(onUpdate: (key: PermKey, state: PermState) => void): Promise<void> {
   const order: PermKey[] = ["location", "notifications", "camera", "backgroundLocation", "battery"];
+  let first = true;
   for (const key of order) {
     if (!permissionKeys().includes(key)) continue;
     if ((await checkPermission(key)) === "granted") {
       onUpdate(key, "granted");
       continue;
     }
+    // Az előző rendszerablak vagy beállításoldal bezárulása után várunk, mielőtt a következőt kérnénk.
+    if (!first) await waitForForeground();
+    first = false;
     onUpdate(key, await requestPermission(key));
   }
 }
