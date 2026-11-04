@@ -533,6 +533,10 @@
   overflow: hidden;
 }
 
+/* Kompakt panel (Beállítások, Szobák): azonos, a korábbi fele magasság. */
+[role="dialog"].compact-panel { display: flex; flex-direction: column; height: 40dvh; min-height: 18rem; }
+[role="dialog"].compact-panel > .elastic-scroll-y { flex: 1 1 auto; min-height: 0; }
+
 .elastic-scroll-y {
   overflow-y: auto;
   overscroll-behavior: none;
