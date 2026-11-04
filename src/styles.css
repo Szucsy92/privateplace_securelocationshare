@@ -409,12 +409,15 @@
 .capsule {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 0.6rem;
   height: 72px;
-  width: 165px;
-  min-width: 165px;
-  max-width: 165px;
-  padding: 5px;
+  width: max-content;
+  min-width: 0;
+  max-width: 210px;
+  flex: 0 0 auto;
+  /* Bal oldali tér = a profilkör alatti/feletti tér (1px keret + 8px = 9px), jobb oldalt kicsit több. */
+  padding: 5px 14px 5px 8px;
   border-radius: 9999px;
   background: var(--glass-bg);
   backdrop-filter: blur(20px) saturate(140%);
