@@ -726,7 +726,7 @@ export default function MapApp() {
         }}
       >
         <DialogContent
-          className={`glass-dialog w-[calc(100%-1.5rem)] max-w-[340px] max-h-[90dvh] overflow-hidden gap-0 p-0${dialog === "settings" || dialog === "rooms" || dialog === "share" ? " compact-panel" : ""}`}
+          className={`glass-dialog w-[calc(100%-1.5rem)] max-w-[340px] max-h-[92dvh] overflow-hidden gap-0 p-0${dialog === "settings" || dialog === "rooms" || dialog === "share" ? " compact-panel" : ""}`}
           onInteractOutside={(e) => dialog === "welcome" && e.preventDefault()}
           onEscapeKeyDown={(e) => dialog === "welcome" && e.preventDefault()}
         >
@@ -813,8 +813,8 @@ export default function MapApp() {
           {dialog === "rooms" && (
             <>
               <PanelHeader compact title="Szobák" description="Csak az lát téged, akinek elküldöd a szobád kódját vagy QR-kódját." />
-              <ElasticScroll className="px-4 pt-4">
-                <div className="space-y-2.5 pb-1">
+              <ElasticScroll className="max-h-[68dvh] px-4 pt-4">
+                <div className="space-y-2.5 pb-2">
                   {rooms.length === 0 && (
                     <p className="glass-inset rounded-2xl p-4 text-sm text-muted-foreground">
                       Még nincs szobád. Hozz létre egyet, és küldd el a QR-kódot annak, akivel kölcsönösen látni szeretnétek egymást.
@@ -1275,18 +1275,18 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
   };
 
   return (
-    <div className="flex max-h-[min(85dvh,480px)] flex-col overflow-hidden">
-      <DialogHeader className="shrink-0 flex-row items-center space-y-0 gap-1 px-3 pt-2.5 pb-1 pr-12 text-left">
+    <div className="flex max-h-[min(92dvh,620px)] flex-col overflow-hidden">
+      <DialogHeader className="shrink-0 flex-row items-center space-y-0 gap-1 px-3 pt-3 pb-1 pr-12 text-left">
         <Button
           size="icon"
           variant="ghost"
-          className="h-7 w-7 shrink-0 rounded-full"
+          className="h-8 w-8 shrink-0 rounded-full"
           aria-label="Vissza a szobákhoz"
           onClick={onDone}
         >
-          <ChevronLeft className="h-4 w-4" />
+          <ChevronLeft className="h-5 w-5" />
         </Button>
-        <DialogTitle className="truncate font-display text-sm">
+        <DialogTitle className="truncate font-display text-base">
           {room.name}
         </DialogTitle>
         <DialogDescription className="sr-only">
@@ -1294,19 +1294,19 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
         </DialogDescription>
       </DialogHeader>
 
-      <div className="flex min-h-0 flex-col items-center gap-1.5 px-4 pb-3 pt-1">
-        {/* Kompaktabb QR-kód */}
+      <div className="flex min-h-0 flex-col items-center gap-2 px-4 pb-3 pt-2">
+        {/* Eredeti méretű QR-kód */}
         <div
           className="qr-frame mx-auto w-full shrink-0"
           style={{
-            width: "min(100%, 160px)",
-            padding: 4,
+            width: "min(100%, 210px)",
+            padding: 6,
           }}
         >
           {qrBackground && qrColor && (
             <QRCodeSVG
               value={text}
-              size={160}
+              size={210}
               level="M"
               bgColor={qrBackground}
               fgColor={qrColor}
@@ -1321,40 +1321,40 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
         </div>
 
         {/* Szobakód */}
-        <div className="glass-inset w-full shrink-0 rounded-xl px-3 py-1 text-center">
-          <p className="text-[8px] uppercase tracking-[0.2em] text-muted-foreground">
+        <div className="glass-inset w-full shrink-0 rounded-2xl px-3 py-1.5 text-center">
+          <p className="text-[9px] uppercase tracking-[0.2em] text-muted-foreground">
             Szobakód
           </p>
-          <p className="font-display text-xs font-bold tracking-wider">
+          <p className="font-display text-sm font-bold tracking-wider">
             {code}
           </p>
         </div>
 
         {/* Műveletek */}
-        <div className="grid w-full shrink-0 grid-cols-2 gap-1.5">
+        <div className="grid w-full shrink-0 grid-cols-2 gap-2">
           <Button
             size="sm"
             variant="outline"
-            className="glass-button h-8 rounded-full text-xs"
+            className="glass-button h-9 rounded-full"
             onClick={() => void copy()}
           >
-            <Copy className="mr-1 h-3.5 w-3.5" />
+            <Copy className="mr-1.5 h-4 w-4" />
             {link ? "Link" : "Kód"} másolása
           </Button>
 
           {"share" in navigator ? (
             <Button
               size="sm"
-              className="h-8 rounded-full text-xs"
+              className="h-9 rounded-full"
               onClick={() => void share()}
             >
-              <Share2 className="mr-1 h-3.5 w-3.5" />
+              <Share2 className="mr-1.5 h-4 w-4" />
               Küldés
             </Button>
           ) : (
             <Button
               size="sm"
-              className="h-8 rounded-full text-xs"
+              className="h-9 rounded-full"
               onClick={onDone}
             >
               Kész
@@ -1362,8 +1362,9 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
           )}
         </div>
 
-        <p className="shrink-0 text-center text-[9px] leading-tight text-muted-foreground">
-          Csak az látja a helyzetedet, akinek ezt elküldöd. Bármikor törölheted a szobát.
+        <p className="shrink-0 text-center text-[10px] leading-tight text-muted-foreground">
+          Csak az látja a helyzetedet, akinek ezt elküldöd.
+          Bármikor törölheted a szobát.
         </p>
       </div>
     </div>
