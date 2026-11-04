@@ -28,9 +28,9 @@ export function PersonBubble({ person, self, addressAllowed, onAllow }: { person
     void lookupAddress(last.lat, last.lng, controller.signal).then((v) => { failedRef.current = false; setErr(null); setAddress(v); setDone(true); }).catch((e) => { if (!controller.signal.aborted) { failedRef.current = true; setErr(e instanceof Error ? e.message : "hiba"); setAddress(null); setDone(true); } });
   }, [addressAllowed, last?.lat, last?.lng, clock]);
   const moving = person.speed != null && person.speed > MOVING_SPEED;
-  const distance = own && last ? distanceMeters(own, last) : null;
+  const distance = !person.isSelf && own && last ? distanceMeters(own, last) : null;
   return <div className="person-bubble glass" role="status" aria-label={`${person.name} adatai`} onClick={addressAllowed ? undefined : onAllow} style={addressAllowed ? undefined : { cursor: "pointer" }}>
-    <div className="flex items-center justify-center gap-1 text-[11px]"><Battery className="h-3 w-3" />{person.battery == null ? "–" : `${person.battery}%`}<span>·</span>{distance === null ? "–" : distance < 1000 ? `${Math.round(distance)} m` : `${(distance / 1000).toFixed(1).replace(".", ",")} km`}</div>
+    <div className="flex items-center justify-center gap-1 text-[11px]"><Battery className="h-3 w-3" />{person.battery == null ? "–" : `${person.battery}%`}{!person.isSelf && <><span>·</span>{distance === null ? "–" : distance < 1000 ? `${Math.round(distance)} m` : `${(distance / 1000).toFixed(1).replace(".", ",")} km`}</>}</div>
     {addressAllowed ? <><div className="bubble-address text-xs font-semibold">{address?.title ?? (done ? `Cím nem elérhető${err ? ` (${err})` : ""}` : "Cím keresése…")}</div>{address?.near && <div className="text-[11px] text-muted-foreground">{address.near}</div>}</> : <Button variant="ghost" size="sm" className="h-6 text-[11px]" onClick={onAllow}><MapPin className="h-3 w-3" />Cím lekérése</Button>}
     <div className="text-[11px] text-muted-foreground">{stopLabel(person.stoppedSince, clock, moving)}</div>
   </div>;

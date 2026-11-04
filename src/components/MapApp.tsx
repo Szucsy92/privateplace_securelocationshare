@@ -659,7 +659,7 @@ export default function MapApp() {
                 color={SELF_COLOR}
                 active={follow?.id === SELF}
                 dot={selfFresh ? "on" : gpsStatus === "denied" || gpsStatus === "error" ? "warn" : "off"}
-                status={selfMeta ? `${kmh(selfMeta.speed)} · ${sinceRef.current ? relTime(sinceRef.current, clock) : "privát"}` : "Helyzet keresése…"}
+                status={selfMeta ? `${kmh(selfMeta.speed)}${sinceRef.current ? ` · ${relTime(sinceRef.current, clock)}` : ""}` : "Helyzet keresése…"}
                 onClick={() => toggleFollow(SELF)}
               />
             )}
