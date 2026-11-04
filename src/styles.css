@@ -695,7 +695,7 @@
 .header-signal { display: block; width: 5px; height: 5px; margin: 4px auto 0 2px; border-radius: 50%; background: var(--signal-color); }
 .header-signal:not([data-status="off"]) { animation: signal-pulse 1.8s ease-out infinite; }
 @keyframes signal-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal-color) 45%, transparent); } 85%,100% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--signal-color) 0%, transparent); } }
-.address-ask { bottom: 1rem; left: 4.5rem; right: 4rem; min-height: 48px; display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 4px 6px 4px 14px; border-radius: 999px; animation: hint-in 180ms ease-out; }
+.address-ask { position: absolute; bottom: 1rem; left: 4.5rem; right: 4rem; min-height: 48px; display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 4px 6px 4px 14px; border-radius: 999px; animation: hint-in 180ms ease-out; }
 .address-ask-text { flex: 1; min-width: 0; font-size: 11px; line-height: 1.25; color: var(--muted-foreground); }
 .transport-control { height: 48px; display: flex; align-items: center; gap: 2px; border-radius: 999px; padding: 3px; width: 48px; overflow: hidden; transition: width 220ms ease; }
 .transport-control[data-open="true"] { width: 128px; }
