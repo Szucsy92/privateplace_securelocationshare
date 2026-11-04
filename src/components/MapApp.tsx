@@ -1273,16 +1273,16 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
         <DialogTitle className="truncate font-display text-base">{room.name}</DialogTitle>
         <DialogDescription className="sr-only">Csak az látja a helyzetedet, akinek ezt elküldöd. Bármikor törölheted a szobát.</DialogDescription>
       </DialogHeader>
-      <ElasticScroll className="px-4 pb-4 pt-4">
-        <div className="flex items-center gap-3">
-          <div className="qr-frame shrink-0" style={{ padding: 8 }}>
-            {qrBackground && qrColor && <QRCodeSVG value={text} size={132} level="M" bgColor={qrBackground} fgColor={qrColor} marginSize={0} />}
+      <ElasticScroll className="px-4 pb-3 pt-2">
+        <div className="flex flex-col items-center gap-2.5">
+          <div className="qr-frame mx-auto w-full" style={{ padding: 8, maxWidth: "min(100%, 46dvh)" }}>
+            {qrBackground && qrColor && <QRCodeSVG value={text} size={320} level="M" bgColor={qrBackground} fgColor={qrColor} marginSize={0} style={{ display: "block", width: "100%", height: "auto" }} />}
           </div>
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <div className="glass-inset rounded-2xl p-2.5 text-center">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Szobakód</p>
-              <p className="mt-0.5 break-all font-display text-xs font-bold tracking-wider">{code}</p>
-            </div>
+          <div className="glass-inset w-full rounded-2xl px-3 py-1.5 text-center">
+            <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Szobakód</p>
+            <p className="font-display text-sm font-bold tracking-wider">{code}</p>
+          </div>
+          <div className="grid w-full grid-cols-2 gap-2">
             <Button size="sm" variant="outline" className="glass-button rounded-full" onClick={() => void copy()}>
               <Copy className="mr-1.5 h-4 w-4" />
               {link ? "Link" : "Kód"} másolása
@@ -1298,8 +1298,8 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
               </Button>
             )}
           </div>
+          <p className="text-center text-[11px] leading-snug text-muted-foreground">Csak az látja a helyzetedet, akinek ezt elküldöd. Bármikor törölheted a szobát.</p>
         </div>
-        <p className="mt-3 text-center text-[11px] text-muted-foreground">Csak az látja a helyzetedet, akinek ezt elküldöd. Bármikor törölheted a szobát.</p>
       </ElasticScroll>
     </>
   );
