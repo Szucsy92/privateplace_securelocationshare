@@ -534,7 +534,7 @@
 }
 
 /* Kompakt panel (Beállítások, Szobák): azonos magasság; a Beállítások főnézete görgetés nélkül elfér benne. */
-[role="dialog"].compact-panel { display: flex; flex-direction: column; height: min(23rem, 85dvh); }
+[role="dialog"].compact-panel { display: flex; flex-direction: column; height: min(760px, 94dvh); }
 [role="dialog"].compact-panel > .elastic-scroll-y { flex: 1 1 auto; min-height: 0; }
 
 .elastic-scroll-y {
