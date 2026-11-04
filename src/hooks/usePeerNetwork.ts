@@ -73,6 +73,8 @@ export function usePeerNetwork(opts: {
   const joinedRef = useRef(new Map<string, Joined>());
   const peerDeviceRef = useRef(new Map<string, string>());
   const pendingLocRef = useRef(new Map<string, LocMessage>());
+  /** Szobánként azok az eszközök, amelyek már bemutatkoztak: a kilépéskor akkor is eltávolíthatók, ha közben lekapcsolódtak. */
+  const roomDevicesRef = useRef(new Map<string, Set<string>>());
   const helloRef = useRef<HelloMessage | null>(null);
   const lastLocRef = useRef<LocMessage>(null);
   const roomsRef = useRef(rooms);
@@ -131,6 +133,7 @@ export function usePeerNetwork(opts: {
   const dropDevice = useCallback((token: string, dev: string) => {
     const j = joinedRef.current.get(token);
     if (!j) return;
+    roomDevicesRef.current.get(token)?.delete(dev);
     for (const peerId of [...j.peers]) if (peerDeviceRef.current.get(peerId) === dev) j.peers.delete(peerId);
     let elsewhere = false;
     for (const [peerId, d] of peerDeviceRef.current) if (d === dev && peerInAnyRoom(peerId)) elsewhere = true;
@@ -144,14 +147,23 @@ export function usePeerNetwork(opts: {
       if (!j) return;
       joinedRef.current.delete(token);
       void j.room.leave().catch(() => undefined);
-      const gone: string[] = [];
-      for (const peerId of j.peers) if (!peerInAnyRoom(peerId)) gone.push(peerId);
+      const devs = new Set<string>(roomDevicesRef.current.get(token) ?? []);
+      roomDevicesRef.current.delete(token);
+      for (const peerId of j.peers) {
+        const d = peerDeviceRef.current.get(peerId);
+        if (d) devs.add(d);
+      }
+      const stillThere = (d: string) => {
+        for (const set of roomDevicesRef.current.values()) if (set.has(d)) return true;
+        for (const [peerId, dd] of peerDeviceRef.current) if (dd === d && peerInAnyRoom(peerId)) return true;
+        return false;
+      };
+      const gone = [...devs].filter((d) => !stillThere(d));
       if (gone.length) {
         setPeople((prev) => {
           const next = { ...prev };
-          for (const peerId of gone) {
-            const dev = peerDeviceRef.current.get(peerId);
-            if (!dev || !next[dev]) continue;
+          for (const dev of gone) {
+            if (!next[dev]) continue;
             if (removePeople) delete next[dev];
             else next[dev] = { ...next[dev], online: false };
           }
@@ -212,6 +224,9 @@ export function usePeerNetwork(opts: {
           if (!h || h.deviceId === deviceId) return;
           if (isKicked(token, h.deviceId)) { j.peers.delete(peerId); refreshCounts(); return; }
           peerDeviceRef.current.set(peerId, h.deviceId);
+          let known = roomDevicesRef.current.get(token);
+          if (!known) { known = new Set(); roomDevicesRef.current.set(token, known); }
+          known.add(h.deviceId);
           setPeople((prev) => {
             const p = prev[h.deviceId] ?? emptyPerson(h.deviceId);
             return { ...prev, [h.deviceId]: { ...p, name: h.name, avatar: h.avatar, online: true } };
