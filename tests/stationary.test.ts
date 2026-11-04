@@ -47,3 +47,42 @@ test("lassú gyalogos elmozdulást sebességadat nélkül is felismer", () => {
   const out = f({ lat: 47.00012, lng: 19, acc: 8, speed: null, at: 5000 });
   expect(out.lat).toBeGreaterThan(47.00005);
 });
+
+test("csendes indításkor az álló jelölő a zajtól mozdulatlan marad", () => {
+  const f = createDriftFilter();
+  const first = f({ lat: 47, lng: 19, acc: 8, speed: 0.1, at: 1000, src: "gps" });
+  const offsets: [number, number][] = [[0.00003, 0], [0, 0.00004], [-0.00003, 0.00002], [0.00002, -0.00004], [-0.00002, -0.00002]];
+  offsets.forEach(([dy, dx], i) => {
+    const out = f({ lat: 47 + dy, lng: 19 + dx, acc: 8, speed: 0.1, at: 2000 + i * 1000, src: "gps" });
+    expect([out.lat, out.lng]).toEqual([first.lat, first.lng]);
+  });
+});
+test("friss jó műholdas fix mellett a 30 m alatti hálózati fix is kimarad", () => {
+  const f = createDriftFilter();
+  f({ lat: 47, lng: 19, acc: 8, speed: 0, at: 1000, src: "gps" });
+  expect(f({ lat: 47.001, lng: 19, acc: 25, speed: null, at: 5000, src: "network" }).lat).toBe(47);
+});
+test("a műholdjel tartós kiesése után a durva fix átjut (türelmi idő)", () => {
+  const f = createDriftFilter();
+  f({ lat: 47, lng: 19, acc: 8, speed: 0, at: 1000, src: "gps" });
+  f({ lat: 47.0005, lng: 19, acc: 100, speed: null, at: 27000, src: "network" });
+  const out = f({ lat: 47.0005, lng: 19, acc: 100, speed: null, at: 28000, src: "network" });
+  expect(out.lat > 47.0004).toBe(true);
+});
+test("a gyalogos Doppler-sebesség (1,1 m/s) azonnal feloldja az állást", () => {
+  const f = createDriftFilter();
+  f({ lat: 47, lng: 19, acc: 6, speed: 0, at: 1000, src: "gps" });
+  expect(f({ lat: 47.00001, lng: 19, acc: 6, speed: 1.2, bearing: 0, at: 2000, src: "gps" }).lat).toBe(47.00001);
+});
+test("egyetlen távoli kiugró fix nem mozdítja az álló jelölőt", () => {
+  const f = createDriftFilter();
+  f({ lat: 47, lng: 19, acc: 8, speed: 0, at: 1000, src: "gps" });
+  expect(f({ lat: 47.001, lng: 19, acc: 8, speed: 0, at: 2000, src: "gps" }).lat).toBe(47);
+  expect(f({ lat: 47, lng: 19, acc: 8, speed: 0, at: 3000, src: "gps" }).lat).toBe(47);
+});
+test("két egymást követő távoli fix után azonnal átugrik az új helyre", () => {
+  const f = createDriftFilter();
+  f({ lat: 47, lng: 19, acc: 5, speed: null, at: 1000, src: "gps" });
+  f({ lat: 47.002, lng: 19, acc: 5, speed: null, at: 2000, src: "gps" });
+  expect(f({ lat: 47.002, lng: 19, acc: 5, speed: null, at: 3000, src: "gps" }).lat > 47.0019).toBe(true);
+});

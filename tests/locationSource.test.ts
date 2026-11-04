@@ -43,3 +43,20 @@ test("a helyhozzáférés elutasítása nem marad végtelen keresés", () => {
   expect(errors).toEqual(["denied"]);
   stop();
 });
+test("a hálózati fix újabb időbélyege nem dobatja el a műholdas fixet", () => {
+  let precise: PositionCallback | undefined;
+  let quick: PositionCallback | undefined;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { geolocation: {
+    getCurrentPosition: (cb: PositionCallback) => { quick = cb; },
+    watchPosition: (cb: PositionCallback) => { precise = cb; return 1; },
+    clearWatch: () => {},
+  } } });
+  const fixes: number[] = [];
+  const stop = startLocationWatch({ background: false, onFix: (fix) => fixes.push(fix.lat), onError: () => {} });
+  const now = Date.now();
+  const pos = (latitude: number, timestamp: number) => ({ timestamp, coords: { latitude, longitude: 19, accuracy: 10, speed: null } }) as GeolocationPosition;
+  quick?.(pos(47, now + 5000));
+  precise?.(pos(47.5, now));
+  expect(fixes).toEqual([47, 47.5]);
+  stop();
+});
