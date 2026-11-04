@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { SavedRoom } from "@/lib/rooms";
 import type { LocalProfile } from "@/lib/profile";
 import { colorForDevice, parseHello, parseLocation, parseRoomControl, parseShareRequest, type HelloMessage, type LocMessage } from "@/lib/peerMessages";
-import { appendTrackPoint } from "@/lib/tracking";
+import { appendTrackPoint, clearTrackHistory } from "@/lib/tracking";
 import { turnConfigFromEnv } from "@/lib/turn";
 import { loadRoomControls, rememberRoomControl, verifyRoomControl, type RoomControl } from "@/lib/moderation";
 import { freshLocation, acceptMeasurement } from "@/lib/locationFreshness";
@@ -323,5 +323,10 @@ export function usePeerNetwork(opts: {
     return sent;
   }, []);
 
-  return { people, roomPeers, roomMembers, connectIssues, sendLocation, sendControl, requestShare };
+  /** Egy személy helyben tárolt útvonalának törlése (az aktuális pozíció marad). */
+  const clearTrail = useCallback((dev: string) => {
+    setPeople((prev) => (prev[dev] ? { ...prev, [dev]: { ...prev[dev], points: clearTrackHistory(prev[dev].points) } } : prev));
+  }, []);
+
+  return { people, roomPeers, roomMembers, connectIssues, sendLocation, sendControl, requestShare, clearTrail };
 }
