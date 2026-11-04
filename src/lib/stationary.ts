@@ -29,7 +29,8 @@ export function updateStop(prev: StopState | null, point: LatLngPoint, speed: nu
 }
 
 /** Rövid felirat a megállás idejéről; üres, ha nincs megállás. */
-export function stopLabel(since: number | null | undefined, now: number): string {
+export function stopLabel(since: number | null | undefined, now: number, moving = false): string {
+  if (moving) return "mozgásban";
   if (since == null) return "";
   const minutes = Math.floor(Math.max(0, now - since) / 60000);
   if (minutes < 1) return "most állt meg";
