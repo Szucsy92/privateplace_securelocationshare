@@ -32,7 +32,6 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ElasticScroll } from "@/components/ElasticScroll";
 import { QrScanner, canScanQr } from "@/components/QrScanner";
@@ -704,7 +703,7 @@ export default function MapApp() {
         }}
       >
         <DialogContent
-          className="glass-dialog w-[calc(100%-1.5rem)] max-w-sm gap-0 p-0"
+          className={`glass-dialog w-[calc(100%-1.5rem)] max-w-sm gap-0 p-0${dialog === "settings" || dialog === "rooms" ? " compact-panel" : ""}`}
           onInteractOutside={(e) => dialog === "welcome" && e.preventDefault()}
           onEscapeKeyDown={(e) => dialog === "welcome" && e.preventDefault()}
         >
@@ -726,6 +725,9 @@ export default function MapApp() {
           {dialog === "permissions" && (
             <PermissionsPanel
               native={nativeApp}
+              addressConsent={prefs.addressConsent}
+              onAddressConsent={(v) => updatePrefs({ addressConsent: v ? "yes" : "no" })}
+              onAskAddressAgain={() => { updatePrefs({ addressConsent: "ask" }); setAddressAskHidden(false); setDialog(null); }}
               onDone={() => {
                 markPermissionsAsked();
                 setGpsRequest((n) => n + 1);
@@ -787,8 +789,8 @@ export default function MapApp() {
 
           {dialog === "rooms" && (
             <>
-              <PanelHeader title="Szobák" description="Csak az lát téged, akinek elküldöd a szobád kódját vagy QR-kódját." />
-              <ElasticScroll className="max-h-[52dvh] px-5">
+              <PanelHeader compact title="Szobák" description="Csak az lát téged, akinek elküldöd a szobád kódját vagy QR-kódját." />
+              <ElasticScroll className="px-4">
                 <div className="space-y-2.5 pb-1">
                   {rooms.length === 0 && (
                     <p className="glass-inset rounded-2xl p-4 text-sm text-muted-foreground">
@@ -812,12 +814,12 @@ export default function MapApp() {
                   ))}
                 </div>
               </ElasticScroll>
-              <div className="grid grid-cols-2 gap-2 p-5 pt-4">
-                <Button className="rounded-full" onClick={() => void createRoom()}>
+              <div className="grid shrink-0 grid-cols-2 gap-2 p-4 pt-3">
+                <Button size="sm" className="rounded-full" onClick={() => void createRoom()}>
                   <Plus className="mr-1.5 h-4 w-4" />
                   Új szoba
                 </Button>
-                <Button variant="outline" className="glass-button rounded-full" onClick={() => setDialog("join")}>
+                <Button size="sm" variant="outline" className="glass-button rounded-full" onClick={() => setDialog("join")}>
                   <DoorOpen className="mr-1.5 h-4 w-4" />
                   Csatlakozás
                 </Button>
@@ -827,27 +829,16 @@ export default function MapApp() {
 
           {dialog === "settings" && profile && (
             <>
-              <PanelHeader title="Beállítások" description="A helyzeted közvetlenül a szobatársaid telefonjára megy, központi tárolás nélkül." />
-              <ElasticScroll className="max-h-[66dvh] px-5 pb-5">
-                <div className="space-y-4">
-                  <div className="glass-inset space-y-3 rounded-2xl p-4">
-                    <SettingRow label="Helyzetem megosztása" hint={nativeApp ? "Bekapcsolva a szobatársaid élőben látják, merre jársz – lezárt képernyőnél is. Ezt egy értesítés jelzi." : "Bekapcsolva a szobatársaid élőben látják, merre jársz, amíg az oldal nyitva van."}>
-                      <Switch
-                        aria-label="Helyzetem megosztása"
-                        checked={prefs.sharing}
-                        className="indicator"
-                        data-indicator={prefs.sharing ? "on" : "off"}
-                        onCheckedChange={setSharing}
-                      />
-                    </SettingRow>
-                  </div>
-
+              <PanelHeader compact title="Beállítások" />
+              <ElasticScroll className="px-4 pb-4">
+                <div className="space-y-2.5">
                   <div className="grid grid-cols-2 gap-2">
-                    <Button variant="outline" className="glass-button rounded-full" onClick={() => setDialog("permissions")}>
+                    <Button size="sm" variant="outline" className="glass-button rounded-full" onClick={() => setDialog("permissions")}>
                       <ShieldCheck className="mr-1.5 h-4 w-4" />
                       Engedélyek
                     </Button>
                     <Button
+                      size="sm"
                       variant="outline"
                       className="glass-button rounded-full"
                       onClick={() => {
@@ -861,47 +852,14 @@ export default function MapApp() {
                     </Button>
                   </div>
 
-                  <div className="glass-inset space-y-3 rounded-2xl p-4">
+                  <div className="glass-inset rounded-2xl p-3">
                     <label className="flex items-center gap-3 text-sm">
                       <Checkbox checked={prefs.showTrails} onCheckedChange={(v) => updatePrefs({ showTrails: v === true })} />
                       Útvonalak kirajzolása a térképen
                     </label>
-                    <label className="flex items-center gap-3 text-sm">
-                      <Checkbox checked={prefs.addressConsent === "yes"} onCheckedChange={(v) => updatePrefs({ addressConsent: v === true ? "yes" : "no" })} />
-                      Pontos cím lekérése (OpenStreetMap)
-                    </label>
-                    <Button size="sm" variant="ghost" className="h-8 rounded-full px-3 text-xs" onClick={() => { updatePrefs({ addressConsent: "ask" }); setAddressAskHidden(false); setDialog(null); }}>Címkérdés újra megjelenítése</Button>
-                    <div className="space-y-2">
-                      <p className="text-sm">Térkép tájolása</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="indicator glass-button rounded-full"
-                          data-state={prefs.orientation === "north" ? "on" : "off"}
-                          onClick={() => updatePrefs({ orientation: "north" })}
-                        >
-                          Észak felül
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="indicator glass-button rounded-full"
-                          data-state={prefs.orientation === "heading" ? "on" : "off"}
-                          onClick={() => {
-                            if (prefs.orientation !== "heading") toggleOrientation();
-                          }}
-                        >
-                          Haladási irány
-                        </Button>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Egy személyre koppintva a térkép követi és középen tartja őt; újabb koppintásra a követés kikapcsol.
-                      </p>
-                    </div>
                   </div>
 
-                  <div className="glass-inset rounded-2xl p-4">
+                  <div className="glass-inset rounded-2xl p-3">
                     <ProfileForm
                       compact
                       initial={profile}
@@ -915,6 +873,7 @@ export default function MapApp() {
                   </div>
 
                   <Button
+                    size="sm"
                     variant="outline"
                     className="glass-button w-full rounded-full"
                     onClick={() => {
@@ -1029,7 +988,7 @@ const PERM_INFO: Record<PermKey, { label: string; hint: string; icon: React.Comp
   },
 };
 
-function PermissionsPanel({ native, onDone }: { native: boolean; onDone: () => void }) {
+function PermissionsPanel({ native, onDone, addressConsent, onAddressConsent, onAskAddressAgain }: { native: boolean; onDone: () => void; addressConsent: Prefs["addressConsent"]; onAddressConsent: (allowed: boolean) => void; onAskAddressAgain: () => void }) {
   const keys = permissionKeys(native);
   const [states, setStates] = useState<Partial<PermMap>>({});
   const [busy, setBusy] = useState<PermKey | "all" | null>(null);
@@ -1129,6 +1088,15 @@ function PermissionsPanel({ native, onDone }: { native: boolean; onDone: () => v
               </div>
             );
           })}
+          <div className="glass-inset space-y-1 rounded-2xl p-3">
+            <label className="flex items-center gap-3 text-sm">
+              <Checkbox checked={addressConsent === "yes"} onCheckedChange={(v) => onAddressConsent(v === true)} />
+              Pontos cím lekérése (OpenStreetMap)
+            </label>
+            <Button size="sm" variant="ghost" className="h-8 rounded-full px-3 text-xs" onClick={onAskAddressAgain}>
+              Címkérdés újra megjelenítése
+            </Button>
+          </div>
         </div>
       </ElasticScroll>
       {native && (
@@ -1159,24 +1127,12 @@ function PermissionsPanel({ native, onDone }: { native: boolean; onDone: () => v
   );
 }
 
-function PanelHeader({ title, description }: { title: string; description: string }) {
+function PanelHeader({ title, description, compact }: { title: string; description?: string; compact?: boolean }) {
   return (
-    <DialogHeader className="p-5 pb-4 pr-12 text-left">
-      <DialogTitle className="font-display text-lg">{title}</DialogTitle>
-      <DialogDescription>{description}</DialogDescription>
+    <DialogHeader className={compact ? "shrink-0 space-y-0.5 p-4 pb-2 pr-12 text-left" : "p-5 pb-4 pr-12 text-left"}>
+      <DialogTitle className={compact ? "font-display text-base" : "font-display text-lg"}>{title}</DialogTitle>
+      <DialogDescription className={description ? (compact ? "text-xs" : undefined) : "sr-only"}>{description || title}</DialogDescription>
     </DialogHeader>
-  );
-}
-
-function SettingRow({ label, hint, children }: { label: string; hint: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <div className="min-w-0">
-        <p className="text-sm">{label}</p>
-        <p className="text-xs text-muted-foreground">{hint}</p>
-      </div>
-      {children}
-    </div>
   );
 }
 
