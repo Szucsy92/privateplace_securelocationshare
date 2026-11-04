@@ -258,10 +258,10 @@ export default function MapApp() {
     });
   };
 
-  const askAddress = mounted && !stopped && prefs.addressConsent === "ask" && !addressAskHidden;
+  const askAddress = mounted && !stopped && dialog === null && prefs.addressConsent === "ask" && !addressAskHidden;
   useEffect(() => {
     if (!askAddress) return;
-    const timer = setTimeout(() => setAddressAskHidden(true), 15000);
+    const timer = setTimeout(() => setAddressAskHidden(true), 30000);
     return () => clearTimeout(timer);
   }, [askAddress]);
 
@@ -617,7 +617,7 @@ export default function MapApp() {
       <main ref={windowRef} className="map-panel min-h-0 flex-1" aria-label="Térkép">
         {askAddress && (
           <div className="map-overlay glass address-ask" role="group" aria-label="Címlekérés engedélye">
-            <span className="address-ask-text">Cím lekérése az OpenStreetMapról?</span>
+            <span className="address-ask-text">Cím megjelenítése?</span>
             <Button size="sm" variant="ghost" className="h-8 rounded-full px-3 text-xs" onClick={() => updatePrefs({ addressConsent: "no" })}>Nem</Button>
             <Button size="sm" variant="ghost" className="indicator h-8 rounded-full px-3 text-xs" data-state="on" onClick={() => updatePrefs({ addressConsent: "yes" })}>Igen</Button>
           </div>
@@ -870,6 +870,7 @@ export default function MapApp() {
                       <Checkbox checked={prefs.addressConsent === "yes"} onCheckedChange={(v) => updatePrefs({ addressConsent: v === true ? "yes" : "no" })} />
                       Pontos cím lekérése (OpenStreetMap)
                     </label>
+                    <Button size="sm" variant="ghost" className="h-8 rounded-full px-3 text-xs" onClick={() => { updatePrefs({ addressConsent: "ask" }); setAddressAskHidden(false); setDialog(null); }}>Címkérdés újra megjelenítése</Button>
                     <div className="space-y-2">
                       <p className="text-sm">Térkép tájolása</p>
                       <div className="grid grid-cols-2 gap-2">
