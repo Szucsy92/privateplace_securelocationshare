@@ -658,8 +658,8 @@ export default function MapApp() {
                 fallback={profile.name}
                 color={SELF_COLOR}
                 active={follow?.id === SELF}
-                dot={selfFresh ? "on" : gpsStatus === "denied" || gpsStatus === "error" ? "warn" : "off"}
-                status={selfMeta ? `${kmh(selfMeta.speed)}${sinceRef.current ? ` · ${relTime(sinceRef.current, clock)}` : ""}` : "Helyzet keresése…"}
+                dot={selfFresh ? "on" : gpsStatus === "denied" || gpsStatus === "error" ? "warn" : "wait"}
+                status={selfMeta ? kmh(selfMeta.speed) : ""}
                 onClick={() => toggleFollow(SELF)}
               />
             )}
@@ -671,8 +671,8 @@ export default function MapApp() {
                 fallback={p.name}
                 color={p.color}
                 active={follow?.id === p.deviceId}
-                dot={p.online && p.sharing && p.at && clock - p.at < 15000 ? "on" : "off"}
-                status={personStatus(p, clock)}
+                dot={!p.online ? "warn" : !p.sharing ? "off" : p.at && clock - p.at < 15000 ? "on" : "wait"}
+                status={personStatus(p)}
                 onClick={() => toggleFollow(p.deviceId)}
               />
             ))}
@@ -682,8 +682,8 @@ export default function MapApp() {
                   <Plus className="h-6 w-6" />
                 </span>
                 <span className="flex min-w-0 flex-col items-start text-left">
-                  <span className="text-sm font-semibold">Meghívás</span>
-                  <span className="text-[11px] text-muted-foreground">Szoba és QR-kód</span>
+                  <span className="w-full truncate text-sm font-semibold">Meghívó</span>
+                  <span className="w-full truncate text-[11px] text-muted-foreground">Szoba</span>
                 </span>
               </button>
             )}
@@ -1186,7 +1186,7 @@ function PersonCapsule(props: {
   fallback: string;
   color: string;
   active: boolean;
-  dot: "on" | "off" | "warn";
+  dot: "on" | "off" | "warn" | "wait";
   status: string;
   onClick: () => void;
 }) {
@@ -1202,10 +1202,8 @@ function PersonCapsule(props: {
         {props.avatar ? <img src={props.avatar} alt="" /> : (props.fallback || "?").charAt(0).toUpperCase()}
       </span>
       <span className="flex min-w-0 flex-col items-start text-left">
-        <span className="max-w-[118px] truncate text-sm font-semibold">{props.name}</span>
-        <span className="flex max-w-[118px] items-center gap-2 text-[11px] text-muted-foreground">
-          <span className="truncate">{props.status}</span>
-        </span>
+        <span className="w-full truncate text-sm font-semibold">{props.name}</span>
+        {props.status && <span className="w-full truncate text-[11px] text-muted-foreground">{props.status}</span>}
         <span className="status-dot mt-1" data-state={props.dot} />
       </span>
     </Button>
@@ -1451,11 +1449,11 @@ function ProfileForm(props: {
   );
 }
 
-function personStatus(p: RemotePerson, now: number) {
-  if (!p.online) return p.at ? `nincs kapcsolat · ${relTime(p.at, now)}` : "nincs kapcsolat";
+function personStatus(p: RemotePerson) {
+  if (!p.online) return "";
   if (!p.sharing) return "nem oszt meg";
-  if (!p.at) return "csatlakozva";
-  return `${kmh(p.speed)} · ${p.since ? relTime(p.since, now) : relTime(p.at, now)}`;
+  if (!p.at) return "";
+  return kmh(p.speed);
 }
 
 function kmh(speed: number | null) {
@@ -1463,9 +1461,3 @@ function kmh(speed: number | null) {
   return `${Math.max(0, Math.round(speed * 3.6))} km/h`;
 }
 
-function relTime(at: number, now: number) {
-  const s = Math.max(0, Math.round((now - at) / 1000));
-  if (s < 60) return `${s} mp`;
-  if (s < 3600) return `${Math.round(s / 60)} perc`;
-  return `${Math.round(s / 3600)} óra`;
-}
