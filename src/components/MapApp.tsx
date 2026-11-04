@@ -726,7 +726,7 @@ export default function MapApp() {
         }}
       >
         <DialogContent
-          className={`glass-dialog w-[calc(100%-1.5rem)] max-w-[340px] max-h-[92dvh] overflow-hidden gap-0 p-0${dialog === "settings" || dialog === "rooms" || dialog === "share" ? " compact-panel" : ""}`}
+          className={`glass-dialog w-[calc(100%-1.5rem)] max-w-[390px] max-h-[94dvh] overflow-hidden gap-0 p-0${dialog === "settings" || dialog === "rooms" || dialog === "share" ? " compact-panel" : ""}`}
           onInteractOutside={(e) => dialog === "welcome" && e.preventDefault()}
           onEscapeKeyDown={(e) => dialog === "welcome" && e.preventDefault()}
         >
@@ -813,7 +813,7 @@ export default function MapApp() {
           {dialog === "rooms" && (
             <>
               <PanelHeader compact title="Szobák" description="Csak az lát téged, akinek elküldöd a szobád kódját vagy QR-kódját." />
-              <ElasticScroll className="max-h-[68dvh] px-4 pt-4">
+              <ElasticScroll className="max-h-[78dvh] px-4 pt-4">
                 <div className="space-y-2.5 pb-2">
                   {rooms.length === 0 && (
                     <p className="glass-inset rounded-2xl p-4 text-sm text-muted-foreground">
@@ -1275,7 +1275,7 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
   };
 
   return (
-    <div className="flex max-h-[min(92dvh,620px)] flex-col overflow-hidden">
+    <div className="flex max-h-[min(94dvh,620px)] flex-col overflow-hidden">
       <DialogHeader className="shrink-0 flex-row items-center space-y-0 gap-1 px-3 pt-3 pb-1 pr-12 text-left">
         <Button
           size="icon"
@@ -1295,7 +1295,7 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
       </DialogHeader>
 
       <div className="flex min-h-0 flex-col items-center gap-2 px-4 pb-3 pt-2">
-        {/* Eredeti méretű QR-kód */}
+        {/* QR-kód */}
         <div
           className="qr-frame mx-auto w-full shrink-0"
           style={{
