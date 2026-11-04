@@ -1275,18 +1275,18 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
   };
 
   return (
-    <div className="flex max-h-[min(90dvh,620px)] flex-col overflow-hidden">
-      <DialogHeader className="shrink-0 flex-row items-center space-y-0 gap-1 px-3 pt-3 pb-1 pr-12 text-left">
+    <div className="flex max-h-[min(85dvh,480px)] flex-col overflow-hidden">
+      <DialogHeader className="shrink-0 flex-row items-center space-y-0 gap-1 px-3 pt-2.5 pb-1 pr-12 text-left">
         <Button
           size="icon"
           variant="ghost"
-          className="h-8 w-8 shrink-0 rounded-full"
+          className="h-7 w-7 shrink-0 rounded-full"
           aria-label="Vissza a szobákhoz"
           onClick={onDone}
         >
-          <ChevronLeft className="h-5 w-5" />
+          <ChevronLeft className="h-4 w-4" />
         </Button>
-        <DialogTitle className="truncate font-display text-base">
+        <DialogTitle className="truncate font-display text-sm">
           {room.name}
         </DialogTitle>
         <DialogDescription className="sr-only">
@@ -1294,19 +1294,19 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
         </DialogDescription>
       </DialogHeader>
 
-      <div className="flex min-h-0 flex-col items-center gap-2 px-4 pb-3 pt-2">
-        {/* Kompakt QR-kód */}
+      <div className="flex min-h-0 flex-col items-center gap-1.5 px-4 pb-3 pt-1">
+        {/* Kompaktabb QR-kód */}
         <div
           className="qr-frame mx-auto w-full shrink-0"
           style={{
-            width: "min(100%, 210px)",
-            padding: 6,
+            width: "min(100%, 160px)",
+            padding: 4,
           }}
         >
           {qrBackground && qrColor && (
             <QRCodeSVG
               value={text}
-              size={210}
+              size={160}
               level="M"
               bgColor={qrBackground}
               fgColor={qrColor}
@@ -1321,40 +1321,40 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
         </div>
 
         {/* Szobakód */}
-        <div className="glass-inset w-full shrink-0 rounded-2xl px-3 py-1.5 text-center">
-          <p className="text-[9px] uppercase tracking-[0.2em] text-muted-foreground">
+        <div className="glass-inset w-full shrink-0 rounded-xl px-3 py-1 text-center">
+          <p className="text-[8px] uppercase tracking-[0.2em] text-muted-foreground">
             Szobakód
           </p>
-          <p className="font-display text-sm font-bold tracking-wider">
+          <p className="font-display text-xs font-bold tracking-wider">
             {code}
           </p>
         </div>
 
         {/* Műveletek */}
-        <div className="grid w-full shrink-0 grid-cols-2 gap-2">
+        <div className="grid w-full shrink-0 grid-cols-2 gap-1.5">
           <Button
             size="sm"
             variant="outline"
-            className="glass-button h-9 rounded-full"
+            className="glass-button h-8 rounded-full text-xs"
             onClick={() => void copy()}
           >
-            <Copy className="mr-1.5 h-4 w-4" />
+            <Copy className="mr-1 h-3.5 w-3.5" />
             {link ? "Link" : "Kód"} másolása
           </Button>
 
           {"share" in navigator ? (
             <Button
               size="sm"
-              className="h-9 rounded-full"
+              className="h-8 rounded-full text-xs"
               onClick={() => void share()}
             >
-              <Share2 className="mr-1.5 h-4 w-4" />
+              <Share2 className="mr-1 h-3.5 w-3.5" />
               Küldés
             </Button>
           ) : (
             <Button
               size="sm"
-              className="h-9 rounded-full"
+              className="h-8 rounded-full text-xs"
               onClick={onDone}
             >
               Kész
@@ -1362,9 +1362,8 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
           )}
         </div>
 
-        <p className="shrink-0 text-center text-[10px] leading-tight text-muted-foreground">
-          Csak az látja a helyzetedet, akinek ezt elküldöd.
-          Bármikor törölheted a szobát.
+        <p className="shrink-0 text-center text-[9px] leading-tight text-muted-foreground">
+          Csak az látja a helyzetedet, akinek ezt elküldöd. Bármikor törölheted a szobát.
         </p>
       </div>
     </div>
