@@ -726,7 +726,7 @@ export default function MapApp() {
         }}
       >
         <DialogContent
-          className={`glass-dialog w-[calc(100%-1.5rem)] max-w-[440px] max-h-[94dvh] overflow-hidden gap-0 p-0${dialog === "settings" || dialog === "rooms" || dialog === "share" ? " compact-panel flex h-[min(94dvh,900px)] max-h-[94dvh] flex-col" : ""}`}
+          className={`glass-dialog w-[calc(100%-1.5rem)] max-w-[390px] max-h-[94dvh] overflow-hidden gap-0 p-0${dialog === "settings" || dialog === "rooms" || dialog === "share" ? " compact-panel flex h-[min(94dvh,760px)] max-h-[94dvh] flex-col" : ""}`}
           onInteractOutside={(e) => dialog === "welcome" && e.preventDefault()}
           onEscapeKeyDown={(e) => dialog === "welcome" && e.preventDefault()}
         >
@@ -1299,14 +1299,14 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
         <div
           className="qr-frame mx-auto w-full shrink-0"
           style={{
-            width: "min(100%, 250px)",
+            width: "min(100%, 210px)",
             padding: 6,
           }}
         >
           {qrBackground && qrColor && (
             <QRCodeSVG
               value={text}
-              size={250}
+              size={210}
               level="M"
               bgColor={qrBackground}
               fgColor={qrColor}
