@@ -681,7 +681,7 @@ export default function MapApp() {
                 <span className="capsule-avatar capsule-avatar-plus">
                   <Plus className="h-6 w-6" />
                 </span>
-                <span className="flex min-w-0 flex-col items-start pr-4 text-left">
+                <span className="flex min-w-0 flex-col items-start text-left">
                   <span className="text-sm font-semibold">Meghívás</span>
                   <span className="text-[11px] text-muted-foreground">Szoba és QR-kód</span>
                 </span>
@@ -1201,7 +1201,7 @@ function PersonCapsule(props: {
       <span className="capsule-avatar" style={{ "--person-color": props.color } as React.CSSProperties}>
         {props.avatar ? <img src={props.avatar} alt="" /> : (props.fallback || "?").charAt(0).toUpperCase()}
       </span>
-      <span className="flex min-w-0 flex-col items-start pr-4 text-left">
+      <span className="flex min-w-0 flex-col items-start text-left">
         <span className="max-w-[118px] truncate text-sm font-semibold">{props.name}</span>
         <span className="flex max-w-[118px] items-center gap-2 text-[11px] text-muted-foreground">
           <span className="truncate">{props.status}</span>
