@@ -31,6 +31,7 @@ type Props = {
   people: MapPerson[];
   follow: { id: string; request: number } | null;
   showTrails: boolean;
+  trailIds?: string[];
   orientation: Orientation;
   theme: "dark" | "light";
   onUserPan: () => void;
@@ -131,7 +132,7 @@ function applyMapContrast(map: MlMap, theme: "dark" | "light") {
   }
 }
 
-export default function LiveMap({ people, follow, showTrails, orientation, theme, onUserPan, compassRef, addressAllowed, onAllowAddress, padding, mirrorRef }: Props) {
+export default function LiveMap({ people, follow, showTrails, trailIds, orientation, theme, onUserPan, compassRef, addressAllowed, onAllowAddress, padding, mirrorRef }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MlMap | null>(null);
   const markerCtorRef = useRef<typeof MlMarker | null>(null);
@@ -353,9 +354,9 @@ export default function LiveMap({ people, follow, showTrails, orientation, theme
     const source = map.getSource("trails") as GeoJSONSource | undefined;
     source?.setData({
       type: "FeatureCollection",
-      features: showTrails
+      features: showTrails || (trailIds && trailIds.length)
         ? people
-            .filter((p) => p.points.length > 1)
+            .filter((p) => (showTrails || trailIds?.includes(p.id)) && p.points.length > 1)
             .map((p) => ({
               type: "Feature" as const,
               properties: { color: p.color },
@@ -373,7 +374,7 @@ export default function LiveMap({ people, follow, showTrails, orientation, theme
         map.flyTo({ center: [last.lng, last.lat], zoom: FOCUS_ZOOM, duration: 1600, essential: true });
       }
     }
-  }, [people, ready, showTrails]);
+  }, [people, ready, showTrails, trailIds]);
 
   useEffect(() => {
     const map = mapRef.current;

@@ -20,6 +20,8 @@ import {
   Play,
   MapPin,
   Navigation2,
+  ChevronLeft,
+  ChevronRight,
   Plus,
   QrCode,
   ScanLine,
@@ -165,6 +167,8 @@ export default function MapApp() {
   const [stopped, setStopped] = useState(false);
   const addressAllowed = prefs.addressConsent === "yes";
   const [addressAskHidden, setAddressAskHidden] = useState(false);
+  const [settingsView, setSettingsView] = useState<"main" | "trails">("main");
+  useEffect(() => { if (dialog !== "settings") setSettingsView("main"); }, [dialog]);
   const [nativeStopReady, setNativeStopReady] = useState(false);
   const invitationRepoRef = useRef<string | null>(null);
   const selfMetaRef = useRef(selfMeta);
@@ -436,6 +440,24 @@ export default function MapApp() {
     return list;
   }, [profile, selfTrack, remote, selfHeading, battery, selfMeta]);
 
+  const trailPeople = useMemo(() => [{ id: SELF, name: "Én" }, ...remote.map((p) => ({ id: p.deviceId, name: p.name }))], [remote]);
+  const trailChecked = (id: string) => prefs.showTrails || prefs.trailIds.includes(id);
+  const setAllTrails = (on: boolean) => updatePrefs({ showTrails: on, trailIds: [] });
+  const setPersonTrail = (id: string, on: boolean) => {
+    const all = trailPeople.map((p) => p.id);
+    const current = prefs.showTrails ? all : prefs.trailIds;
+    const next = on ? [...new Set([...current, id])] : current.filter((x) => x !== id);
+    if (all.every((x) => next.includes(x))) updatePrefs({ showTrails: true, trailIds: [] });
+    else updatePrefs({ showTrails: false, trailIds: next });
+  };
+  const clearPersonTrail = (id: string, name: string) => {
+    if (id === SELF) {
+      selfTrackRef.current = clearTrackHistory(selfTrackRef.current);
+      setSelfTrack(selfTrackRef.current);
+    } else net.clearTrail(id);
+    toast.success(`${name} útvonala törölve erről a telefonról.`);
+  };
+
   const hasPosition = (id: string) => mapPeople.some((p) => p.id === id);
 
   const toggleFollow = (id: string) => {
@@ -567,6 +589,7 @@ export default function MapApp() {
             people={mapPeople}
             follow={follow}
             showTrails={prefs.showTrails}
+            trailIds={prefs.trailIds}
             orientation={prefs.orientation}
             theme={prefs.mapTheme}
             onUserPan={() => setFollow(null)}
@@ -790,7 +813,7 @@ export default function MapApp() {
           {dialog === "rooms" && (
             <>
               <PanelHeader compact title="Szobák" description="Csak az lát téged, akinek elküldöd a szobád kódját vagy QR-kódját." />
-              <ElasticScroll className="px-4">
+              <ElasticScroll className="px-4 pt-4">
                 <div className="space-y-2.5 pb-1">
                   {rooms.length === 0 && (
                     <p className="glass-inset rounded-2xl p-4 text-sm text-muted-foreground">
@@ -827,11 +850,29 @@ export default function MapApp() {
             </>
           )}
 
-          {dialog === "settings" && profile && (
+          {dialog === "settings" && profile && settingsView === "main" && (
             <>
               <PanelHeader compact title="Beállítások" />
-              <ElasticScroll className="px-4 pb-4">
+              <ElasticScroll className="px-4 pb-4 pt-4">
                 <div className="space-y-2.5">
+                  <div className="glass-inset rounded-2xl p-3">
+                    <ProfileForm
+                      compact
+                      initial={profile}
+                      submitLabel="Profil mentése"
+                      onSave={(p) => {
+                        saveProfile(p);
+                        setProfile(p);
+                        toast.success("Profil mentve");
+                      }}
+                    />
+                  </div>
+
+                  <Button size="sm" variant="outline" className="glass-button w-full justify-between rounded-full" onClick={() => setSettingsView("trails")}>
+                    Útvonalak rajzolása a térképen
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+
                   <div className="grid grid-cols-2 gap-2">
                     <Button size="sm" variant="outline" className="glass-button rounded-full" onClick={() => setDialog("permissions")}>
                       <ShieldCheck className="mr-1.5 h-4 w-4" />
@@ -852,42 +893,40 @@ export default function MapApp() {
                     </Button>
                   </div>
 
-                  <div className="glass-inset rounded-2xl p-3">
-                    <label className="flex items-center gap-3 text-sm">
-                      <Checkbox checked={prefs.showTrails} onCheckedChange={(v) => updatePrefs({ showTrails: v === true })} />
-                      Útvonalak kirajzolása a térképen
-                    </label>
-                  </div>
-
-                  <div className="glass-inset rounded-2xl p-3">
-                    <ProfileForm
-                      compact
-                      initial={profile}
-                      submitLabel="Profil mentése"
-                      onSave={(p) => {
-                        saveProfile(p);
-                        setProfile(p);
-                        toast.success("Profil mentve");
-                      }}
-                    />
-                  </div>
-
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="glass-button w-full rounded-full"
-                    onClick={() => {
-                      selfTrackRef.current = clearTrackHistory(selfTrackRef.current);
-                      setSelfTrack(selfTrackRef.current);
-                      toast.success("A saját útvonalad törölve erről a telefonról.");
-                    }}
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Saját útvonal törlése
-                  </Button>
                   <p className="text-center text-[11px] text-muted-foreground">
                     Private Place · {(import.meta.env["VITE_APP_VERSION"] as string | undefined) || "webes változat"}
                   </p>
+                </div>
+              </ElasticScroll>
+            </>
+          )}
+
+          {dialog === "settings" && profile && settingsView === "trails" && (
+            <>
+              <DialogHeader className="shrink-0 flex-row items-center space-y-0 gap-1 p-3 pb-2 pr-12 text-left">
+                <Button size="icon" variant="ghost" className="h-8 w-8 rounded-full" aria-label="Vissza" onClick={() => setSettingsView("main")}>
+                  <ChevronLeft className="h-5 w-5" />
+                </Button>
+                <DialogTitle className="font-display text-base">Útvonalak</DialogTitle>
+                <DialogDescription className="sr-only">Kiválaszthatod, kinek az útvonala jelenjen meg a térképen, és törölheted az útvonalakat.</DialogDescription>
+              </DialogHeader>
+              <ElasticScroll className="px-4 pb-4 pt-4">
+                <div className="glass-inset space-y-1 rounded-2xl p-3">
+                  <label className="flex items-center gap-3 pb-2 text-sm font-semibold">
+                    <Checkbox checked={prefs.showTrails} onCheckedChange={(v) => setAllTrails(v === true)} />
+                    Összes személy
+                  </label>
+                  {trailPeople.map((p) => (
+                    <div key={p.id} className="flex items-center gap-3 border-t border-foreground/10 py-1">
+                      <label className="flex min-w-0 flex-1 items-center gap-3 text-sm">
+                        <Checkbox checked={trailChecked(p.id)} onCheckedChange={(v) => setPersonTrail(p.id, v === true)} />
+                        <span className="truncate">{p.name}</span>
+                      </label>
+                      <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0 rounded-full" aria-label={`${p.name} útvonalának törlése`} title="Útvonal törlése" onClick={() => clearPersonTrail(p.id, p.name)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
                 </div>
               </ElasticScroll>
             </>
