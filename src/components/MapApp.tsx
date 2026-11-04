@@ -726,7 +726,7 @@ export default function MapApp() {
         }}
       >
         <DialogContent
-          className={`glass-dialog w-[calc(100%-1.5rem)] max-w-[390px] max-h-[94dvh] overflow-hidden gap-0 p-0${dialog === "settings" || dialog === "rooms" || dialog === "share" ? " compact-panel" : ""}`}
+          className={`glass-dialog w-[calc(100%-1.5rem)] max-w-[390px] max-h-[94dvh] overflow-hidden gap-0 p-0${dialog === "settings" || dialog === "rooms" || dialog === "share" ? " compact-panel flex h-[min(88dvh,680px)] max-h-[88dvh] flex-col" : ""}`}
           onInteractOutside={(e) => dialog === "welcome" && e.preventDefault()}
           onEscapeKeyDown={(e) => dialog === "welcome" && e.preventDefault()}
         >
@@ -813,7 +813,7 @@ export default function MapApp() {
           {dialog === "rooms" && (
             <>
               <PanelHeader compact title="Szobák" description="Csak az lát téged, akinek elküldöd a szobád kódját vagy QR-kódját." />
-              <ElasticScroll className="max-h-[78dvh] px-4 pt-4">
+              <ElasticScroll className="min-h-0 flex-1 px-4 pt-4">
                 <div className="space-y-2.5 pb-2">
                   {rooms.length === 0 && (
                     <p className="glass-inset rounded-2xl p-4 text-sm text-muted-foreground">
@@ -853,7 +853,7 @@ export default function MapApp() {
           {dialog === "settings" && profile && settingsView === "main" && (
             <>
               <PanelHeader compact title="Beállítások" />
-              <ElasticScroll className="px-4 pb-4 pt-4">
+              <ElasticScroll className="min-h-0 flex-1 px-4 pb-4 pt-4">
                 <div className="space-y-2.5">
                   <div className="glass-inset rounded-2xl p-3">
                     <ProfileForm
@@ -910,7 +910,7 @@ export default function MapApp() {
                 <DialogTitle className="font-display text-base">Útvonalak</DialogTitle>
                 <DialogDescription className="sr-only">Kiválaszthatod, kinek az útvonala jelenjen meg a térképen, és törölheted az útvonalakat.</DialogDescription>
               </DialogHeader>
-              <ElasticScroll className="px-4 pb-4 pt-4">
+              <ElasticScroll className="min-h-0 flex-1 px-4 pb-4 pt-4">
                 <div className="glass-inset space-y-1 rounded-2xl p-3">
                   <label className="flex items-center gap-3 pb-2 text-sm font-semibold">
                     <Checkbox checked={prefs.showTrails} onCheckedChange={(v) => setAllTrails(v === true)} />
@@ -1275,7 +1275,7 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
   };
 
   return (
-    <div className="flex max-h-[min(94dvh,620px)] flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
       <DialogHeader className="shrink-0 flex-row items-center space-y-0 gap-1 px-3 pt-3 pb-1 pr-12 text-left">
         <Button
           size="icon"
