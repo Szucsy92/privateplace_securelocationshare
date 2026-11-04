@@ -726,7 +726,7 @@ export default function MapApp() {
         }}
       >
         <DialogContent
-          className={`glass-dialog w-[calc(100%-1.5rem)] max-w-sm gap-0 p-0${dialog === "settings" || dialog === "rooms" || dialog === "share" ? " compact-panel" : ""}`}
+          className={`glass-dialog w-[calc(100%-1.5rem)] max-w-[340px] max-h-[90dvh] overflow-hidden gap-0 p-0${dialog === "settings" || dialog === "rooms" || dialog === "share" ? " compact-panel" : ""}`}
           onInteractOutside={(e) => dialog === "welcome" && e.preventDefault()}
           onEscapeKeyDown={(e) => dialog === "welcome" && e.preventDefault()}
         >
@@ -1235,15 +1235,20 @@ const ROOM_COLOR_NAMES: Record<RoomColor, string> = { mint: "Menta Zöld", viole
 function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => void }) {
   const [qrColor, setQrColor] = useState<string>();
   const [qrBackground, setQrBackground] = useState<string>();
+
   useEffect(() => {
     const css = getComputedStyle(document.documentElement);
     setQrColor(css.getPropertyValue(`--room-${room?.color ?? DEFAULT_ROOM_COLOR}`).trim());
     setQrBackground(css.getPropertyValue("--qr-background").trim());
   }, [room?.color]);
+
   if (!room) return null;
+
   const base = shareBase();
   const repo = releaseRepository();
-  const rawLink = base ? buildRoomLink(base, room.token, room.name, room.color ?? DEFAULT_ROOM_COLOR, room.ownerKey) : null;
+  const rawLink = base
+    ? buildRoomLink(base, room.token, room.name, room.color ?? DEFAULT_ROOM_COLOR, room.ownerKey)
+    : null;
   const link = rawLink && repo ? `${rawLink}&forras=${encodeURIComponent(repo)}` : rawLink;
   const code = formatRoomToken(room.token);
   const text = link ?? code;
@@ -1256,52 +1261,113 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
       toast.error("A másolás nem sikerült");
     }
   };
+
   const share = async () => {
     try {
-      await navigator.share({ title: "Private Place meghívó", text: link ? "Csatlakozz a szobámhoz:" : `Szobakód: ${code}`, ...(link ? { url: link } : {}) });
+      await navigator.share({
+        title: "Private Place meghívó",
+        text: link ? "Csatlakozz a szobámhoz:" : `Szobakód: ${code}`,
+        ...(link ? { url: link } : {}),
+      });
     } catch {
       /* a felhasználó bezárta */
     }
   };
 
   return (
-    <>
-      <DialogHeader className="shrink-0 flex-row items-center space-y-0 gap-1 p-3 pb-2 pr-12 text-left">
-        <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0 rounded-full" aria-label="Vissza a szobákhoz" onClick={onDone}>
+    <div className="flex max-h-[min(90dvh,620px)] flex-col overflow-hidden">
+      <DialogHeader className="shrink-0 flex-row items-center space-y-0 gap-1 px-3 pt-3 pb-1 pr-12 text-left">
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-8 w-8 shrink-0 rounded-full"
+          aria-label="Vissza a szobákhoz"
+          onClick={onDone}
+        >
           <ChevronLeft className="h-5 w-5" />
         </Button>
-        <DialogTitle className="truncate font-display text-base">{room.name}</DialogTitle>
-        <DialogDescription className="sr-only">Csak az látja a helyzetedet, akinek ezt elküldöd. Bármikor törölheted a szobát.</DialogDescription>
+        <DialogTitle className="truncate font-display text-base">
+          {room.name}
+        </DialogTitle>
+        <DialogDescription className="sr-only">
+          Csak az látja a helyzetedet, akinek ezt elküldöd.
+        </DialogDescription>
       </DialogHeader>
-      <ElasticScroll className="px-4 pb-3 pt-2">
-        <div className="flex flex-col items-center gap-2.5">
-          <div className="qr-frame mx-auto w-full" style={{ padding: 8, maxWidth: "min(100%, 46dvh)" }}>
-            {qrBackground && qrColor && <QRCodeSVG value={text} size={320} level="M" bgColor={qrBackground} fgColor={qrColor} marginSize={0} style={{ display: "block", width: "100%", height: "auto" }} />}
-          </div>
-          <div className="glass-inset w-full rounded-2xl px-3 py-1.5 text-center">
-            <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Szobakód</p>
-            <p className="font-display text-sm font-bold tracking-wider">{code}</p>
-          </div>
-          <div className="grid w-full grid-cols-2 gap-2">
-            <Button size="sm" variant="outline" className="glass-button rounded-full" onClick={() => void copy()}>
-              <Copy className="mr-1.5 h-4 w-4" />
-              {link ? "Link" : "Kód"} másolása
-            </Button>
-            {"share" in navigator ? (
-              <Button size="sm" className="rounded-full" onClick={() => void share()}>
-                <Share2 className="mr-1.5 h-4 w-4" />
-                Küldés
-              </Button>
-            ) : (
-              <Button size="sm" className="rounded-full" onClick={onDone}>
-                Kész
-              </Button>
-            )}
-          </div>
-          <p className="text-center text-[11px] leading-snug text-muted-foreground">Csak az látja a helyzetedet, akinek ezt elküldöd. Bármikor törölheted a szobát.</p>
+
+      <div className="flex min-h-0 flex-col items-center gap-2 px-4 pb-3 pt-2">
+        {/* Kompakt QR-kód */}
+        <div
+          className="qr-frame mx-auto w-full shrink-0"
+          style={{
+            width: "min(100%, 210px)",
+            padding: 6,
+          }}
+        >
+          {qrBackground && qrColor && (
+            <QRCodeSVG
+              value={text}
+              size={210}
+              level="M"
+              bgColor={qrBackground}
+              fgColor={qrColor}
+              marginSize={0}
+              style={{
+                display: "block",
+                width: "100%",
+                height: "auto",
+              }}
+            />
+          )}
         </div>
-      </ElasticScroll>
-    </>
+
+        {/* Szobakód */}
+        <div className="glass-inset w-full shrink-0 rounded-2xl px-3 py-1.5 text-center">
+          <p className="text-[9px] uppercase tracking-[0.2em] text-muted-foreground">
+            Szobakód
+          </p>
+          <p className="font-display text-sm font-bold tracking-wider">
+            {code}
+          </p>
+        </div>
+
+        {/* Műveletek */}
+        <div className="grid w-full shrink-0 grid-cols-2 gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="glass-button h-9 rounded-full"
+            onClick={() => void copy()}
+          >
+            <Copy className="mr-1.5 h-4 w-4" />
+            {link ? "Link" : "Kód"} másolása
+          </Button>
+
+          {"share" in navigator ? (
+            <Button
+              size="sm"
+              className="h-9 rounded-full"
+              onClick={() => void share()}
+            >
+              <Share2 className="mr-1.5 h-4 w-4" />
+              Küldés
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              className="h-9 rounded-full"
+              onClick={onDone}
+            >
+              Kész
+            </Button>
+          )}
+        </div>
+
+        <p className="shrink-0 text-center text-[10px] leading-tight text-muted-foreground">
+          Csak az látja a helyzetedet, akinek ezt elküldöd.
+          Bármikor törölheted a szobát.
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -1487,4 +1553,3 @@ function kmh(speed: number | null) {
   if (speed == null || Number.isNaN(speed)) return "– km/h";
   return `${Math.max(0, Math.round(speed * 3.6))} km/h`;
 }
-
