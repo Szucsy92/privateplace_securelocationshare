@@ -164,7 +164,8 @@ export default function MapApp() {
   const [battery, setBattery] = useState<number | null>(null);
   const [exitConfirm, setExitConfirm] = useState(false);
   const [stopped, setStopped] = useState(false);
-  const [addressAllowed, setAddressAllowed] = useState(false);
+  const addressAllowed = prefs.addressConsent === "yes";
+  const [addressAskHidden, setAddressAskHidden] = useState(false);
   const [nativeStopReady, setNativeStopReady] = useState(false);
   const invitationRepoRef = useRef<string | null>(null);
   const selfMetaRef = useRef(selfMeta);
@@ -256,6 +257,13 @@ export default function MapApp() {
       return next;
     });
   };
+
+  const askAddress = mounted && !stopped && prefs.addressConsent === "ask" && !addressAskHidden;
+  useEffect(() => {
+    if (!askAddress) return;
+    const timer = setTimeout(() => setAddressAskHidden(true), 15000);
+    return () => clearTimeout(timer);
+  }, [askAddress]);
 
   const updateRooms = useCallback((fn: (prev: SavedRoom[]) => SavedRoom[]) => {
     setRooms((prev) => {
@@ -421,13 +429,13 @@ export default function MapApp() {
   const mapPeople: MapPerson[] = useMemo(() => {
     const list: MapPerson[] = [];
     if (profile && selfTrack.length)
-      list.push({ id: SELF, name: profile.name, avatarUrl: profile.avatar, color: SELF_COLOR, points: selfTrack, isSelf: true, heading: selfHeading, battery, stoppedSince: stopRef.current?.since ?? null });
+      list.push({ id: SELF, name: profile.name, avatarUrl: profile.avatar, color: SELF_COLOR, points: selfTrack, isSelf: true, heading: selfHeading, battery, stoppedSince: stopRef.current?.since ?? null, speed: selfMeta?.speed ?? null });
     for (const p of remote) {
       if (p.sharing && p.points.length)
-        list.push({ id: p.deviceId, name: p.name, avatarUrl: p.avatar, color: p.color, points: p.points, heading: p.heading, battery: p.battery, stoppedSince: p.stoppedSince });
+        list.push({ id: p.deviceId, name: p.name, avatarUrl: p.avatar, color: p.color, points: p.points, heading: p.heading, battery: p.battery, stoppedSince: p.stoppedSince, speed: p.speed });
     }
     return list;
-  }, [profile, selfTrack, remote, selfHeading, battery]);
+  }, [profile, selfTrack, remote, selfHeading, battery, selfMeta]);
 
   const hasPosition = (id: string) => mapPeople.some((p) => p.id === id);
 
@@ -565,7 +573,7 @@ export default function MapApp() {
             onUserPan={() => setFollow(null)}
             compassRef={compassRef}
             addressAllowed={addressAllowed}
-            onAllowAddress={() => { if (window.confirm("A cím lekéréséhez a kijelölt koordinátát elküldjük az OpenStreetMap címszolgáltatásának. Engedélyezed?")) setAddressAllowed(true); }}
+            onAllowAddress={() => updatePrefs({ addressConsent: "yes" })}
             padding={mapPadding}
             mirrorRef={mirrorRef}
           />
@@ -607,6 +615,13 @@ export default function MapApp() {
       </header>
 
       <main ref={windowRef} className="map-panel min-h-0 flex-1" aria-label="Térkép">
+        {askAddress && (
+          <div className="map-overlay glass address-ask" role="group" aria-label="Címlekérés engedélye">
+            <span className="address-ask-text">Cím lekérése az OpenStreetMapról?</span>
+            <Button size="sm" variant="ghost" className="h-8 rounded-full px-3 text-xs" onClick={() => updatePrefs({ addressConsent: "no" })}>Nem</Button>
+            <Button size="sm" variant="ghost" className="indicator h-8 rounded-full px-3 text-xs" data-state="on" onClick={() => updatePrefs({ addressConsent: "yes" })}>Igen</Button>
+          </div>
+        )}
         <button
           className="map-overlay indicator glass compass-btn absolute right-3 top-3"
           data-state={prefs.orientation === "heading" ? "on" : "off"}
@@ -633,12 +648,12 @@ export default function MapApp() {
         }} />
       </main>
 
-      <section className="people-rail-wrap shrink-0" aria-label="Saját magam és a szobatársaim">
+      <section className="people-rail-wrap shrink-0" aria-label="Én és a szobatársaim">
         <div ref={railRef} className="people-rail">
           <div className="people-track">
             {profile && (
               <PersonCapsule
-                name="Saját magam"
+                name="Én"
                 avatar={profile.avatar}
                 fallback={profile.name}
                 color={SELF_COLOR}
@@ -850,6 +865,10 @@ export default function MapApp() {
                     <label className="flex items-center gap-3 text-sm">
                       <Checkbox checked={prefs.showTrails} onCheckedChange={(v) => updatePrefs({ showTrails: v === true })} />
                       Útvonalak kirajzolása a térképen
+                    </label>
+                    <label className="flex items-center gap-3 text-sm">
+                      <Checkbox checked={prefs.addressConsent === "yes"} onCheckedChange={(v) => updatePrefs({ addressConsent: v === true ? "yes" : "no" })} />
+                      Pontos cím lekérése (OpenStreetMap)
                     </label>
                     <div className="space-y-2">
                       <p className="text-sm">Térkép tájolása</p>

@@ -17,6 +17,7 @@ export type MapPerson = {
   heading?: number | null;
   battery?: number | null;
   stoppedSince?: number | null;
+  speed?: number | null;
 };
 
 export type Orientation = "north" | "heading";
