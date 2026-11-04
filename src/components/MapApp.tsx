@@ -726,7 +726,7 @@ export default function MapApp() {
         }}
       >
         <DialogContent
-          className={`glass-dialog w-[calc(100%-1.5rem)] max-w-sm gap-0 p-0${dialog === "settings" || dialog === "rooms" ? " compact-panel" : ""}`}
+          className={`glass-dialog w-[calc(100%-1.5rem)] max-w-sm gap-0 p-0${dialog === "settings" || dialog === "rooms" || dialog === "share" ? " compact-panel" : ""}`}
           onInteractOutside={(e) => dialog === "welcome" && e.preventDefault()}
           onEscapeKeyDown={(e) => dialog === "welcome" && e.preventDefault()}
         >
@@ -1266,36 +1266,40 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
 
   return (
     <>
-      <PanelHeader title={room.name} description="Csak az látja a helyzetedet, akinek ezt elküldöd. Bármikor törölheted a szobát." />
-      <ElasticScroll className="max-h-[70dvh] px-5 pb-5">
-        <div className="flex flex-col items-center gap-4">
-          <div className="qr-frame">
-            {qrBackground && qrColor && <QRCodeSVG value={text} size={196} level="M" bgColor={qrBackground} fgColor={qrColor} marginSize={0} />}
+      <DialogHeader className="shrink-0 flex-row items-center space-y-0 gap-1 p-3 pb-2 pr-12 text-left">
+        <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0 rounded-full" aria-label="Vissza a szobákhoz" onClick={onDone}>
+          <ChevronLeft className="h-5 w-5" />
+        </Button>
+        <DialogTitle className="truncate font-display text-base">{room.name}</DialogTitle>
+        <DialogDescription className="sr-only">Csak az látja a helyzetedet, akinek ezt elküldöd. Bármikor törölheted a szobát.</DialogDescription>
+      </DialogHeader>
+      <ElasticScroll className="px-4 pb-4 pt-4">
+        <div className="flex items-center gap-3">
+          <div className="qr-frame shrink-0" style={{ padding: 8 }}>
+            {qrBackground && qrColor && <QRCodeSVG value={text} size={132} level="M" bgColor={qrBackground} fgColor={qrColor} marginSize={0} />}
           </div>
-          <div className="glass-inset w-full rounded-2xl p-3 text-center">
-            <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Szobakód</p>
-            <p className="mt-1 break-all font-display text-base font-bold tracking-wider">{code}</p>
-          </div>
-          <div className="grid w-full grid-cols-2 gap-2">
-            <Button variant="outline" className="glass-button rounded-full" onClick={() => void copy()}>
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <div className="glass-inset rounded-2xl p-2.5 text-center">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Szobakód</p>
+              <p className="mt-0.5 break-all font-display text-xs font-bold tracking-wider">{code}</p>
+            </div>
+            <Button size="sm" variant="outline" className="glass-button rounded-full" onClick={() => void copy()}>
               <Copy className="mr-1.5 h-4 w-4" />
               {link ? "Link" : "Kód"} másolása
             </Button>
             {"share" in navigator ? (
-              <Button className="rounded-full" onClick={() => void share()}>
+              <Button size="sm" className="rounded-full" onClick={() => void share()}>
                 <Share2 className="mr-1.5 h-4 w-4" />
                 Küldés
               </Button>
             ) : (
-              <Button className="rounded-full" onClick={onDone}>
+              <Button size="sm" className="rounded-full" onClick={onDone}>
                 Kész
               </Button>
             )}
           </div>
-          <Button variant="ghost" size="sm" className="rounded-full" onClick={onDone}>
-            Vissza a szobákhoz
-          </Button>
         </div>
+        <p className="mt-3 text-center text-[11px] text-muted-foreground">Csak az látja a helyzetedet, akinek ezt elküldöd. Bármikor törölheted a szobát.</p>
       </ElasticScroll>
     </>
   );
@@ -1304,6 +1308,7 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
 function JoinPanel({ initial, repository, onJoin, onReject }: { initial: { token: string; name: string | null; color?: RoomColor; ownerKey?: string } | null; repository: string | null; onJoin: (token: string, name: string | null, color?: RoomColor, ownerKey?: string) => void; onReject: () => void }) {
   const [value, setValue] = useState(initial ? formatRoomToken(initial.token) : "");
   const [scanning, setScanning] = useState(false);
+  const [appTry, setAppTry] = useState<"idle" | "opening" | "missing">("idle");
   const parsed = parseRoomInput(value);
   const name = parsed?.name ?? initial?.name ?? null;
   const [release, setRelease] = useState<AppRelease | null>(null);
@@ -1314,6 +1319,23 @@ function JoinPanel({ initial, repository, onJoin, onReject }: { initial: { token
     void latestRelease(repo, controller.signal).then(setRelease).catch(() => {});
     return () => controller.abort();
   }, []);
+  /** Az app megnyitását próbáljuk; ha az oldal marad (nem váltott át az app), akkor nincs telepítve, és csak akkor ajánljuk a letöltést. */
+  const openApp = () => {
+    if (!initial) return;
+    setAppTry("opening");
+    let left = false;
+    const onLeave = () => { left = true; };
+    document.addEventListener("visibilitychange", onLeave);
+    window.addEventListener("pagehide", onLeave);
+    window.addEventListener("blur", onLeave);
+    window.location.href = appLink(initial);
+    window.setTimeout(() => {
+      document.removeEventListener("visibilitychange", onLeave);
+      window.removeEventListener("pagehide", onLeave);
+      window.removeEventListener("blur", onLeave);
+      setAppTry(left || document.hidden ? "idle" : "missing");
+    }, 1800);
+  };
   const installed = Number(import.meta.env["VITE_APP_VERSION_CODE"] ?? 0);
   const update = isNativeApp() && release && needsUpdate(installed, release.versionCode);
 
@@ -1355,8 +1377,18 @@ function JoinPanel({ initial, repository, onJoin, onReject }: { initial: { token
               {scanning ? "Beolvasás leállítása" : "QR-kód beolvasása"}
             </Button>
           )}
-          {release && (update || (isAndroidBrowser() && !isNativeApp())) && <Button type="button" className="w-full rounded-full" onClick={() => { window.location.href = release.apk; }}>{update ? "Frissítés letöltése" : "Alkalmazás letöltése"}</Button>}
-          {initial && !isNativeApp() && isAndroidBrowser() && <Button type="button" variant="outline" className="w-full rounded-full" onClick={() => { window.location.href = appLink(initial); }}>Megnyitás a telepített appban</Button>}
+          {update && release && <Button type="button" className="w-full rounded-full" onClick={() => { window.location.href = release.apk; }}>Frissítés letöltése</Button>}
+          {initial && !isNativeApp() && isAndroidBrowser() && (
+            <>
+              <Button type="button" variant="outline" className="glass-button w-full rounded-full" disabled={appTry === "opening"} onClick={openApp}>Megnyitás az appban</Button>
+              {appTry === "missing" && (
+                <>
+                  <p className="text-center text-xs text-muted-foreground">Az app nincs telepítve ezen a telefonon.</p>
+                  {release && <Button type="button" className="w-full rounded-full" onClick={() => { window.location.href = release.apk; }}>Alkalmazás letöltése</Button>}
+                </>
+              )}
+            </>
+          )}
           <Button type="submit" className="w-full rounded-full" disabled={!parsed}>{update ? "Csatlakozás frissítés nélkül" : "Csatlakozás"}</Button>
           <Button type="button" variant="ghost" className="w-full rounded-full" onClick={onReject}>Elutasítás</Button>
         </form>
