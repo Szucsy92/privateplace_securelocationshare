@@ -1275,7 +1275,7 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
   };
 
   return (
-    <div className="flex max-h-[min(94dvh,760px)] flex-col overflow-hidden">
+    <div className="flex max-h-[94dvh] flex-col overflow-hidden">
       <DialogHeader className="shrink-0 flex-row items-center space-y-0 gap-1 px-3 pt-3 pb-1 pr-12 text-left">
         <Button
           size="icon"
