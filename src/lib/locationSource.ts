@@ -7,7 +7,7 @@
 import { registerPlugin } from "@capacitor/core";
 import type { BackgroundGeolocationPlugin } from "@capacitor-community/background-geolocation";
 
-export type Fix = { lat: number; lng: number; acc: number | null; speed: number | null; bearing?: number | null; at?: number };
+export type Fix = { lat: number; lng: number; acc: number | null; speed: number | null; bearing?: number | null; at?: number; src?: "gps" | "network" };
 export type FixError = "denied" | "error";
 
 type CapacitorGlobal = { isNativePlatform?: () => boolean };
@@ -92,13 +92,24 @@ export function startLocationWatch(opts: {
 
   let acquisitionTimer: ReturnType<typeof setTimeout> | undefined;
   let gotFix = false;
-  let latestAt = 0;
+  let latestAt = 0;      // bármely forrás utolsó fixe (hibajelzéshez, újrapróbálkáshoz)
+  let latestGpsAt = 0;   // a műholdas/figyelő forrás legfrissebb mérése: a hálózati kereső ezt nem írhatja felül
+  let latestNetAt = 0;
   let retryTimer: ReturnType<typeof setInterval> | undefined;
   const reportFix = (fix: Fix) => {
     if (stopped || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lng) || Math.abs(fix.lat) > 90 || Math.abs(fix.lng) > 180) return;
     const at = fix.at ?? Date.now();
-    if (at < latestAt || Date.now() - at > 30000 || at > Date.now() + 60000) return;
-    latestAt = at;
+    if (Date.now() - at > 30000 || at > Date.now() + 60000) return;
+    // Forrásonként külön időbélyeg: a hálózati fix (akár „újabb” időbélyeggel) nem teszi elavulttá a műholdas
+    // csomagokat, így a valódi GPS-fixek azonnal átjutnak. A hálózati fix a műholdasnál régebbi időpontra nem kell.
+    if (fix.src === "network") {
+      if (at < latestNetAt || at < latestGpsAt) return;
+      latestNetAt = at;
+    } else {
+      if (at < latestGpsAt) return;
+      latestGpsAt = at;
+    }
+    latestAt = Math.max(latestAt, at);
     gotFix = true;
     clearTimeout(acquisitionTimer);
     opts.onFix({ ...fix, at });
@@ -117,9 +128,14 @@ export function startLocationWatch(opts: {
     const fromPosition = (pos: GeolocationPosition) => reportFix({
       lat: pos.coords.latitude, lng: pos.coords.longitude,
       acc: pos.coords.accuracy ?? null, speed: pos.coords.speed ?? null,
-      bearing: pos.coords.heading ?? null, at: pos.timestamp,
+      bearing: pos.coords.heading ?? null, at: pos.timestamp, src: "gps",
     });
-    const quickFix = () => navigator.geolocation.getCurrentPosition(fromPosition,
+    const fromQuick = (pos: GeolocationPosition) => reportFix({
+      lat: pos.coords.latitude, lng: pos.coords.longitude,
+      acc: pos.coords.accuracy ?? null, speed: pos.coords.speed ?? null,
+      bearing: pos.coords.heading ?? null, at: pos.timestamp, src: "network",
+    });
+    const quickFix = () => navigator.geolocation.getCurrentPosition(fromQuick,
       (err) => reportError(err.code === 1 ? "denied" : "error"),
       { enableHighAccuracy: false, maximumAge: 0, timeout: 10000 });
     quickFix();
@@ -163,7 +179,7 @@ export function startLocationWatch(opts: {
         quickPending = true;
         void Geolocation.getCurrentPosition({ enableHighAccuracy: false, maximumAge: 0, timeout: 10000 })
           .then((pos) => reportFix({ lat: pos.coords.latitude, lng: pos.coords.longitude,
-            acc: pos.coords.accuracy ?? null, speed: pos.coords.speed ?? null, bearing: pos.coords.heading ?? null, at: pos.timestamp }))
+            acc: pos.coords.accuracy ?? null, speed: pos.coords.speed ?? null, bearing: pos.coords.heading ?? null, at: pos.timestamp, src: "network" }))
           .catch(() => undefined).finally(() => { quickPending = false; });
       };
       quickFix();
@@ -180,7 +196,7 @@ export function startLocationWatch(opts: {
         requestPermissions: true, stale: false, distanceFilter: 0,
       }, (loc, err) => {
         if (err) { reportError(err.code === "NOT_AUTHORIZED" ? "denied" : "error"); return; }
-        if (loc) reportFix({ lat: loc.latitude, lng: loc.longitude, acc: loc.accuracy ?? null, speed: loc.speed ?? null, bearing: loc.bearing ?? null, at: loc.time ?? Date.now() });
+        if (loc) reportFix({ lat: loc.latitude, lng: loc.longitude, acc: loc.accuracy ?? null, speed: loc.speed ?? null, bearing: loc.bearing ?? null, at: loc.time ?? Date.now(), src: "gps" });
       });
       if (stopped) { void plugin.removeWatcher({ id }).catch(() => undefined); return; }
       cleanup = () => void plugin.removeWatcher({ id }).catch(() => undefined);
