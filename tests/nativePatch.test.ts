@@ -24,7 +24,14 @@ test("native stop actions, compass and deep link are applied once in generated A
     expect(service).toContain("stopForeground(true)");
     expect(service).toContain("sharingLock.release()");
     expect(service.match(/FOREGROUND_SERVICE_TYPE_LOCATION/g)?.length).toBe(1);
-    expect(service.match(/sharingLock\.acquire/g)?.length).toBe(1);
+    // Az indításkori acquire mellett az energiatakarékos mérési köz váltása is felvehet egyet (egyszer, a patch alatt).
+    expect(service.match(/sharingLock\.acquire/g)?.length).toBe(2);
+    expect(service.match(/Private Place power patch/g)?.length).toBe(1);
+    expect(service.match(/public static boolean privateSetInterval/g)?.length).toBe(1);
+    expect(service.match(/instance = this;/g)?.length).toBe(1);
+    expect(service).toContain("LOCK_MAX_INTERVAL_MS");
+    expect(service).toContain("if (instance == this) instance = null;");
+    expect(service).toContain("getNotification() != null && !sharingLock.isHeld()");
     expect(service).toContain("if (pendingNotification != null) promote(pendingNotification);");
     const plugin = readFileSync(join(dir, dependency, "BackgroundGeolocation.java"), "utf8");
     // A felső sávban azonnal látszó szolgáltatás-értesítés, egyszer beépítve.
