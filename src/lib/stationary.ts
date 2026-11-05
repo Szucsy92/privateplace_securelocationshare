@@ -211,12 +211,12 @@ export function createDriftFilter() {
           const u = { x: dir.x / dl, y: dir.y / dl };
           const proj = r3.map((r) => (r.p.x - anchor.x) * u.x + (r.p.y - anchor.y) * u.y);
           const lat = r3.map((r) => Math.abs(-(r.p.x - anchor.x) * u.y + (r.p.y - anchor.y) * u.x));
-          const growing = proj[1] >= proj[0] - 0.5 && proj[2] >= proj[1] - 0.5;
+          const growing = proj[1]! >= proj[0]! - 0.5 && proj[2]! >= proj[1]! - 0.5;
           // A küszöb nyugodt GPS-nél 3,5 m; hullámzó GPS-nél a tanult zajszinttel nő (különben a zaj indulásnak látszana).
           // Ha a telefon ad sebességet, az már „áll” bizonyíték: a Doppler a gyors kilépést kezeli, itt szigorúbbak vagyunk.
           const thr = Math.max(WALK_EXIT_METERS, NOISE_K * Math.sqrt(rms2)) * (sp !== null ? 2 : 1);
-          const forward = proj[0] >= thr * 0.3 && proj[2] >= thr;
-          const straight = lat.every((l, i) => l <= proj[i]);
+          const forward = proj[0]! >= thr * 0.3 && proj[2]! >= thr;
+          const straight = lat.every((l, i) => l <= proj[i]!);
           leave = growing && forward && straight;
         }
       }
@@ -286,7 +286,7 @@ export function createDriftFilter() {
     if (recent.length > 24) recent.shift();
     const longWin = sp === null ? 10000 : ENTER_MS;
     const wnd = recent.filter((r) => at - r.at <= longWin);
-    const spanOk = wnd.length >= ENTER_FIXES && at - wnd[0].at >= longWin * 0.8;
+    const spanOk = wnd.length >= ENTER_FIXES && at - wnd[0]!.at >= longWin * 0.8;
     if (spanOk) {
       const slow = wnd.every((r) => r.speed === null || r.speed <= STILL_SPEED + 0.3);
       const c = wmean(wnd);
@@ -311,9 +311,9 @@ export function createDriftFilter() {
     const speedWindow = recent.slice(-4);
     let confirmedMove = false;
     if (speedWindow.length >= 3) {
-      const a = speedWindow[0].p, b = speedWindow[speedWindow.length - 1].p;
+      const a = speedWindow[0]!.p, b = speedWindow[speedWindow.length - 1]!.p;
       const displacement = Math.hypot(b.x - a.x, b.y - a.y);
-      const elapsed = Math.max(0.5, (speedWindow[speedWindow.length - 1].at - speedWindow[0].at) / 1000);
+      const elapsed = Math.max(0.5, (speedWindow[speedWindow.length - 1]!.at - speedWindow[0]!.at) / 1000);
       confirmedMove = displacement >= Math.max(2.5, elapsed * 0.65);
     }
     const dopplerSpeed = sp !== null && sp >= GO_SPEED && (fix.acc ?? 999) <= WALK_MAX_ACC;

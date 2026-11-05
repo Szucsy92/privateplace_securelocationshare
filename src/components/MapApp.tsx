@@ -248,7 +248,7 @@ export default function MapApp() {
   // A sötét/világos kapcsoló az egész felületre hat (panelek, ablakok, kapszulák, beállítások), nem csak a térképre.
   useEffect(() => {
     const root = document.documentElement;
-    root.dataset.theme = prefs.mapTheme;
+    root.dataset["theme"] = prefs.mapTheme;
     root.classList.toggle("dark", prefs.mapTheme === "dark");
     root.style.colorScheme = prefs.mapTheme;
     document.querySelector('meta[name="theme-color"]')?.setAttribute("content", prefs.mapTheme === "dark" ? "#12161f" : "#d9d1bf");

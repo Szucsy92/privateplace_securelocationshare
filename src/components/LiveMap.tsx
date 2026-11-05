@@ -40,7 +40,7 @@ type Props = {
   addressAllowed: boolean;
   onAllowAddress: () => void;
   /** Az éles térképablak távolsága a képernyő széleitől: a középpont és a ráközelítés ehhez igazodik. */
-  padding?: MapPadding;
+  padding?: MapPadding | undefined;
   /** Kis tükör-canvas: minden renderelt képkockát ide másolunk, a MapApp ezt mossa el a térképablakon kívül. */
   mirrorRef?: RefObject<HTMLCanvasElement | null>;
 };
