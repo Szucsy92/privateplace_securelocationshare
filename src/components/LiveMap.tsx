@@ -148,6 +148,7 @@ export default function LiveMap({ people, follow, showTrails, trailIds, orientat
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const bubbleRef = useRef<{ marker: MlMarker; el: HTMLDivElement; root: Root } | null>(null);
+  const holdUntilRef = useRef(0);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
 
@@ -195,6 +196,14 @@ export default function LiveMap({ people, follow, showTrails, trailIds, orientat
       if (f) {
         const s = markersRef.current.get(f.id);
         if (!s) return;
+        const hold = holdUntilRef.current;
+        if (hold) {
+          if (Date.now() < hold || m.isMoving()) return;
+          holdUntilRef.current = 0;
+          flyingRef.current = true;
+          m.easeTo({ center: [s.pos.lng, s.pos.lat], bearing: o === "heading" ? (headingsRef.current.get(f.id) ?? bearing) : 0, duration: 900 });
+          return;
+        }
         const target = o === "heading" ? (headingsRef.current.get(f.id) ?? bearing) : 0;
         const nb = Math.abs(target - bearing) < 0.05 ? target : smoothAngle(bearing, target, 0.07);
         const c = m.getCenter();
@@ -243,7 +252,20 @@ export default function LiveMap({ people, follow, showTrails, trailIds, orientat
           ctx.drawImage(src, 0, 0, w, h);
           ctx.drawImage(src, p, p, w - p * 2, h - p * 2);
         });
-        map.on("dragstart", () => propsRef.current.onUserPan());
+        // Követés közben szabadon lapozható/nagyítható; az utolsó érintés után 4 mp-cel lágyan visszatér.
+        const userMoveStart = (e: { originalEvent?: unknown }) => {
+          if (!e.originalEvent) return;
+          if (!propsRef.current.follow) { propsRef.current.onUserPan(); return; }
+          holdUntilRef.current = Infinity;
+        };
+        const userMoveEnd = (e: { originalEvent?: unknown }) => {
+          if (holdUntilRef.current === Infinity && (e.originalEvent || !map?.isMoving())) holdUntilRef.current = Date.now() + FOLLOW_RESUME_MS;
+        };
+        map.on("dragstart", userMoveStart);
+        map.on("zoomstart", userMoveStart);
+        map.on("dragend", userMoveEnd);
+        map.on("zoomend", userMoveEnd);
+        map.on("moveend", userMoveEnd);
         map.on("click", () => setSelected(null));
         map.on("moveend", () => {
           flyingRef.current = false;
@@ -398,6 +420,7 @@ export default function LiveMap({ people, follow, showTrails, trailIds, orientat
   // Odaugrás: minden újabb kérésre lágy kameramozgással középre áll.
   useEffect(() => {
     const map = mapRef.current;
+    holdUntilRef.current = 0;
     if (!map || !ready || !follow) return;
     const s = markersRef.current.get(follow.id);
     if (!s) return;
