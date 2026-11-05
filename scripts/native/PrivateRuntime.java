@@ -35,6 +35,14 @@ public class PrivateRuntime extends Plugin {
     @Override public void load() {
         LocalBroadcastManager.getInstance(getContext()).registerReceiver(receiver, new IntentFilter("hu.privateplace.STOPPED"));
     }
+    /** GPS-mérési köz (ms) futás közben; a háttérkövető szolgáltatás újraindítása nélkül. */
+    @PluginMethod public void setLocationInterval(PluginCall call) {
+        Integer ms = call.getInt("ms", 1000);
+        boolean applied = com.equimaps.capacitor_background_geolocation.BackgroundGeolocationService.privateSetInterval(ms == null ? 1000L : ms.longValue());
+        JSObject data = new JSObject();
+        data.put("applied", applied);
+        call.resolve(data);
+    }
     @PluginMethod public void consumeStop(PluginCall call) {
         android.content.SharedPreferences prefs = prefs();
         JSObject data = new JSObject();
