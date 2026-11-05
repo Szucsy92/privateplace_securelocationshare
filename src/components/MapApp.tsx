@@ -72,10 +72,10 @@ import { SharingControl, type SharingStatus } from "@/components/SharingControl"
 import { TransportControl, TRANSPORT_DEMO_EVENT } from "@/components/TransportControl";
 import { useSmoothHeight } from "@/lib/useSmoothHeight";
 import { hybridHeading, type HeadingState } from "@/lib/heading";
-import { watchCompass, watchBattery, requestCompassPermission } from "@/lib/deviceSensors";
+import { watchCompass, watchBattery, watchWalking, requestCompassPermission } from "@/lib/deviceSensors";
 import { watchNativeStop } from "@/lib/nativeRuntime";
 import { updateTransport, type TransportMode, type TransportState } from "@/lib/transport";
-import { createDriftFilter, updateStop, type StopState } from "@/lib/stationary";
+import { createDriftFilter, type StopState } from "@/lib/stationary";
 import { latestRelease, releaseRepository, needsUpdate, appLink, isAndroidBrowser, type AppRelease } from "@/lib/invitations";
 import { headingFromTrack } from "@/lib/mapMath";
 import { isNativeApp, prepareSharing, startLocationWatch } from "@/lib/locationSource";
@@ -157,6 +157,9 @@ export default function MapApp() {
   const fixBearingRef = useRef<number | null>(null);
   const batteryRef = useRef<number | null>(null);
   const stopRef = useRef<StopState | null>(null);
+  // A szűrő állapota (horgony, álló-óra) túléli a figyelő újraindításait (visszatérés a háttérből, engedélyváltás).
+  const driftFilterRef = useRef<ReturnType<typeof createDriftFilter> | null>(null);
+  const walkingRef = useRef(false);
   const sinceRef = useRef<number | null>(null);
   const manualRef = useRef<TransportMode | null>(null);
   const transportRef = useRef<TransportState>({ mode: "walk", candidate: null, candidateAt: 0 });
@@ -189,8 +192,9 @@ export default function MapApp() {
       setSelfHeading(headingRef.current.angle);
     });
     const stopBattery = watchBattery(value => { batteryRef.current = value; setBattery(value); });
+    const stopWalking = watchWalking(value => { walkingRef.current = value; });
     const timer = setInterval(() => publishRef.current(), 1000);
-    return () => { stopCompass(); stopBattery(); clearInterval(timer); };
+    return () => { stopCompass(); stopBattery(); stopWalking(); clearInterval(timer); };
   }, [mounted, profile !== null, stopped]);
   useEffect(() => {
     if (!mounted) return;
@@ -316,11 +320,11 @@ export default function MapApp() {
     if (!mounted || !profile || stopped || !nativeStopReady || dialog === "welcome" || dialog === "permissions") return;
     setGpsStatus((s) => (s === "live" ? s : "waiting"));
     // Drift-szűrő: álló helyzetben a jelölő nem vándorol, a pontatlan hálózati fix nem ront a jó GPS-en.
-    const driftFilter = createDriftFilter();
+    const driftFilter = (driftFilterRef.current ??= createDriftFilter());
     return startLocationWatch({
       background: backgroundSharing,
       onFix: (rawFix) => {
-        const fix = driftFilter(rawFix);
+        const fix = driftFilter({ ...rawFix, stepping: walkingRef.current });
         const now = Date.now();
         const at = fix.at ?? now;
         const point = { lat: fix.lat, lng: fix.lng, t: at };
@@ -331,7 +335,7 @@ export default function MapApp() {
         fixBearingRef.current = fix.bearing ?? headingFromTrack(selfTrackRef.current);
         headingRef.current = hybridHeading(headingRef.current, fix.speed, fixBearingRef.current, sensorRef.current);
         setSelfHeading(headingRef.current.angle);
-        stopRef.current = updateStop(stopRef.current, point, fix.speed, fix.acc, at);
+        stopRef.current = fix.stoppedSince != null ? { anchor: point, since: fix.stoppedSince } : null;
         transportRef.current = updateTransport(transportRef.current, fix.speed, at, manualRef.current);
         setTransport(transportRef.current.mode);
         setGpsStatus("live");
