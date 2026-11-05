@@ -40,7 +40,8 @@ import { QrScanner, canScanQr } from "@/components/QrScanner";
 import type { MapPerson, Orientation, TrackPoint } from "@/components/LiveMap";
 import { usePeerNetwork, type RemotePerson } from "@/hooks/usePeerNetwork";
 import { useElasticOverscroll } from "@/hooks/useElasticOverscroll";
-import { appendTrackPoint, clearTrackHistory, shouldPublishLocation } from "@/lib/tracking";
+import { appendTrackPoint, clearTrackHistory, publishIntervalMs, shouldPublishLocation } from "@/lib/tracking";
+import { useVisibleClock } from "@/hooks/useVisibleClock";
 import { SELF_COLOR } from "@/lib/peerMessages";
 import {
   addRoom,
@@ -144,7 +145,8 @@ export default function MapApp() {
   const [selfMeta, setSelfMeta] = useState<{ speed: number | null; acc: number | null; at: number } | null>(null);
   const [gpsStatus, setGpsStatus] = useState<GpsStatus>("waiting");
   const [gpsRequest, setGpsRequest] = useState(0);
-  const [clock, setClock] = useState(() => Date.now());
+  // Csak látható képernyőnél ketyeg: háttérben nem ébreszti a processzort, és nem rendereli újra a felületet.
+  const clock = useVisibleClock();
   const [hintsKey, setHintsKey] = useState(0);
   const selfTrackRef = useRef<TrackPoint[]>([]);
   const lastSentRef = useRef(0);
@@ -180,21 +182,47 @@ export default function MapApp() {
   const publishSelf = () => {
     const last = selfTrackRef.current.at(-1);
     if (!prefsRef.current.sharing || !last || Date.now() - last.t > 15000) return;
+    // Adaptív küldési köz: látható/mozgó 1 mp, háttérben 2 mp, álló helyzetben 4 mp. A fogadó a mérési időkből
+    // simít (animationDurationMs), ezért nincs szaggatás; mozgásindulásnál az onFix nullázza a lastSentRef-et.
+    const sendNow = Date.now();
+    const interval = publishIntervalMs({ visible: document.visibilityState === "visible", still: stopRef.current != null });
+    if (!shouldPublishLocation(true, sendNow, lastSentRef.current, interval)) return;
+    lastSentRef.current = sendNow;
     net.sendLocation({ lat: last.lat, lng: last.lng, t: last.t, speed: selfMetaRef.current?.speed ?? null, acc: selfMetaRef.current?.acc ?? null, heading: headingRef.current.angle, battery: batteryRef.current, since: sinceRef.current, stoppedSince: stopRef.current?.since ?? null, transport: transportRef.current.mode });
   };
   const publishRef = useRef(publishSelf);
   publishRef.current = publishSelf;
   useEffect(() => {
     if (!mounted || !profile || stopped) return;
-    const stopCompass = watchCompass(angle => {
-      sensorRef.current = angle;
-      headingRef.current = hybridHeading(headingRef.current, selfMetaRef.current?.speed ?? null, fixBearingRef.current, angle);
-      setSelfHeading(headingRef.current.angle);
-    });
+    // Az iránytű és a lépésfelismerés csak akkor fut, ha a képernyő látszik: zsebben az iránytű amúgy is
+    // értelmetlen irányt adna, mozgás közben a GPS-irány pótolja. A lépésfelismerés a drift-szűrőt segíti,
+    // ezért bekapcsolt megosztásnál háttérben is megmarad.
+    const noop = () => {};
+    let stopCompass = noop;
+    let stopWalking = noop;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const startTimer = (ms: number) => { clearInterval(timer); timer = setInterval(() => publishRef.current(), ms); };
+    const sync = () => {
+      const visible = document.visibilityState === "visible";
+      if (visible) {
+        if (stopCompass === noop) {
+          stopCompass = watchCompass(angle => {
+            sensorRef.current = angle;
+            headingRef.current = hybridHeading(headingRef.current, selfMetaRef.current?.speed ?? null, fixBearingRef.current, angle);
+            setSelfHeading(headingRef.current.angle);
+          });
+        }
+        if (stopWalking === noop) stopWalking = watchWalking(value => { walkingRef.current = value; });
+      } else {
+        stopCompass(); stopCompass = noop;
+        if (!prefsRef.current.sharing) { stopWalking(); stopWalking = noop; }
+      }
+      startTimer(1000); // tartalék ütem: a küldés sűrűségét a publishSelf adaptív köze szabályozza
+    };
     const stopBattery = watchBattery(value => { batteryRef.current = value; setBattery(value); });
-    const stopWalking = watchWalking(value => { walkingRef.current = value; });
-    const timer = setInterval(() => publishRef.current(), 1000);
-    return () => { stopCompass(); stopBattery(); stopWalking(); clearInterval(timer); };
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => { document.removeEventListener("visibilitychange", sync); stopCompass(); stopBattery(); stopWalking(); clearInterval(timer); };
   }, [mounted, profile !== null, stopped]);
   useEffect(() => {
     if (!mounted) return;
@@ -242,11 +270,6 @@ export default function MapApp() {
     }
     setDialog(p ? (parsed ? "join" : null) : "welcome");
     setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    const t = window.setInterval(() => setClock(Date.now()), 1000);
-    return () => window.clearInterval(t);
   }, []);
 
   // A sötét/világos kapcsoló az egész felületre hat (panelek, ablakok, kapszulák, beállítások), nem csak a térképre.
@@ -335,12 +358,13 @@ export default function MapApp() {
         fixBearingRef.current = fix.bearing ?? headingFromTrack(selfTrackRef.current);
         headingRef.current = hybridHeading(headingRef.current, fix.speed, fixBearingRef.current, sensorRef.current);
         setSelfHeading(headingRef.current.angle);
+        const wasStill = stopRef.current != null;
         stopRef.current = fix.stoppedSince != null ? { anchor: point, since: fix.stoppedSince } : null;
+        // Mozgásindulásnál azonnal küldünk, hogy az álló helyzet ritkább ütemétől ne késsen a jelző.
+        if (wasStill && stopRef.current == null) lastSentRef.current = 0;
         transportRef.current = updateTransport(transportRef.current, fix.speed, at, manualRef.current);
         setTransport(transportRef.current.mode);
         setGpsStatus("live");
-        if (!shouldPublishLocation(prefsRef.current.sharing, now, lastSentRef.current)) return;
-        lastSentRef.current = now;
         publishRef.current();
       },
       onError: (err) => setGpsStatus(err),

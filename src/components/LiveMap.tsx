@@ -158,11 +158,20 @@ export default function LiveMap({ people, follow, showTrails, trailIds, orientat
     let raf = 0;
     let map: MlMap | null = null;
 
+    // Üresjárat: ha nincs marker-animáció, a térkép áll, és nem követünk/forgatunk, elég ~15 képkocka/mp.
+    // Bármi mozdul (animáció, érintés, követés), azonnal teljes sebességre vált.
+    let lastStepAt = 0;
     const step = () => {
       raf = requestAnimationFrame(step);
       const m = mapRef.current;
       if (!m) return;
       const now = performance.now();
+      let animating = false;
+      for (const s of markersRef.current.values()) if (s.anim) { animating = true; break; }
+      const { follow: followNow, orientation: orientationNow } = propsRef.current;
+      const idle = !animating && !followNow && !flyingRef.current && !m.isMoving() && !m.isZooming() && !(orientationNow === "north" && Math.abs(m.getBearing()) > 0.05);
+      if (idle && now - lastStepAt < 66) return;
+      lastStepAt = now;
       for (const s of markersRef.current.values()) {
         if (!s.anim) continue;
         const k = Math.min(1, (now - s.anim.start) / s.anim.duration);
@@ -174,8 +183,10 @@ export default function LiveMap({ people, follow, showTrails, trailIds, orientat
         const arrow = s.el.querySelector<HTMLElement>(".heading-arrow");
         const heading = headingsRef.current.get(id);
         if (arrow) {
-          arrow.hidden = propsRef.current.orientation !== "heading" || heading === undefined;
-          arrow.style.transform = `rotate(${(heading ?? 0) - m.getBearing()}deg)`;
+          const hidden = propsRef.current.orientation !== "heading" || heading === undefined;
+          if (arrow.hidden !== hidden) arrow.hidden = hidden;
+          const transform = `rotate(${(heading ?? 0) - m.getBearing()}deg)`;
+          if (arrow.style.transform !== transform) arrow.style.transform = transform;
         }
       }
       const bubble = bubbleRef.current;

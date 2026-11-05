@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useVisibleClock } from "@/hooks/useVisibleClock";
 import { Battery, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { distanceMeters } from "@/lib/mapMath";
@@ -9,14 +10,13 @@ export function PersonBubble({ person, self, addressAllowed, onAllow }: { person
   const [address, setAddress] = useState<AddressInfo | null>(null);
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [clock, setClock] = useState(Date.now());
+  const clock = useVisibleClock();
   const lastQuery = useRef<{ lat: number; lng: number; at: number } | null>(null);
   const requestRef = useRef<AbortController | null>(null);
   const failedRef = useRef(false);
   useEffect(() => () => requestRef.current?.abort(), []);
   const last = person.points.at(-1);
   const own = self?.points.at(-1);
-  useEffect(() => { const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, []);
   useEffect(() => {
     if (!addressAllowed || !last) return;
     const prev = lastQuery.current;
