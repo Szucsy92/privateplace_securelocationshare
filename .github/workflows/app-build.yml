@@ -179,7 +179,6 @@ jobs:
         run: |
           APK=$(ls out/*.apk 2>/dev/null | head -n1)
           if [ -n "$APK" ]; then
-            cp "$APK" out/private-place-latest.apk
             printf '{"versionCode":%s,"version":"%s"}\n' '${{ github.run_number }}' '${{ needs.stamp.outputs.version }}' > out/private-place-release.json
           fi
       - name: Kiadás (Releases)

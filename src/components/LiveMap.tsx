@@ -26,6 +26,7 @@ export type Orientation = "north" | "heading";
 export const MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/dark";
 /** Kellemes rálátás: a környező utcák is látszanak. */
 const FOCUS_ZOOM = 15.6;
+const FOLLOW_RESUME_MS = 4000;
 
 type Props = {
   people: MapPerson[];

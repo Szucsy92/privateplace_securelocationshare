@@ -945,7 +945,9 @@ const HINTS_KEY = "privateplace.hints.v1";
 const HINTS: { text: string; place: string }[] = [
   { text: "Ezzel a gombbal egy koppintással indítod vagy leállítod a megosztást. Akkut kímél, ha leállítod.", place: "hint-share" },
   { text: "Itt látod, hogyan közlekedsz (gyalog, kerékpárral vagy autóval). A tempód alapján magától vált, de rábökve te is kiválaszthatod.", place: "hint-transport" },
-  { text: "Koppints egy személyre a követéshez. Ha nem oszt meg, innen kérheted meg rá.", place: "hint-rail" },
+  { text: "Alul a „Cím megjelenítése?” kérdésnél döntöd el, kérjen-e az app utcaneveket. Igen esetén csak a megnyitott jelölő helye megy a nyilvános címkeresőhöz; a Beállításokban bármikor átállíthatod.", place: "hint-address" },
+  { text: "Koppints egy jelölőre a térképen: kis buborékban látod az akkuját, a távolságát tőled, a címét, és hogy éppen úton van vagy mióta áll egy helyben.", place: "hint-marker" },
+  { text: "Koppints egy személyre a követéshez. Követés közben is lapozhatsz és nagyíthatsz; 4 másodperc után a térkép visszaáll rá. Ha nem oszt meg, innen kérheted meg rá.", place: "hint-rail" },
   { text: "Ha valaki megosztást kér, felül üzenet jelenik meg – a „Megosztás” gombbal azonnal bekapcsolod.", place: "hint-share" },
 ];
 
