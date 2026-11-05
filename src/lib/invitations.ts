@@ -36,7 +36,7 @@ export async function latestRelease(repo: string, signal?: AbortSignal): Promise
   if (!response.ok) return null;
   const data = (await response.json()) as { tag_name?: string; assets?: { name: string; browser_download_url: string }[] };
   const meta = data.assets?.find((a) => a.name === "private-place-release.json");
-  const apk = data.assets?.find((a) => a.name === "private-place-latest.apk");
+  const apk = data.assets?.find((a) => a.name === "private-place-latest.apk") ?? data.assets?.find((a) => a.name.endsWith(".apk"));
   if (!meta || !apk || !validApkUrl(apk.browser_download_url)) return null;
   const metadata = await fetch(meta.browser_download_url, init).catch(() => null);
   // GitHub release assets may deny browser CORS; the dated tag also ends in the version code.

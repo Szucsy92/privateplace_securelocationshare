@@ -636,6 +636,10 @@
 .hint-transport::before { bottom: -0.4rem; left: 1.6rem; transform: rotate(225deg); }
 .hint-rail { bottom: 7.5rem; left: 1rem; }
 .hint-rail::before { bottom: -0.4rem; left: 2rem; transform: rotate(225deg); }
+.hint-address { bottom: 8rem; left: 0; right: 0; margin-inline: auto; }
+.hint-address::before { bottom: -0.4rem; left: calc(50% - 0.35rem); transform: rotate(225deg); }
+.hint-marker { top: 40%; left: 0; right: 0; margin-inline: auto; }
+.hint-marker::before { bottom: -0.4rem; left: calc(50% - 0.35rem); transform: rotate(225deg); }
 .hint-next {
   border-radius: 999px;
   padding: 0.25rem 0.7rem;

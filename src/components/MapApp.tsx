@@ -70,6 +70,7 @@ import {
 } from "@/lib/profile";
 import { SharingControl, type SharingStatus } from "@/components/SharingControl";
 import { TransportControl, TRANSPORT_DEMO_EVENT } from "@/components/TransportControl";
+import { useSmoothHeight } from "@/lib/useSmoothHeight";
 import { hybridHeading, type HeadingState } from "@/lib/heading";
 import { watchCompass, watchBattery, requestCompassPermission } from "@/lib/deviceSensors";
 import { watchNativeStop } from "@/lib/nativeRuntime";
@@ -247,7 +248,7 @@ export default function MapApp() {
   // A sötét/világos kapcsoló az egész felületre hat (panelek, ablakok, kapszulák, beállítások), nem csak a térképre.
   useEffect(() => {
     const root = document.documentElement;
-    root.dataset.theme = prefs.mapTheme;
+    root.dataset["theme"] = prefs.mapTheme;
     root.classList.toggle("dark", prefs.mapTheme === "dark");
     root.style.colorScheme = prefs.mapTheme;
     document.querySelector('meta[name="theme-color"]')?.setAttribute("content", prefs.mapTheme === "dark" ? "#12161f" : "#d9d1bf");
@@ -537,6 +538,8 @@ export default function MapApp() {
 
   const sharingStatus: SharingStatus = !prefs.sharing ? "off" : gpsStatus === "error" || gpsStatus === "denied" ? "lost" : !selfFresh ? "search" : "live";
   const windowRef = useRef<HTMLElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useSmoothHeight(dialogRef, dialog !== null);
   const mirrorRef = useRef<HTMLCanvasElement | null>(null);
   const [win, setWin] = useState<MapWindow | null>(null);
   useEffect(() => {
@@ -726,6 +729,7 @@ export default function MapApp() {
         }}
       >
         <DialogContent
+          ref={dialogRef}
           className={`glass-dialog w-[calc(100%-1.5rem)] max-w-[390px] max-h-[94dvh] overflow-hidden gap-0 p-0${dialog === "settings" || dialog === "rooms" || dialog === "share" ? " compact-panel" : ""}`}
           onInteractOutside={(e) => dialog === "welcome" && e.preventDefault()}
           onEscapeKeyDown={(e) => dialog === "welcome" && e.preventDefault()}
@@ -941,7 +945,9 @@ const HINTS_KEY = "privateplace.hints.v1";
 const HINTS: { text: string; place: string }[] = [
   { text: "Ezzel a gombbal egy koppintással indítod vagy leállítod a megosztást. Akkut kímél, ha leállítod.", place: "hint-share" },
   { text: "Itt látod, hogyan közlekedsz (gyalog, kerékpárral vagy autóval). A tempód alapján magától vált, de rábökve te is kiválaszthatod.", place: "hint-transport" },
-  { text: "Koppints egy személyre a követéshez. Ha nem oszt meg, innen kérheted meg rá.", place: "hint-rail" },
+  { text: "Alul a „Cím megjelenítése?” kérdésnél döntöd el, kérjen-e az app utcaneveket. Igen esetén csak a megnyitott jelölő helye megy a nyilvános címkeresőhöz; a Beállításokban bármikor átállíthatod.", place: "hint-address" },
+  { text: "Koppints egy jelölőre a térképen: kis buborékban látod az akkuját, a távolságát tőled, a címét, és hogy éppen úton van vagy mióta áll egy helyben.", place: "hint-marker" },
+  { text: "Koppints egy személyre a követéshez. Követés közben is lapozhatsz és nagyíthatsz; 4 másodperc után a térkép visszaáll rá. Ha nem oszt meg, innen kérheted meg rá.", place: "hint-rail" },
   { text: "Ha valaki megosztást kér, felül üzenet jelenik meg – a „Megosztás” gombbal azonnal bekapcsolod.", place: "hint-share" },
 ];
 
@@ -1217,11 +1223,11 @@ function RoomRow({ room, peers, members, onKick, onShare, onDelete, onSave }: { 
       <Button variant="ghost" className="flex-1 h-20" aria-label={`Szoba megnyitása: ${room.name}`} aria-expanded={expanded} onClick={() => setExpanded(v => !v)}><ChevronDown className={expanded ? "rotate-180 transition-transform" : "transition-transform"} /></Button>
       <Button variant="ghost" size="icon" className="h-14 w-14 rounded-full" aria-label={`QR-kód: ${room.name}`} onClick={onShare}><QrCode className="h-8 w-8" /></Button>
     </div>
-    {editing && <form className="mt-3 space-y-3 border-t border-border pt-3" onSubmit={e => { e.preventDefault(); if (name.trim()) { onSave(name, color); setEditing(false); } }}>
+    <div className="room-expansion" data-open={editing} inert={!editing}><div className="min-h-0 overflow-hidden"><form className="mt-3 space-y-3 border-t border-border pt-3" onSubmit={e => { e.preventDefault(); if (name.trim()) { onSave(name, color); setEditing(false); } }}>
       <Input aria-label="Szoba neve" value={name} maxLength={40} onChange={e => setName(e.target.value)} />
       <div className="grid grid-cols-5 gap-2">{ROOM_COLORS.map(c => <Button key={c} type="button" variant="ghost" size="icon" className={`room-choice room-${c}`} aria-label={ROOM_COLOR_NAMES[c]} aria-pressed={color === c} onClick={() => setColor(c)}><span className="room-swatch">{color === c && <Check className="h-3 w-3" />}</span></Button>)}</div>
       <div className="flex justify-end gap-2"><Button type="button" variant="ghost" size="icon" aria-label="Szerkesztés elvetése" onClick={() => setEditing(false)}><X /></Button><Button type="submit" disabled={!name.trim()}><Check />Mentés</Button></div>
-    </form>}
+    </form></div></div>
     <div className="room-expansion" data-open={expanded}><div className="min-h-0 overflow-hidden">
       <div className="flex justify-between items-center border-t border-border mt-3 pt-2"><span className="text-xs text-muted-foreground">{peers} kapcsolódva</span><Button variant="ghost" size="icon" className="text-destructive rounded-full" aria-label={room.owner ? `Szoba törlése: ${room.name}` : `Kilépés: ${room.name}`} onClick={() => setConfirm(true)}>{room.owner ? <Trash2 /> : <LogOut />}</Button></div>
       <ElasticScroll className="max-h-44"><div className="space-y-2 py-2">{members.map(p => <div key={p.deviceId} className="flex items-center gap-2"><span className="capsule-avatar viewer-avatar" style={{ "--person-color": p.color } as React.CSSProperties}>{p.avatar ? <img src={p.avatar} alt="" /> : p.name.charAt(0)}</span><span className="text-sm flex-1 min-w-0 truncate">{p.name}</span><span className="status-dot" data-state={p.online ? "on" : "off"} />{room.owner && room.ownerPrivateKey && <Button variant="ghost" size="icon" aria-label={`Eltávolítás: ${p.name}`} onClick={() => onKick(p)}><X /></Button>}</div>)}</div></ElasticScroll>
