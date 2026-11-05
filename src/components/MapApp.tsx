@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
-import { QRCodeSVG } from "qrcode.react";
+import { RoundedQRCode } from "@/components/RoundedQRCode";
 import {
   BatteryCharging,
   ChevronDown,
@@ -1363,13 +1363,11 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
           }}
         >
           {qrBackground && qrColor && (
-            <QRCodeSVG
+            <RoundedQRCode
               value={text}
               size={210}
-              level="M"
               bgColor={qrBackground}
               fgColor={qrColor}
-              marginSize={0}
               style={{
                 display: "block",
                 width: "100%",
