@@ -70,6 +70,7 @@ import {
 } from "@/lib/profile";
 import { SharingControl, type SharingStatus } from "@/components/SharingControl";
 import { TransportControl, TRANSPORT_DEMO_EVENT } from "@/components/TransportControl";
+import { useSmoothHeight } from "@/lib/useSmoothHeight";
 import { hybridHeading, type HeadingState } from "@/lib/heading";
 import { watchCompass, watchBattery, requestCompassPermission } from "@/lib/deviceSensors";
 import { watchNativeStop } from "@/lib/nativeRuntime";
@@ -537,6 +538,8 @@ export default function MapApp() {
 
   const sharingStatus: SharingStatus = !prefs.sharing ? "off" : gpsStatus === "error" || gpsStatus === "denied" ? "lost" : !selfFresh ? "search" : "live";
   const windowRef = useRef<HTMLElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useSmoothHeight(dialogRef, dialog !== null);
   const mirrorRef = useRef<HTMLCanvasElement | null>(null);
   const [win, setWin] = useState<MapWindow | null>(null);
   useEffect(() => {
@@ -726,6 +729,7 @@ export default function MapApp() {
         }}
       >
         <DialogContent
+          ref={dialogRef}
           className={`glass-dialog w-[calc(100%-1.5rem)] max-w-[390px] max-h-[94dvh] overflow-hidden gap-0 p-0${dialog === "settings" || dialog === "rooms" || dialog === "share" ? " compact-panel" : ""}`}
           onInteractOutside={(e) => dialog === "welcome" && e.preventDefault()}
           onEscapeKeyDown={(e) => dialog === "welcome" && e.preventDefault()}

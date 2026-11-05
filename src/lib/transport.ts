@@ -9,7 +9,7 @@ export function updateTransport(previous: TransportState, speed: number | null, 
   if (manual) return { mode: manual, candidate: null, candidateAt: now };
   if (speed === null || !Number.isFinite(speed) || speed < 0.8) return { ...previous, candidate: null, candidateAt: now };
   const kmh = speed * 3.6;
-  const target: TransportMode = kmh >= 50 ? "car" : kmh >= 20 ? "bike" : "walk";
+  const target: TransportMode = kmh >= 28 ? "car" : kmh >= 14 ? "bike" : "walk";
   if (target === previous.mode) return { ...previous, candidate: null, candidateAt: now };
   if (target !== previous.candidate) return { ...previous, candidate: target, candidateAt: now };
   if (now - previous.candidateAt >= TRANSPORT_HOLD_MS) return { mode: target, candidate: null, candidateAt: now };
