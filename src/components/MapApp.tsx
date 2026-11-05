@@ -74,7 +74,8 @@ import { TransportControl, TRANSPORT_DEMO_EVENT } from "@/components/TransportCo
 import { useSmoothHeight } from "@/lib/useSmoothHeight";
 import { hybridHeading, type HeadingState } from "@/lib/heading";
 import { watchCompass, watchBattery, watchWalking, requestCompassPermission } from "@/lib/deviceSensors";
-import { watchNativeStop } from "@/lib/nativeRuntime";
+import { watchNativeStop, setNativeLocationInterval, reapplyNativeLocationInterval } from "@/lib/nativeRuntime";
+import { CALM_AFTER_MS, desiredGpsIntervalMs, movementWake } from "@/lib/powerMode";
 import { updateTransport, type TransportMode, type TransportState } from "@/lib/transport";
 import { createDriftFilter, type StopState } from "@/lib/stationary";
 import { latestRelease, releaseRepository, needsUpdate, appLink, isAndroidBrowser, type AppRelease } from "@/lib/invitations";
@@ -150,6 +151,17 @@ export default function MapApp() {
   const [hintsKey, setHintsKey] = useState(0);
   const selfTrackRef = useRef<TrackPoint[]>([]);
   const lastSentRef = useRef(0);
+  // Energiatakarékos GPS-ütem: kívánt mérési köz a láthatóság, a megosztás, a nézők és a tartós állás alapján.
+  const viewersRef = useRef(false);
+  const calmRef = useRef(false);
+  const wakeUntilRef = useRef(0);
+  const powerRef = useRef<() => void>(() => undefined);
+  powerRef.current = () => setNativeLocationInterval(desiredGpsIntervalMs({
+    visible: document.visibilityState === "visible",
+    sharing: prefsRef.current.sharing,
+    viewers: viewersRef.current,
+    calm: calmRef.current,
+  }));
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
   const compassRef = useRef<HTMLSpanElement | null>(null);
@@ -218,6 +230,7 @@ export default function MapApp() {
         if (!prefsRef.current.sharing) { stopWalking(); stopWalking = noop; }
       }
       startTimer(1000); // tartalék ütem: a küldés sűrűségét a publishSelf adaptív köze szabályozza
+      powerRef.current();
     };
     const stopBattery = watchBattery(value => { batteryRef.current = value; setBattery(value); });
     sync();
@@ -335,6 +348,9 @@ export default function MapApp() {
 
   const net = usePeerNetwork({ rooms, deviceId, profile: stopped ? null : profile, onRoomClosed, onShareRequest });
   netPeopleRef.current = net.people;
+  const hasViewers = Object.values(net.roomPeers).some((n) => n > 0);
+  viewersRef.current = hasViewers;
+  useEffect(() => { powerRef.current(); }, [hasViewers, prefs.sharing]);
 
   // Saját GPS: mindig fut, privát; csak a megosztás kapcsoló küld a szobatársaknak.
   // Az Android-alkalmazásban bekapcsolt megosztásnál lezárt képernyőnél is folytatódik.
@@ -346,6 +362,7 @@ export default function MapApp() {
     const driftFilter = (driftFilterRef.current ??= createDriftFilter());
     return startLocationWatch({
       background: backgroundSharing,
+      onWatcherStarted: () => { reapplyNativeLocationInterval(); powerRef.current(); },
       onFix: (rawFix) => {
         const fix = driftFilter({ ...rawFix, stepping: walkingRef.current });
         const now = Date.now();
@@ -362,6 +379,14 @@ export default function MapApp() {
         stopRef.current = fix.stoppedSince != null ? { anchor: point, since: fix.stoppedSince } : null;
         // Mozgásindulásnál azonnal küldünk, hogy az álló helyzet ritkább ütemétől ne késsen a jelző.
         if (wasStill && stopRef.current == null) lastSentRef.current = 0;
+        // Tartós állás → ritkább GPS (háttérben, néző mellett). Ritkított mérésnél a szűrő nem tud időben kilépni az
+        // „áll” állapotból, ezért a nyers fixből külön észleljük az indulást, és azonnal visszaváltunk 1 mp-re.
+        let calm = fix.stoppedSince != null && at - fix.stoppedSince >= CALM_AFTER_MS && now > wakeUntilRef.current;
+        if (calmRef.current && movementWake(rawFix, stopRef.current?.anchor ?? null)) {
+          calm = false;
+          wakeUntilRef.current = now + 20000;
+        }
+        if (calm !== calmRef.current) { calmRef.current = calm; powerRef.current(); }
         transportRef.current = updateTransport(transportRef.current, fix.speed, at, manualRef.current);
         setTransport(transportRef.current.mode);
         setGpsStatus("live");
