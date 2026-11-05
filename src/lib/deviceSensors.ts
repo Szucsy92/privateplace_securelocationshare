@@ -51,7 +51,7 @@ export function watchBattery(onBattery: (percent: number | null) => void): () =>
       } catch { if (!stopped) onBattery(null); }
     };
     void read();
-    const timer = setInterval(() => void read(), 30000);
+    const timer = setInterval(() => void read(), 60000);
     cleanup = () => clearInterval(timer);
   } else {
     type Battery = EventTarget & { level: number };
