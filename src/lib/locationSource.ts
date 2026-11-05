@@ -86,6 +86,8 @@ export function startLocationWatch(opts: {
   onNotificationsBlocked?: () => void;
   /** Csak hozzávetőleges helyzet engedélyezett (a „Pontos hely” kapcsoló ki van kapcsolva). */
   onPreciseMissing?: () => void;
+  /** A natív követő (újra)indult: itt állítható vissza a futás közben választott GPS-mérési köz. */
+  onWatcherStarted?: () => void;
 }): () => void {
   let stopped = false;
   let cleanup: () => void = () => undefined;
@@ -203,6 +205,7 @@ export function startLocationWatch(opts: {
       });
       if (stopped) { void plugin.removeWatcher({ id }).catch(() => undefined); return; }
       cleanup = () => void plugin.removeWatcher({ id }).catch(() => undefined);
+      opts.onWatcherStarted?.();
     } catch (err) {
       const code = typeof err === "object" && err !== null && "code" in err ? String(err.code) : "";
       reportError(code === "OS-PLUG-GLOC-0003" || code === "NOT_AUTHORIZED" ? "denied" : "error");

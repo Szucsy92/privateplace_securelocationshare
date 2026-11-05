@@ -22,3 +22,24 @@ export function watchNativeStop(onStop: (exit: boolean) => void, onReady: () => 
   })();
   return () => { cancelled = true; cleanup(); };
 }
+let wantedGpsMs = 1000;
+let appliedGpsMs = 1000;
+function runtimePlugin() {
+  return import("@capacitor/core").then(({ registerPlugin }) => registerPlugin<{ setLocationInterval(o: { ms: number }): Promise<void> }>("PrivateRuntime"));
+}
+/**
+ * A natív háttérkövető GPS-mérési közét állítja futás közben (a szolgáltatás és az értesítés érintetlen marad).
+ * Újraindított követőnél a natív oldal az 1 mp-es alapra áll vissza: ilyenkor `force` újra elküldi a kívánt értéket.
+ */
+export function setNativeLocationInterval(ms: number, force = false): void {
+  if (!isNativeApp()) return;
+  wantedGpsMs = ms;
+  if (!force && appliedGpsMs === ms) return;
+  appliedGpsMs = ms;
+  void runtimePlugin().then((p) => p.setLocationInterval({ ms })).catch(() => { appliedGpsMs = -1; });
+}
+/** Új natív követő indulása után hívjuk: a kívánt mérési köz visszaállítása (alapérték: 1 mp, nincs teendő). */
+export function reapplyNativeLocationInterval(): void {
+  appliedGpsMs = 1000;
+  if (wantedGpsMs !== 1000) setNativeLocationInterval(wantedGpsMs, true);
+}
