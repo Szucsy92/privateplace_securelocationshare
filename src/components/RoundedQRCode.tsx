@@ -31,7 +31,8 @@ function buildMatrix(value: string): QRMatrix | null {
     const count = Number(viewBox[1]);
     const cells = Array.from({ length: count }, () => new Array<boolean>(count).fill(false));
 
-    const run = /M(\d+)[ ,](\d+)h(\d+)v1h-\d+z/g;
+    // qrcode.react 4.x: "M{x} {y}h{w}v1H{x}z" (a sor végén "M{x},{y} h…")
+    const run = /M\s*(\d+)[\s,]+(\d+)\s*h\s*(\d+)\s*v1\s*[hH]\s*-?\d+\s*z/g;
     let match: RegExpExecArray | null;
     let found = 0;
     while ((match = run.exec(markup))) {
@@ -91,7 +92,19 @@ export function RoundedQRCode({
   }, [value]);
 
   if (!paths) {
-    return <div style={{ width: size, height: size, ...style }} className={className} aria-hidden />;
+    // Tartalék: ha a mátrix nem olvasható ki, a QR-kód akkor is látszik (sima stílusban)
+    return (
+      <QRCodeSVG
+        value={value}
+        size={size}
+        level="M"
+        bgColor={bgColor}
+        fgColor={fgColor}
+        marginSize={0}
+        className={className}
+        style={style}
+      />
+    );
   }
 
   return (
