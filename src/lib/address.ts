@@ -36,6 +36,8 @@ export async function lookupAddress(lat: number, lng: number, signal: AbortSigna
     else title = ref;
   }
   if (!title) throw new Error("nincs útnév");
+  // Csak számból álló útnév (pl. mellékút: 5205) → "5205. sz. út"
+  if (title && /^\d{1,5}$/.test(title)) title = `${title}. sz. út`;
   const number = str(a["house_number"], 20);
   if (number && !isMajor) title = `${title} ${number}`;
 
