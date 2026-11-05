@@ -41,42 +41,45 @@ export function stopLabel(since: number | null | undefined, now: number, moving 
 }
 
 /* ------------------------------------------------------------------ */
-/* Drift-szűrő: helyben állva a jelölő ne vándoroljon a GPS-zaj miatt,  */
-/* induláskor viszont azonnal kövesse a mozgást.                        */
+/* Drift-szűrő v2: „horgony + bizonyíték” állapotgép                    */
 /* ------------------------------------------------------------------ */
 
 /*
- * Két állapot:
- *  - ÁLLÁS: a kimenet egy lassan finomodó horgony (pontossággal súlyozott átlag). A megtartási sugarat a szűrő a
- *    ténylegesen mért szórásból tanulja, nem a (túl optimista) jelentett pontosságból. Kilépés: a Doppler-sebesség
- *    (független a pozíciószórástól) két fixen át ≥ 1 m/s, vagy tartós, egy irányba mutató elmozdulás.
- *  - MOZGÁS: állandó sebesség modellű Kalman-szűrő, a Doppler-sebességgel és -iránnyal is javítva, így nincs késés és kevés a zaj.
- * Belépés az állásba: ~5 s (Doppler nélkül 10 s) egybefüggő „áll” bizonyíték.
+ * Alapelv: a pozíció zajos és sodródik, a Doppler-sebesség viszont a pozíciózajtól FÜGGETLEN bizonyíték.
+ *  - ÁLLÁS: a kimenet egy pontossággal súlyozott, lassan finomodó horgony. Kilépés csak bizonyítékkal:
+ *      a) Doppler ≥ 0,8 m/s (vagy járás-jelzés, ha a Doppler nem mond ellent) az utolsó 3 fixből kettőn; ≥ 2,5 m/s egyen is – az egyedi sebességtüske nem indít;
+ *      b) sebességadat nélkül: tartós, egyirányú elmozdulás a tanult zajszint többszöröse fölé;
+ *      c) „távoli klaszter”: ha a Doppler végig áll-t mond, a pozíció-ugrás (multipath) csak 45 s tartós elmozdulás után fogadódik el.
+ *  - MOZGÁS: állandó sebesség modellű Kalman-szűrő, a HORGONYBÓL indítva (nem a nyers fixből), Doppler-sebességgel javítva.
+ *  - A `stoppedSince` ugyanebből az állapotgépből jön, a bizonyíték kezdetére visszadátumozva – nincs külön megállás-detektor.
  */
-export type RawFix = { lat: number; lng: number; acc: number | null; speed: number | null; bearing?: number | null; at?: number; src?: "gps" | "network" };
+export type RawFix = {
+  lat: number; lng: number; acc: number | null; speed: number | null; speedAcc?: number | null; bearing?: number | null; at?: number; src?: "gps" | "network";
+  /** Független mozgásjelzés (gyorsulásmérő/lépésérzékelő): igaz, ha az utóbbi ~3 s-ban járás-szerű mozgás volt. */
+  stepping?: boolean;
+};
+export type FilteredFix = RawFix & { mode: "still" | "moving"; stoppedSince: number | null };
 
 /* ---- Hangolható állandók ------------------------------------------------------------------------------ */
-// Pontosság-hierarchia: friss, jó műholdas fix mellett a durva/hálózati fix nem juthat át.
 const SAT_ACC = 20;            // m: ennél pontosabb (és nem hálózati) fix „műholdas minőségű”
 const ROUGH_ACC = 30;          // m: ennél pontatlanabb vagy ismeretlen pontosságú fix „durva”
-const SAT_FRESH_MS = 22000;    // ennyi ideig friss a műholdas fix; ennyi csend után (türelmi idő) a durva fix is átjut
-const ACC_FLOOR = 6;           // m: a jelentett pontosságot ennél jobbnak nem hisszük el
-const ACC_TRUST = 1.3;         // a jelentett pontosság szorzója (a telefon többnyire túl optimista)
-const STILL_SPEED = 0.5;       // m/s: ennél lassabb Doppler-sebesség „áll” bizonyíték
-const START_STILL_SPEED = 0.5; // m/s: ennél lassabb első fixnél azonnal álló módban indulunk
-const GO_SPEED = 1.1;          // m/s: gyalogos tempó; ennél gyorsabb Doppler-sebességnél azonnal feloldunk
-const GO_FIXES = 1;            // ennyi egymást követő gyors fix kell a feloldáshoz (2-re emelve robusztusabb, de 1 mp-et késik)
-const ENTER_MS = 5000;         // ennyi ideig kell „állónak” látszania a belépéshez
-const ENTER_FIXES = 4;         // és legalább ennyi fixből
-const SHELL_M = 4.5;           // m: álló helyzetben ekkora védőzónán belüli zaj teljesen elnyelődik
-const FAR_M = 40;              // m: ennél távolabbi fix „nagy ugrás” jelölt
-const FAR_AGREE_M = 25;        // m: két távoli fix ennyin belül megegyezik -> valódi áthelyeződés
-const ANCHOR_WEIGHT_CAP = 0.8;
-const WALK_EXIT_METERS = 3.5;   // m: tartós pozícióeltérés lassú gyaloglásnál (nyugodt GPS-nél)
-const NOISE_K = 2.2;            // a vektor-küszöb a tanult zaj (RMS) ennyiszerese, ha az nagyobb a 3,5 m-nél
-const SPEED_NOISE_FLOOR = 1.2; // m/s: ennél kisebb becsült sebességet GPS-zajnak tekintünk
-const WALK_MAX_ACC = 20;        // m: rossz pontosságú fixből ne következtessünk gyaloglásra
-const SIGMA_A_MIN = 0.8, SIGMA_A_MAX = 4; // m/s²: a Kalman-szűrő folyamatzaja (gyalogos … autó)
+const SAT_FRESH_MS = 22000;    // ennyi ideig friss a műholdas fix; ennyi csend után a durva fix is átjut
+const INIT_ROUGH_MS = 8000;    // induláskor ennyit várunk jó fixre, mielőtt durva fixre horgonyoznánk
+const ACC_FLOOR = 6, ACC_TRUST = 1.3;
+const STILL_SPEED = 0.5;       // m/s: ennél lassabb Doppler = „áll” bizonyíték
+const GO_SPEED = 0.8;          // m/s: gyalogos indulás (lassú séta is)
+const FAST_SPEED = 2.5;        // m/s: ennyinél egyetlen fix is elég (jármű indul)
+const GO_FIXES = 2;            // az utolsó 3 fixből ennyi gyors kell a feloldáshoz (egyedi sebességtüske nem indít)
+const ENTER_MS = 5000, ENTER_FIXES = 4;
+const NO_SPEED_ENTER_MS = 20000; // sebességadat nélkül hosszabb ablak kell az „áll” döntéshez
+const FAR_M = 30, FAR_AGREE_M = 25;
+const FAR_STILL_MS = 45000;    // Doppler-állás mellett ennyi ideig kell tartósan máshol lennie a pozíciónak
+const WALK_EXIT_METERS = 8;    // m: sebességadat nélküli kilépés minimális elmozdulása
+const NOISE_K = 2.0;
+const WALK_MAX_ACC = 25;
+const SPEED_NOISE_FLOOR = 1.2;
+const SIGMA_A_MIN = 0.8, SIGMA_A_MAX = 4;
+const GAP_RESET_MS = 60000;    // mozgásban ennyi csend után a Kalman újraindul
 
 type Vec = { x: number; y: number };
 type Axis = { p: number; v: number; Ppp: number; Ppv: number; Pvv: number };
@@ -89,17 +92,16 @@ export function createDriftFilter() {
 
   let mode: "init" | "moving" | "still" = "init";
   let kx: Axis | null = null, ky: Axis | null = null;
-  let lastAt: number | null = null;
-  let last: RawFix | null = null;
-  let lastSatAt: number | null = null;
+  let lastAt: number | null = null, lastSatAt: number | null = null, initRoughAt: number | null = null;
+  let last: FilteredFix | null = null;
   let lastBearing: number | null = null;
 
-  // „állás” állapot
-  let anchor: Vec = { x: 0, y: 0 }, anchorW = 0, shown: Vec = { x: 0, y: 0 };
-  let rms2 = 100;                // a horgonytól mért távolságnégyzet mozgóátlaga (m²)
-  let outside = 0, fastCount = 0;
-  let farPrev: Vec | null = null;     // állásban: az előző távoli fix
-  let pendingFar: Vec | null = null;  // mozgásban: az elutasított, távoli fix
+  let anchor: Vec = { x: 0, y: 0 }, shown: Vec = { x: 0, y: 0 };
+  let rms2 = 36;
+  let stillSince: number | null = null;
+  let fastHist: boolean[] = [];
+  let far: { p: Vec; at: number; dopStill: boolean; afterGap: boolean }[] = [];
+  let pendingFar: Vec | null = null;
   let recent: { p: Vec; w: number; at: number; speed: number | null }[] = [];
 
   const newAxis = (p: number, v: number, pp: number, pv: number): Axis => ({ p, v, Ppp: pp, Ppv: 0, Pvv: pv });
@@ -123,32 +125,34 @@ export function createDriftFilter() {
     const Ppp = a.Ppp - Kp * a.Ppv, Ppv = a.Ppv - Kp * a.Pvv, Pvv = a.Pvv - Kv * a.Pvv;
     a.Ppp = Ppp; a.Ppv = Ppv; a.Pvv = Pvv;
   };
-
   const wmean = (pts: { p: Vec; w: number }[]): Vec => {
     let sw = 0, sx = 0, sy = 0;
     for (const q of pts) { sw += q.w; sx += q.p.x * q.w; sy += q.p.y * q.w; }
     return sw > 0 ? { x: sx / sw, y: sy / sw } : { x: 0, y: 0 };
   };
+  const emit = (fix: RawFix, pos: LatLngPoint, at: number, extra: Partial<RawFix> = {}): FilteredFix => {
+    const m = mode === "still" ? "still" : "moving";
+    last = { ...fix, ...pos, ...extra, at, mode: m, stoppedSince: m === "still" ? stillSince : null };
+    return last;
+  };
 
-  function toMoving(pos: Vec, at: number) {
-    mode = "moving";
-    kx = newAxis(pos.x, 0, 25, 4); ky = newAxis(pos.y, 0, 25, 4);
-    outside = 0; fastCount = 0; farPrev = null; pendingFar = null; recent = [];
-    lastAt = at;
+  function toMoving(pos: Vec, posVar: number) {
+    mode = "moving"; stillSince = null;
+    kx = newAxis(pos.x, 0, posVar, 4); ky = newAxis(pos.y, 0, posVar, 4);
+    fastHist = []; far = []; pendingFar = null; recent = [];
   }
-  function toStill(pos: Vec, spread2: number) {
-    mode = "still";
-    anchor = { ...pos }; shown = { ...pos }; anchorW = ANCHOR_WEIGHT_CAP / 2;
+  function toStill(pos: Vec, spread2: number, since: number) {
+    mode = "still"; stillSince = since;
+    anchor = { ...pos }; shown = { ...pos };
     rms2 = Math.max(spread2, 9);
-    outside = 0; fastCount = 0; farPrev = null; pendingFar = null;
+    fastHist = []; far = []; pendingFar = null;
   }
 
-  /** Kiszűrt fixnél (pontatlan/hálózati becslés friss, jó műholdas fix mellett) az utolsó kimenetet adja vissza változatlan helyzettel. */
-  return function filter(fix: RawFix): RawFix {
+  return function filter(fix: RawFix): FilteredFix {
     const at = fix.at ?? Date.now();
+    if (lastAt !== null && at <= lastAt && last) return { ...last };   // sorrend-hiba / duplikátum
 
-    // 1) Pontosság-hierarchia. Friss, jó (<20 m) műholdas fix mellett a durva (>30 m / ismeretlen) vagy hálózati
-    //    fix csendben eldobódik. Ha a műholdjel tartósan (SAT_FRESH_MS) megszűnt, a durva fix átjut: nem maradunk hely nélkül.
+    // 1) Pontosság-hierarchia (változatlan): friss, jó műholdas fix mellett a durva/hálózati fix eldobódik.
     const satQuality = fix.src !== "network" && fix.acc !== null && fix.acc < SAT_ACC;
     const rough = fix.src === "network" || fix.acc === null || fix.acc > ROUGH_ACC;
     const satFresh = lastSatAt !== null && at - lastSatAt < SAT_FRESH_MS;
@@ -160,98 +164,109 @@ export function createDriftFilter() {
     const sigma = Math.max(ACC_FLOOR, (fix.acc ?? 15) * ACC_TRUST);
     const w = 1 / (sigma * sigma);
     const dt = lastAt === null ? 1 : Math.min(30, Math.max(0.2, (at - lastAt) / 1000));
-    const sp = fix.speed;
+    // Doppler-sebesség csak megbízható forrásból: a hálózati/durva fix „0 m/s”-a nem bizonyíték.
+    let sp = fix.speed !== null && Number.isFinite(fix.speed) && fix.src !== "network" ? fix.speed : null;
+    if (sp !== null && fix.speedAcc != null && fix.speedAcc > 1) sp = null;
+    const dopplerOk = sp !== null && (fix.acc === null || fix.acc <= ROUGH_ACC);
     if (fix.bearing != null && Number.isFinite(fix.bearing) && (sp === null || sp > 1)) lastBearing = fix.bearing;
+    const prevAt = lastAt;
 
-    // 2) Csendes indítás: ha az első fix álló helyzetet jelez (vagy nincs sebességadat, és a gyors
-    //    elmozdulás-felismerés úgyis feloldja), a jelölő azonnal rögzül, nincs kezdeti „vándorlás”.
+    // 2) Indítás: durva (hálózati) fixre nem horgonyozunk; megjelenik, de a jó műholdas fixig nincs „állás”.
     if (mode === "init") {
-      lastAt = at;
-      if (sp === null || sp < START_STILL_SPEED) {
-        toStill(z, 9);
-        recent = [{ p: z, w, at, speed: sp }];
-        last = { ...fix, speed: 0, at };
-        return last;
+      if (rough && (initRoughAt === null || at - initRoughAt < INIT_ROUGH_MS)) {
+        initRoughAt ??= at; lastAt = at;
+        return emit(fix, fix, at);
       }
-      toMoving(z, at);
-      last = { ...fix, at };
-      return last;
+      lastAt = at;
+      if (sp === null || sp < STILL_SPEED) {
+        toStill(z, 9, at);
+        recent = [{ p: z, w, at, speed: sp }];
+        return emit(fix, toLL(shown), at, { speed: 0 });
+      }
+      toMoving(z, sigma * sigma);
+      return emit(fix, fix, at);
     }
 
     /* ---------- ÁLLÁS ---------- */
     if (mode === "still") {
       const d = Math.hypot(z.x - anchor.x, z.y - anchor.y);
+      const rms = Math.min(20, Math.sqrt(rms2));
       recent.push({ p: z, w, at, speed: sp });
-      if (recent.length > 4) recent.shift();
+      if (recent.length > 8) recent.shift();
+      const dopStill = dopplerOk && sp! < STILL_SPEED;
 
-      // a) Gyalogos Doppler-sebesség: az első ≥1,1 m/s-os fix azonnal feloldja az állást.
-      const dopplerOk = sp !== null && (fix.acc === null || fix.acc <= ROUGH_ACC);
-      fastCount = dopplerOk && sp >= GO_SPEED ? fastCount + 1 : 0;
-      let leave = fastCount >= GO_FIXES;
-      let snap: Vec | null = null;
+      // a) Doppler-indulás: az utolsó 3 fixből 2 gyalogos tempójú; egyetlen tüske nem indít.
+      // A járás-jelzés a Doppler hiányában (vagy ha az nem mond ellent) felgyorsítja az indulást; Doppler-„áll” mellett nem számít.
+      fastHist.push((dopplerOk && sp! >= GO_SPEED) || (fix.stepping === true && !dopStill));
+      if (fastHist.length > 3) fastHist.shift();
+      let leave = fastHist.filter(Boolean).length >= GO_FIXES || (dopplerOk && sp! >= FAST_SPEED);
+      let relocate: Vec | null = null;
 
-      // b) Nagy ugrás (metró, villamos indul): 2 egymást követő, egymással egyező távoli fix után azonnal átugrunk.
+      // b) Távoli klaszter (metró, alagút / multipath-lökés). Egyező távoli fixek kellenek; ha a Doppler végig áll-t mond,
+      //    akkor csak tartós (45 s) áthelyeződés számít, a rövid lökés nem.
+      const farThr = Math.max(FAR_M, 3 * Math.min(25, Math.max(fix.acc ?? 15, rms)));   // 30…75 m; a durva fix pontatlansága nem „takarja el” a valódi áthelyeződést
       if (!leave) {
-        if (d > FAR_M) {
-          if (farPrev && Math.hypot(z.x - farPrev.x, z.y - farPrev.y) <= FAR_AGREE_M) {
+        if (d > farThr) {
+          if (far.length && Math.hypot(z.x - wmean(far.map((f) => ({ p: f.p, w: 1 }))).x, z.y - wmean(far.map((f) => ({ p: f.p, w: 1 }))).y) > FAR_AGREE_M) far = [];
+          far.push({ p: z, at, dopStill, afterGap: prevAt !== null && at - prevAt > 20000 });
+          const allStill = far.every((f) => f.dopStill);
+          if ((!allStill && far.length >= 3) || (far[0]!.afterGap && far.length >= 2) || (allStill && far.length >= 15 && at - far[0]!.at >= FAR_STILL_MS)) {
+            relocate = wmean(far.map((f) => ({ p: f.p, w: 1 })));
             leave = true;
-            snap = { x: (z.x + farPrev.x) / 2, y: (z.y + farPrev.y) / 2 };
-          } else farPrev = z;
-        } else farPrev = null;
+          }
+        } else if (d < farThr * 0.6) far = [];
       }
 
-      // c) Vektorszűrés (nincs megbízható sebesség): 3 egymást követő fix tartósan ugyanabba az irányba távolodik a
-      //    kiindulási ponttól, az utolsó legalább 3,5 m-re. A körkörös, véletlen zaj ezt nem teljesíti.
-      if (!leave && (sp === null || sp < GO_SPEED) && (fix.acc ?? 999) <= WALK_MAX_ACC && recent.length >= 3) {
-        const r3 = recent.slice(-3);
-        const c = wmean(r3);
-        const dir = { x: c.x - anchor.x, y: c.y - anchor.y };
-        const dl = Math.hypot(dir.x, dir.y);
-        if (dl > 1e-6) {
-          const u = { x: dir.x / dl, y: dir.y / dl };
-          const proj = r3.map((r) => (r.p.x - anchor.x) * u.x + (r.p.y - anchor.y) * u.y);
-          const lat = r3.map((r) => Math.abs(-(r.p.x - anchor.x) * u.y + (r.p.y - anchor.y) * u.x));
-          const growing = proj[1]! >= proj[0]! - 0.5 && proj[2]! >= proj[1]! - 0.5;
-          // A küszöb nyugodt GPS-nél 3,5 m; hullámzó GPS-nél a tanult zajszinttel nő (különben a zaj indulásnak látszana).
-          // Ha a telefon ad sebességet, az már „áll” bizonyíték: a Doppler a gyors kilépést kezeli, itt szigorúbbak vagyunk.
-          const thr = Math.max(WALK_EXIT_METERS, NOISE_K * Math.sqrt(rms2)) * (sp !== null ? 2 : 1);
-          const forward = proj[0]! >= thr * 0.3 && proj[2]! >= thr;
-          const straight = lat.every((l, i) => l <= proj[i]!);
-          leave = growing && forward && straight;
+      // c) Sebességadat nélküli (vagy nem egyértelműen álló) elmozdulás: 4 fix átlaga tartósan, növekvően és egy irányban
+      //    a tanult zajszint többszörösénél messzebb. A Doppler-„áll” felülírja: a pozíciósodródás nem indulás.
+      if (!leave && !dopStill && (fix.acc ?? 999) <= WALK_MAX_ACC && recent.length >= 4) {
+        const r4 = recent.slice(-4);
+        if (r4[3]!.at - r4[0]!.at <= 8000) {
+          const c = wmean(r4);
+          const dir = { x: c.x - anchor.x, y: c.y - anchor.y };
+          const dl = Math.hypot(dir.x, dir.y);
+          const thr = Math.max(WALK_EXIT_METERS, NOISE_K * rms);
+          if (dl >= thr) {
+            const u = { x: dir.x / dl, y: dir.y / dl };
+            const proj = r4.map((r) => (r.p.x - anchor.x) * u.x + (r.p.y - anchor.y) * u.y);
+            const lat = r4.map((r) => Math.abs(-(r.p.x - anchor.x) * u.y + (r.p.y - anchor.y) * u.x));
+            const lateral = Math.sqrt(lat.reduce((s, l) => s + l * l, 0) / lat.length);
+            leave = proj[3]! >= proj[0]! + 1 && proj[3]! >= thr && lateral <= 0.6 * dl;
+          if (leave) relocate = c;
+          }
         }
       }
 
-      if (leave) {
-        const c = wmean(recent.slice(-3));
-        const start = snap ?? (fastCount >= GO_FIXES ? z : c);
-        toMoving(start, at);
-        if (sp !== null && fix.bearing != null && sp >= GO_SPEED) {
-          const b = (fix.bearing * Math.PI) / 180;
-          kx!.v = sp * Math.sin(b); ky!.v = sp * Math.cos(b);
-        }
+      if (!leave) {
+        // A horgony szándékosan nem „finomodik”: a korrelált (multipath/légköri) hiba rövid átlagolással nem csökken,
+        // a finomítás csak vándoroltatná a jelölőt, és elnyelné a lassú indulást. A zajszint viszont tanulódik.
+        const dl = Math.min(d, 1.5 * rms + 3);
+        rms2 = 0.95 * rms2 + 0.05 * dl * dl;
         lastAt = at;
-        const pos = toLL({ x: kx!.p, y: ky!.p });
-        last = { ...fix, ...pos, at };
-        return last;
+        return emit(fix, toLL(shown), at, { speed: 0, bearing: lastBearing });
       }
 
-      // A ténylegesen mért állóhelyzeti zajt tanulja; egy-egy kiugró vagy induló séta hatását korlátozza (winsorizálás).
-      const dl = Math.min(d, 1.5 * Math.sqrt(rms2) + 3);
-      rms2 = 0.95 * rms2 + 0.05 * dl * dl;
-      // Álló helyzetben a védőzónán (SHELL_M) belüli minden zaj elnyelődik: a jelölő mozdulatlan.
-      // A zónán kívüli, de még nem tartós eltérés (kiugró pont, oda-vissza zaj) sem mozdítja.
-      lastAt = at;
-      last = { ...fix, ...toLL(shown), speed: 0, bearing: lastBearing, at };
-      return last;
+      // Kilépés
+      const wasStillSince = stillSince;
+      if (relocate && far.length && far.every((f) => f.dopStill)) {      // tartós áthelyeződés, Doppler szerint végig álló: új horgony
+        toStill(relocate, rms2, far[0]!.at);
+        lastAt = at;
+        return emit(fix, toLL(shown), at, { speed: 0, bearing: lastBearing });
+      }
+      const v0 = sp !== null && fix.bearing != null && sp >= GO_SPEED
+        ? { x: sp * Math.sin((fix.bearing * Math.PI) / 180), y: sp * Math.cos((fix.bearing * Math.PI) / 180) } : { x: 0, y: 0 };
+      toMoving(relocate ?? anchor, relocate ? sigma * sigma : Math.max(rms2, 9));
+      kx!.v = v0.x; ky!.v = v0.y;
+      void wasStillSince;
+      // → tovább a MOZGÁS ágon ugyanezzel a fixszel
     }
 
     /* ---------- MOZGÁS (Kalman, állandó sebesség modell) ---------- */
+    if (prevAt !== null && at - prevAt > GAP_RESET_MS) { toMoving(z, sigma * sigma); }
     const kxx = kx!, kyy = ky!;
     const v = Math.hypot(kxx.v, kyy.v);
     const sa = Math.min(SIGMA_A_MAX, Math.max(SIGMA_A_MIN, 0.5 + 0.35 * v));
     predict(kxx, dt, sa); predict(kyy, dt, sa);
-    // Kiugró fix kapuzása: a jósolt helytől 4σ-nál messzebbi fixet az első alkalommal nem vesszük be; ha a következő is
-    // ugyanoda mutat (2 távoli fix), valódi áthelyeződés: azonnal átugrunk. A gyors Doppler-sebesség igazolja a mozgást.
     const Rm = sigma * sigma;
     const nis = ((z.x - kxx.p) ** 2) / (kxx.Ppp + Rm) + ((z.y - kyy.p) ** 2) / (kyy.Ppp + Rm);
     const supported = sp !== null && sp >= 2;
@@ -259,16 +274,11 @@ export function createDriftFilter() {
       if (pendingFar && Math.hypot(z.x - pendingFar.x, z.y - pendingFar.y) <= FAR_AGREE_M) {
         const j = { x: (z.x + pendingFar.x) / 2, y: (z.y + pendingFar.y) / 2 };
         kxx.p = j.x; kyy.p = j.y; kxx.v = kyy.v = 0; kxx.Ppp = kyy.Ppp = Rm; kxx.Pvv = kyy.Pvv = 4; kxx.Ppv = kyy.Ppv = 0;
-        pendingFar = null;
-        recent = [];
-        lastAt = at;
-        last = { ...fix, ...toLL(j), speed: sp ?? 0, bearing: fix.bearing ?? lastBearing, at };
-        return last;
+        pendingFar = null; recent = []; lastAt = at;
+        return emit(fix, toLL(j), at, { speed: sp ?? 0, bearing: fix.bearing ?? lastBearing });
       }
-      pendingFar = z;
-      lastAt = at;
-      last = { ...fix, ...toLL({ x: kxx.p, y: kyy.p }), speed: sp ?? Math.hypot(kxx.v, kyy.v), bearing: fix.bearing ?? lastBearing, at };
-      return last;
+      pendingFar = z; lastAt = at;
+      return emit(fix, toLL({ x: kxx.p, y: kyy.p }), at, { speed: sp ?? Math.hypot(kxx.v, kyy.v), bearing: fix.bearing ?? lastBearing });
     }
     pendingFar = null;
     updPos(kxx, z.x, Rm); updPos(kyy, z.y, Rm);
@@ -277,37 +287,33 @@ export function createDriftFilter() {
         const b = (fix.bearing * Math.PI) / 180, R = 0.8 * 0.8 + (0.15 * sp) ** 2;
         updVel(kxx, sp * Math.sin(b), R); updVel(kyy, sp * Math.cos(b), R);
       } else if (sp < STILL_SPEED) {
-        updVel(kxx, 0, 0.3 * 0.3); updVel(kyy, 0, 0.3 * 0.3); // „nulla sebesség” frissítés
+        updVel(kxx, 0, 0.3 * 0.3); updVel(kyy, 0, 0.3 * 0.3);
       }
     }
 
-    // Belépés az állásba: elég hosszan és elég fixből is álló bizonyíték.
+    // Belépés az állásba: elég hosszú és elég sűrű „áll” bizonyíték; az állás kezdete = a bizonyíték ablakának eleje.
     recent.push({ p: z, w, at, speed: sp });
     if (recent.length > 24) recent.shift();
-    const longWin = sp === null ? 10000 : ENTER_MS;
+    const longWin = recent.some((r) => r.speed === null) ? NO_SPEED_ENTER_MS : ENTER_MS;
     const wnd = recent.filter((r) => at - r.at <= longWin);
-    const spanOk = wnd.length >= ENTER_FIXES && at - wnd[0]!.at >= longWin * 0.8;
-    if (spanOk) {
+    if (wnd.length >= ENTER_FIXES && at - wnd[0]!.at >= longWin * 0.8) {
       const slow = wnd.every((r) => r.speed === null || r.speed <= STILL_SPEED + 0.3);
       const c = wmean(wnd);
       const rms = Math.sqrt(wnd.reduce((s, r) => s + (r.p.x - c.x) ** 2 + (r.p.y - c.y) ** 2, 0) / wnd.length);
-      const half = Math.floor(wnd.length / 2);
-      const c1 = wmean(wnd.slice(0, half)), c2 = wmean(wnd.slice(half));
-      const halves = Math.hypot(c1.x - c2.x, c1.y - c2.y);
+      const third = Math.max(1, Math.floor(wnd.length / 3));
+      const c1 = wmean(wnd.slice(0, third)), c2 = wmean(wnd.slice(-third));
+      const net = Math.hypot(c1.x - c2.x, c1.y - c2.y);   // az ablak eleje és vége közti nettó elmozdulás
       const doppler = wnd.every((r) => r.speed !== null);
-      if (slow && rms <= (doppler ? 60 : 45) && (doppler || halves <= 1.2 * rms + 5)) {
-        toStill(c, rms * rms);
+      if (slow && rms <= (doppler ? 60 : 45) && (doppler || net <= 6 + 0.5 * rms)) {
+        toStill(c, rms * rms, wnd[0]!.at);
         lastAt = at;
-        last = { ...fix, ...toLL(shown), speed: 0, bearing: lastBearing, at };
-        return last;
+        return emit(fix, toLL(shown), at, { speed: 0, bearing: lastBearing });
       }
     }
 
     lastAt = at;
     const pos = toLL({ x: kxx.p, y: kyy.p });
     const spd = Math.hypot(kxx.v, kyy.v);
-    // A Kalman velocity can become nonzero from GPS jitter alone. Confirm it
-    // against displacement across recent fixes before exposing it as speed.
     const speedWindow = recent.slice(-4);
     let confirmedMove = false;
     if (speedWindow.length >= 3) {
@@ -318,8 +324,7 @@ export function createDriftFilter() {
     }
     const dopplerSpeed = sp !== null && sp >= GO_SPEED && (fix.acc ?? 999) <= WALK_MAX_ACC;
     const displaySpeed = dopplerSpeed ? sp : (confirmedMove && spd >= SPEED_NOISE_FLOOR ? spd : 0);
-    const bearing = displaySpeed >= 0.8 ? ((Math.atan2(kxx.v, kyy.v) * 180) / Math.PI + 360) % 360 : fix.bearing ?? lastBearing;
-    last = { ...fix, ...pos, speed: displaySpeed, bearing, at };
-    return last;
+    const bearing = displaySpeed! >= 0.8 ? ((Math.atan2(kxx.v, kyy.v) * 180) / Math.PI + 360) % 360 : fix.bearing ?? lastBearing;
+    return emit(fix, pos, at, { speed: displaySpeed, bearing });
   };
 }
