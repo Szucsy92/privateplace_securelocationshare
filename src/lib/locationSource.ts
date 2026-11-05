@@ -196,7 +196,10 @@ export function startLocationWatch(opts: {
         requestPermissions: true, stale: false, distanceFilter: 0,
       }, (loc, err) => {
         if (err) { reportError(err.code === "NOT_AUTHORIZED" ? "denied" : "error"); return; }
-        if (loc) reportFix({ lat: loc.latitude, lng: loc.longitude, acc: loc.accuracy ?? null, speed: loc.speed ?? null, bearing: loc.bearing ?? null, at: loc.time ?? Date.now(), src: "gps" });
+        if (!loc || (loc as { simulated?: boolean }).simulated === true) return;
+        // A hálózati/Wi-Fi alapú fixnél az Android 0-t ad sebességnek (nincs Doppler): ez nem „áll” bizonyíték, ezért nem adjuk tovább.
+        const noDoppler = loc.speed == null || (loc.speed === 0 && (loc.accuracy ?? 999) > 20);
+        reportFix({ lat: loc.latitude, lng: loc.longitude, acc: loc.accuracy ?? null, speed: noDoppler ? null : loc.speed, bearing: loc.bearing ?? null, at: loc.time ?? Date.now(), src: "gps" });
       });
       if (stopped) { void plugin.removeWatcher({ id }).catch(() => undefined); return; }
       cleanup = () => void plugin.removeWatcher({ id }).catch(() => undefined);
