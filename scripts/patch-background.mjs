@@ -91,6 +91,59 @@ if (!service.includes("FOREGROUND_SERVICE_TYPE_LOCATION")) {
             if (pendingNotification != null) promote(pendingNotification);`);
   writeFileSync(servicePath, service);
 }
+// Energiatakarékos GPS-ütem: a mérési köz futás közben állítható (a szolgáltatás, az értesítés és a watcher érintetlen marad,
+// így Android 12+ alatt sincs újraindított előtér-szolgáltatás). Ritkított (>= 5 mp) mérésnél a CPU-t ébren tartó
+// wake lock felszabadul; néző mellett (<= 3 mp) marad, hogy a közvetlen kapcsolat ne szakadjon meg.
+service = readFileSync(servicePath, "utf8");
+if (!service.includes("// Private Place power patch")) {
+  const binderToken = "public class LocalBinder extends Binder {";
+  const bindToken = "public IBinder onBind(Intent intent) {";
+  if (!service.includes(binderToken) || !service.includes(bindToken) || !service.includes("private android.os.PowerManager.WakeLock sharingLock;")) {
+    throw new Error(`Pinned native source changed: ${servicePath}`);
+  }
+  service = service.replace(bindToken, `${bindToken}
+        instance = this;`);
+  if (!service.includes("super.onDestroy();")) throw new Error(`Pinned native source changed: ${servicePath}`);
+  service = service.replace("super.onDestroy();", `if (instance == this) instance = null;
+        super.onDestroy();`);
+  service = service.replace(binderToken, `// Private Place power patch
+    private static volatile BackgroundGeolocationService instance;
+    // Ennél ritkább mérésnél nincs szükség a CPU-t ébren tartó wake lockra.
+    private static final long LOCK_MAX_INTERVAL_MS = 3000;
+    /** A PrivateRuntime hívja (JS: setLocationInterval). Igaz, ha volt futó szolgáltatás, amin alkalmazni lehetett. */
+    public static boolean privateSetInterval(long ms) {
+        BackgroundGeolocationService service = instance;
+        if (service == null) return false;
+        service.applyInterval(Math.max(1000L, Math.min(ms, 15000L)));
+        return true;
+    }
+    private void applyInterval(long ms) {
+        try {
+            for (Watcher watcher : new java.util.ArrayList<Watcher>(watchers)) {
+                LocationRequest request = new LocationRequest();
+                request.setMaxWaitTime(ms);
+                request.setInterval(ms);
+                if (ms > 1000L) request.setFastestInterval(ms);
+                request.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
+                request.setSmallestDisplacement(watcher.locationRequest.getSmallestDisplacement());
+                watcher.locationRequest = request;
+                try {
+                    watcher.client.removeLocationUpdates(watcher.locationCallback);
+                    watcher.client.requestLocationUpdates(request, watcher.locationCallback, null);
+                } catch (SecurityException ignore) {}
+            }
+            // Wake lockot csak futó előtér-szolgáltatásnál (van értesítés) szabad felvenni; így nem maradhat gazdátlanul.
+            if (sharingLock != null) {
+                if (ms <= LOCK_MAX_INTERVAL_MS) { if (getNotification() != null && !sharingLock.isHeld()) sharingLock.acquire(); }
+                else if (sharingLock.isHeld()) sharingLock.release();
+            }
+        } catch (Exception exception) {
+            Logger.error("Failed to change location interval", exception);
+        }
+    }
+    ${binderToken}`);
+  writeFileSync(servicePath, service);
+}
 const java = "android/app/src/main/java/hu/privateplace/app";
 const manifestPath = "android/app/src/main/AndroidManifest.xml";
 let manifest = readFileSync(manifestPath, "utf8");
