@@ -68,3 +68,17 @@ export async function downloadAndInstallUpdate(url: string, onProgress: (percent
     await listener?.remove().catch(() => {});
   }
 }
+
+/** A telepített APK tényleges versionCode-ja (a natív csomaginfóból); a build-időben beírt érték csak tartalék. */
+export async function installedVersionCode(): Promise<number> {
+  const built = Number(import.meta.env["VITE_APP_VERSION_CODE"] ?? 0);
+  if (!isNativeApp()) return built;
+  try {
+    const { registerPlugin } = await import("@capacitor/core");
+    const runtime = registerPlugin<{ versionCode(): Promise<{ versionCode: number }> }>("PrivateRuntime");
+    const { versionCode } = await runtime.versionCode();
+    return Number.isInteger(versionCode) && versionCode > 0 ? versionCode : built;
+  } catch {
+    return built;
+  }
+}
