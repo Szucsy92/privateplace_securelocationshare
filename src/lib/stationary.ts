@@ -27,15 +27,17 @@ export interface StationaryFilterConfig {
   noiseThreshold: number;
   heightenedThreshold: number;
   clusterThreshold: number;
+  dopplerSpeedThreshold: number;
 }
 
 const DEFAULT_CONFIG: StationaryFilterConfig = {
   minAcquireCount: 5,
-  minAcquireWindowMs: 12000, // 12-20 másodperces ablak
+  minAcquireWindowMs: 12000, // 12-20 másodperces mérési ablak
   maxAllowedAccuracy: 30,    // 30 méternél rosszabb fixek szűrése
   noiseThreshold: 4,         // 2-4 méteres zaj
   heightenedThreshold: 10,   // 5-10 méteres fokozott ellenőrzés
   clusterThreshold: 20,      // 10-20 méteres új klaszter vizsgálat
+  dopplerSpeedThreshold: 2.5,// Gyorsabb mozgás küszöbértéke (m/s)
 };
 
 // Haversine távolságszámítás méterben
@@ -69,6 +71,37 @@ function computeMedianCoordinate(fixes: RawGPSFix[]): { latitude: number; longit
   return { latitude: lat, longitude: lon, accuracy: acc };
 }
 
+// Egyszerűsített 1D/2D Kalman frissítés a meglévő mozgáskövetés támogatásához
+class SimpleKalmanFilter {
+  private estimateLat: number;
+  private estimateLon: number;
+  private variance: number;
+
+  constructor(initialLat: number, initialLon: number, initialAccuracy: number) {
+    this.estimateLat = initialLat;
+    this.estimateLon = initialLon;
+    this.variance = initialAccuracy * initialAccuracy;
+  }
+
+  public update(lat: number, lon: number, accuracy: number): { latitude: number; longitude: number } {
+    const measurementVariance = accuracy * accuracy;
+    // Kalman gain
+    const kalmanGain = this.variance / (this.variance + measurementVariance);
+
+    this.estimateLat = this.estimateLat + kalmanGain * (lat - this.estimateLat);
+    this.estimateLon = this.estimateLon + kalmanGain * (lon - this.estimateLon);
+    this.variance = (1 - kalmanGain) * this.variance;
+
+    return { latitude: this.estimateLat, longitude: this.estimateLon };
+  }
+
+  public reset(lat: number, lon: number, accuracy: number) {
+    this.estimateLat = lat;
+    this.estimateLon = lon;
+    this.variance = accuracy * accuracy;
+  }
+}
+
 export class StationaryGPSFilterV3 {
   private config: StationaryFilterConfig;
   private state: TrackingState = 'acquiring';
@@ -76,6 +109,7 @@ export class StationaryGPSFilterV3 {
   private anchor: { latitude: number; longitude: number } | null = null;
   private candidate: { latitude: number; longitude: number; count: number; firstSeen: number } | null = null;
   private shown: { latitude: number; longitude: number; accuracy: number } | null = null;
+  private kalmanFilter: SimpleKalmanFilter | null = null;
   private lastValidFix: RawGPSFix | null = null;
 
   constructor(config: Partial<StationaryFilterConfig> = {}) {
@@ -88,6 +122,7 @@ export class StationaryGPSFilterV3 {
     this.anchor = null;
     this.candidate = null;
     this.shown = null;
+    this.kalmanFilter = null;
     this.lastValidFix = null;
   }
 
@@ -101,6 +136,8 @@ export class StationaryGPSFilterV3 {
     }
 
     const now = fix.timestamp;
+    const speed = fix.speed ?? 0;
+    const isMovingFast = speed >= this.config.dopplerSpeedThreshold;
 
     switch (this.state) {
       case 'acquiring': {
@@ -118,16 +155,21 @@ export class StationaryGPSFilterV3 {
           ? this.acquireBuffer[this.acquireBuffer.length - 1].timestamp - this.acquireBuffer[0].timestamp 
           : 0;
 
-        // Horgony elfogadása ha megvan a stabil klaszter
-        if (
-          this.acquireBuffer.length >= this.config.minAcquireCount &&
-          timeSpan >= this.config.minAcquireWindowMs * 0.5
-        ) {
+        // Ha van valódi mozgás (Doppler vagy stepping) az elején, ne ragadjon be az acquiring állapotba
+        if (isMovingFast || isStepping || this.acquireBuffer.length >= this.config.minAcquireCount) {
           const medianFix = computeMedianCoordinate(this.acquireBuffer);
           if (medianFix.accuracy <= this.config.maxAllowedAccuracy) {
             this.anchor = { latitude: medianFix.latitude, longitude: medianFix.longitude };
             this.shown = { latitude: medianFix.latitude, longitude: medianFix.longitude, accuracy: medianFix.accuracy };
-            this.state = 'stationary';
+            
+            // Kalman szűrő inicializálása a horgonnyal
+            if (!this.kalmanFilter) {
+              this.kalmanFilter = new SimpleKalmanFilter(medianFix.latitude, medianFix.longitude, medianFix.accuracy);
+            } else {
+              this.kalmanFilter.reset(medianFix.latitude, medianFix.longitude, medianFix.accuracy);
+            }
+
+            this.state = (isMovingFast || isStepping) ? 'moving' : 'stationary';
           }
         }
 
@@ -149,8 +191,8 @@ export class StationaryGPSFilterV3 {
           return { latitude: fix.latitude, longitude: fix.longitude, accuracy: fix.accuracy, state: 'acquiring', isReliable: false };
         }
 
-        const speed = fix.speed ?? 0;
-        if (speed > 1.5 || isStepping) {
+        // Doppler sebesség vagy lépésérzékelés alapján átváltás mozgásba
+        if (speed > 1.2 || isStepping || isMovingFast) {
           this.state = 'moving';
           this.candidate = null;
           break;
@@ -174,9 +216,13 @@ export class StationaryGPSFilterV3 {
             const distToCandidate = calculateDistance(this.candidate.latitude, this.candidate.longitude, fix.latitude, fix.longitude);
             if (distToCandidate < 3) {
               this.candidate.count++;
-              if (this.candidate.count >= 3 && now - this.candidate.firstSeen >= 5000) {
+              // Ellenőrzött horgonykorrekció tartós új klaszter esetén
+              if (this.candidate.count >= 3 && now - this.candidate.firstSeen >= 4000) {
                 this.anchor = { latitude: this.candidate.latitude, longitude: this.candidate.longitude };
                 this.shown = { latitude: this.candidate.latitude, longitude: this.candidate.longitude, accuracy: fix.accuracy };
+                if (this.kalmanFilter) {
+                  this.kalmanFilter.reset(this.anchor.latitude, this.anchor.longitude, fix.accuracy);
+                }
                 this.candidate = null;
               }
             } else {
@@ -188,12 +234,21 @@ export class StationaryGPSFilterV3 {
       }
 
       case 'moving': {
-        const speed = fix.speed ?? 0;
-        if (speed < 0.8 && !isStepping) {
-          this.state = 'acquiring';
-          this.acquireBuffer = [fix];
+        // Ha megállt a felhasználó (alacsony Doppler sebesség és nincsenek lépések)
+        if (speed < 0.6 && !isStepping && !isMovingFast) {
+          this.state = 'stationary';
+          this.anchor = { latitude: fix.latitude, longitude: fix.longitude };
+          this.candidate = null;
         }
-        this.shown = { latitude: fix.latitude, longitude: fix.longitude, accuracy: fix.accuracy };
+
+        // Kalman-szűrő alkalmazása mozgás közben
+        if (this.kalmanFilter) {
+          const smoothed = this.kalmanFilter.update(fix.latitude, fix.longitude, fix.accuracy);
+          this.shown = { latitude: smoothed.latitude, longitude: smoothed.longitude, accuracy: fix.accuracy };
+        } else {
+          this.shown = { latitude: fix.latitude, longitude: fix.longitude, accuracy: fix.accuracy };
+          this.kalmanFilter = new SimpleKalmanFilter(fix.latitude, fix.longitude, fix.accuracy);
+        }
         break;
       }
     }
