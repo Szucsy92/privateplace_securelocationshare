@@ -293,12 +293,32 @@ export default function LiveMap({ people, follow, showTrails, trailIds, orientat
           if (!map) return;
           containerRef.current?.querySelector(".maplibregl-ctrl-attrib")?.classList.remove("maplibregl-compact-show");
           map.addSource("trails", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+          // Finom neon-glow: a széles, elmosott réteg adja a fényudvart,
+          // a fölötte rajzolt vékonyabb réteg pedig megtartja az útvonal éles színét.
+          // A round cap/join a vonal elejét, végét és kanyarjait is lekerekíti.
+          map.addLayer({
+            id: "trails-glow",
+            type: "line",
+            source: "trails",
+            layout: { "line-cap": "round", "line-join": "round" },
+            paint: {
+              "line-color": ["get", "color"],
+              "line-width": 13,
+              "line-opacity": 0.28,
+              "line-blur": 5,
+            },
+          });
           map.addLayer({
             id: "trails",
             type: "line",
             source: "trails",
             layout: { "line-cap": "round", "line-join": "round" },
-            paint: { "line-color": ["get", "color"], "line-width": 4, "line-opacity": 0.85, "line-blur": 0.5 },
+            paint: {
+              "line-color": ["get", "color"],
+              "line-width": 4,
+              "line-opacity": 0.96,
+              "line-blur": 0.15,
+            },
           });
           setReady(true);
         });
