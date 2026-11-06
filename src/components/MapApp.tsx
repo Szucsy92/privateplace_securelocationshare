@@ -55,6 +55,7 @@ import {
   loadRooms,
   parseRoomInput,
   removeRoom,
+  roomQrValue,
   saveRooms,
   type SavedRoom,
 } from "@/lib/rooms";
@@ -189,6 +190,20 @@ export default function MapApp() {
   useEffect(() => { if (dialog !== "settings") setSettingsView("main"); }, [dialog]);
   const [nativeStopReady, setNativeStopReady] = useState(false);
   const invitationRepoRef = useRef<string | null>(null);
+  const [availableUpdate, setAvailableUpdate] = useState<AppRelease | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+  // Induláskor (csak a telepített appban) megnézzük, van-e újabb kiadás; a hibát csendben elnyeljük.
+  useEffect(() => {
+    if (!mounted || !nativeApp) return;
+    const repo = releaseRepository();
+    if (!repo) return;
+    const installed = Number(import.meta.env["VITE_APP_VERSION_CODE"] ?? 0);
+    const controller = new AbortController();
+    void latestRelease(repo, controller.signal)
+      .then((release) => { if (release && needsUpdate(installed, release.versionCode)) setAvailableUpdate(release); })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [mounted, nativeApp]);
   const selfMetaRef = useRef(selfMeta);
   selfMetaRef.current = selfMeta;
   const publishSelf = () => {
@@ -770,6 +785,19 @@ export default function MapApp() {
       </section>
 
       {profile && dialog === null && <HintBubbles key={hintsKey} />}
+
+      <Dialog
+        open={availableUpdate !== null && !updateDismissed && dialog !== "welcome" && dialog !== "permissions"}
+        onOpenChange={(open) => { if (!open) setUpdateDismissed(true); }}
+      >
+        <DialogContent className="glass-dialog w-[calc(100%-1.5rem)] max-w-[340px] gap-0 p-0">
+          <PanelHeader title="Új frissítés elérhető" description={availableUpdate?.version ? `Elérhető verzió: ${availableUpdate.version}` : "A Private Place új verziója letölthető."} />
+          <div className="flex justify-end gap-2 p-5">
+            <Button variant="outline" className="glass-button rounded-full" onClick={() => setUpdateDismissed(true)}>Később</Button>
+            <Button className="rounded-full" onClick={() => { if (availableUpdate) window.location.href = availableUpdate.apk; setUpdateDismissed(true); }}>Letöltés</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={dialog !== null}
@@ -1364,7 +1392,7 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
         >
           {qrBackground && qrColor && (
             <RoundedQRCode
-              value={text}
+              value={roomQrValue(room.token)}
               size={210}
               bgColor={qrBackground}
               fgColor={qrColor}
