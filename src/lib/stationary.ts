@@ -32,15 +32,14 @@ export interface StationaryFilterConfig {
 
 const DEFAULT_CONFIG: StationaryFilterConfig = {
   minAcquireCount: 5,
-  minAcquireWindowMs: 12000, // 12-20 másodperces mérési ablak
-  maxAllowedAccuracy: 30,    // 30 méternél rosszabb fixek szűrése
-  noiseThreshold: 4,         // 2-4 méteres zaj
-  heightenedThreshold: 10,   // 5-10 méteres fokozott ellenőrzés
-  clusterThreshold: 20,      // 10-20 méteres új klaszter vizsgálat
-  dopplerSpeedThreshold: 2.5,// Gyorsabb mozgás küszöbértéke (m/s)
+  minAcquireWindowMs: 12000,
+  maxAllowedAccuracy: 30,
+  noiseThreshold: 4,
+  heightenedThreshold: 10,
+  clusterThreshold: 20,
+  dopplerSpeedThreshold: 2.5,
 };
 
-// Haversine távolságszámítás méterben
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371e3;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -55,7 +54,6 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * c;
 }
 
-// Geometriai medián / koordináta-stabilitás számítása
 function computeMedianCoordinate(fixes: RawGPSFix[]): { latitude: number; longitude: number; accuracy: number } {
   if (fixes.length === 0) return { latitude: 0, longitude: 0, accuracy: 999 };
   
@@ -71,7 +69,6 @@ function computeMedianCoordinate(fixes: RawGPSFix[]): { latitude: number; longit
   return { latitude: lat, longitude: lon, accuracy: acc };
 }
 
-// Egyszerűsített 1D/2D Kalman frissítés a meglévő mozgáskövetés támogatásához
 class SimpleKalmanFilter {
   private estimateLat: number;
   private estimateLon: number;
@@ -85,7 +82,6 @@ class SimpleKalmanFilter {
 
   public update(lat: number, lon: number, accuracy: number): { latitude: number; longitude: number } {
     const measurementVariance = accuracy * accuracy;
-    // Kalman gain
     const kalmanGain = this.variance / (this.variance + measurementVariance);
 
     this.estimateLat = this.estimateLat + kalmanGain * (lat - this.estimateLat);
@@ -127,7 +123,6 @@ export class StationaryGPSFilterV3 {
   }
 
   public processFix(fix: RawGPSFix, isStepping: boolean = false): FilteredFix {
-    // Pontossági küszöb ellenőrzése
     if (fix.accuracy > this.config.maxAllowedAccuracy) {
       if (this.shown) {
         return { ...this.shown, state: this.state, isReliable: false };
@@ -141,7 +136,6 @@ export class StationaryGPSFilterV3 {
 
     switch (this.state) {
       case 'acquiring': {
-        // Időablak tisztítása
         if (this.acquireBuffer.length > 0) {
           const firstTimestamp = this.acquireBuffer[0].timestamp;
           if (now - firstTimestamp > this.config.minAcquireWindowMs * 2) {
@@ -155,14 +149,12 @@ export class StationaryGPSFilterV3 {
           ? this.acquireBuffer[this.acquireBuffer.length - 1].timestamp - this.acquireBuffer[0].timestamp 
           : 0;
 
-        // Ha van valódi mozgás (Doppler vagy stepping) az elején, ne ragadjon be az acquiring állapotba
         if (isMovingFast || isStepping || this.acquireBuffer.length >= this.config.minAcquireCount) {
           const medianFix = computeMedianCoordinate(this.acquireBuffer);
           if (medianFix.accuracy <= this.config.maxAllowedAccuracy) {
             this.anchor = { latitude: medianFix.latitude, longitude: medianFix.longitude };
             this.shown = { latitude: medianFix.latitude, longitude: medianFix.longitude, accuracy: medianFix.accuracy };
             
-            // Kalman szűrő inicializálása a horgonnyal
             if (!this.kalmanFilter) {
               this.kalmanFilter = new SimpleKalmanFilter(medianFix.latitude, medianFix.longitude, medianFix.accuracy);
             } else {
@@ -191,7 +183,6 @@ export class StationaryGPSFilterV3 {
           return { latitude: fix.latitude, longitude: fix.longitude, accuracy: fix.accuracy, state: 'acquiring', isReliable: false };
         }
 
-        // Doppler sebesség vagy lépésérzékelés alapján átváltás mozgásba
         if (speed > 1.2 || isStepping || isMovingFast) {
           this.state = 'moving';
           this.candidate = null;
@@ -205,18 +196,13 @@ export class StationaryGPSFilterV3 {
           fix.longitude
         );
 
-        if (distanceToAnchor <= this.config.noiseThreshold) {
-          this.candidate = null;
-        } else if (distanceToAnchor <= this.config.heightenedThreshold) {
-          this.candidate = null;
-        } else if (distanceToAnchor <= this.config.clusterThreshold) {
+        if (distanceToAnchor > this.config.heightenedThreshold && distanceToAnchor <= this.config.clusterThreshold) {
           if (!this.candidate) {
             this.candidate = { latitude: fix.latitude, longitude: fix.longitude, count: 1, firstSeen: now };
           } else {
             const distToCandidate = calculateDistance(this.candidate.latitude, this.candidate.longitude, fix.latitude, fix.longitude);
             if (distToCandidate < 3) {
               this.candidate.count++;
-              // Ellenőrzött horgonykorrekció tartós új klaszter esetén
               if (this.candidate.count >= 3 && now - this.candidate.firstSeen >= 4000) {
                 this.anchor = { latitude: this.candidate.latitude, longitude: this.candidate.longitude };
                 this.shown = { latitude: this.candidate.latitude, longitude: this.candidate.longitude, accuracy: fix.accuracy };
@@ -234,14 +220,12 @@ export class StationaryGPSFilterV3 {
       }
 
       case 'moving': {
-        // Ha megállt a felhasználó (alacsony Doppler sebesség és nincsenek lépések)
         if (speed < 0.6 && !isStepping && !isMovingFast) {
           this.state = 'stationary';
           this.anchor = { latitude: fix.latitude, longitude: fix.longitude };
           this.candidate = null;
         }
 
-        // Kalman-szűrő alkalmazása mozgás közben
         if (this.kalmanFilter) {
           const smoothed = this.kalmanFilter.update(fix.latitude, fix.longitude, fix.accuracy);
           this.shown = { latitude: smoothed.latitude, longitude: smoothed.longitude, accuracy: fix.accuracy };
@@ -265,3 +249,11 @@ export class StationaryGPSFilterV3 {
     return this.state;
   }
 }
+
+// Visszafelé kompatibilis alapértelmezett export vagy wrapper, ha a többi modul ezt igényli
+export function filterStationaryFix(fix: RawGPSFix, isStepping: boolean = false): FilteredFix {
+  // Egyszerű stateless hívásokhoz vagy globális instance-hoz
+  return filterInstance.processFix(fix, isStepping);
+}
+
+const filterInstance = new StationaryGPSFilterV3();
