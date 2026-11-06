@@ -63,3 +63,12 @@ test("a szobaszín a meghívó rejtett részében utazik", () => {
   expect(parseRoomInput(link)).toEqual({ token, name: "Család", color: "rose" });
   expect(link.split("#")[0]).toBe("https://pelda.hu/");
 });
+
+test("the QR code carries only the room key and scans back as a valid invitation", async () => {
+  const { roomQrValue, parseRoomInput, generateRoomToken } = await import("../src/lib/rooms");
+  const token = generateRoomToken();
+  const value = roomQrValue(token);
+  expect(value).toBe(token);
+  expect(value.includes("#") || value.includes("http")).toBe(false);
+  expect(parseRoomInput(value)?.token).toBe(token);
+});
