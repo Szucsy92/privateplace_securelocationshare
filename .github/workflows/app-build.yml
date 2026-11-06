@@ -86,25 +86,38 @@ jobs:
             KS_FILE="$RUNNER_TEMP/private-place.keystore"
             printf '%s' "$KS_BASE64" | base64 -d > "$KS_FILE"
           fi
-          if [ -n "$KS_PASSWORD" ] && [ -f "$KS_FILE" ]; then
-            ./gradlew assembleRelease --no-daemon \
-              -Pandroid.injected.signing.store.file="$KS_FILE" \
-              -Pandroid.injected.signing.store.password="$KS_PASSWORD" \
-              -Pandroid.injected.signing.key.alias=privateplace \
-              -Pandroid.injected.signing.key.password="$KS_PASSWORD"
-            cp app/build/outputs/apk/release/app-release.apk "../out/private-place-${BUILD_STAMP}.apk"
-          else
-            echo "::warning::Hiányzik az ANDROID_KEYSTORE_PASSWORD titok vagy a kulcsfájl – teszt aláírással készül."
-            ./gradlew assembleDebug --no-daemon
-            cp app/build/outputs/apk/debug/app-debug.apk "../out/private-place-${BUILD_STAMP}-teszt.apk"
+          # Ideiglenes (teszt) aláírású APK-t soha nem adunk ki: másik kulccsal aláírt APK nem települ a meglévő app fölé.
+          if [ -z "$KS_PASSWORD" ] || [ ! -f "$KS_FILE" ]; then
+            echo "::error::Hiányzik az ANDROID_KEYSTORE_PASSWORD / ANDROID_KEYSTORE_BASE64 titok vagy a kulcsfájl – APK nem készül."
+            exit 1
           fi
+          export KS_PASSWORD
+          echo "KS_FILE=$KS_FILE" >> "$GITHUB_ENV"
+          ./gradlew assembleRelease --no-daemon \
+            -Pandroid.injected.signing.store.file="$KS_FILE" \
+            -Pandroid.injected.signing.store.password="$KS_PASSWORD" \
+            -Pandroid.injected.signing.key.alias=privateplace \
+            -Pandroid.injected.signing.key.password="$KS_PASSWORD"
+          cp app/build/outputs/apk/release/app-release.apk "../out/private-place-${BUILD_STAMP}.apk"
 
-      # Csak tájékoztató: soha nem állítja le a mentést.
-      - name: Aláírás ellenőrzése
-        continue-on-error: true
+      # Az APK-t az állandó kulccsal kell aláírni, különben az appon belüli frissítés nem települ fel.
+      - name: Aláírás ellenőrzése (az állandó kulccsal egyezik-e)
+        env:
+          KS_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
-          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -n1)
-          if [ -n "$APKSIGNER" ]; then "$APKSIGNER" verify --print-certs out/*.apk || true; fi
+          APKSIGNER=$(printf '%s\n' "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n1)
+          test -n "$APKSIGNER"
+          "$APKSIGNER" verify --verbose out/*.apk
+          "$APKSIGNER" verify --print-certs out/*.apk > "$RUNNER_TEMP/apk-certs.txt"
+          ACTUAL=$(sed -n 's/^.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/apk-certs.txt" | head -n1 | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')
+          EXPECTED=$(keytool -exportcert -keystore "$KS_FILE" -storepass:env KS_PASSWORD -alias privateplace | sha256sum | cut -d ' ' -f 1)
+          echo "APK tanúsítvány SHA-256: $ACTUAL"
+          test -n "$ACTUAL"
+          test "$ACTUAL" = "$EXPECTED"
+
+      - name: Aláírókulcs törlése a futtatóról
+        if: always()
+        run: rm -f "$RUNNER_TEMP/private-place.keystore"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -166,7 +179,8 @@ jobs:
 
   release:
     needs: [stamp, android, ios]
-    if: ${{ always() && (needs.android.result == 'success' || needs.ios.result == 'success') }}
+    # Csak sikeres Android build után: egy APK nélküli, újabb kiadás elrejtené a legutóbbi telepíthető APK-t a frissítés elől.
+    if: ${{ always() && needs.android.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
