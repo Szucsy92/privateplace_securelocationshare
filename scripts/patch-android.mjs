@@ -21,6 +21,7 @@ const entries = [
   '<uses-permission android:name="android.permission.WAKE_LOCK" />',
   '<uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />',
   '<uses-permission android:name="android.permission.INTERNET" />',
+  '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />',
   '<uses-feature android:name="android.hardware.location.gps" android:required="false" />',
   '<uses-feature android:name="android.hardware.camera" android:required="false" />',
 ];
@@ -39,6 +40,21 @@ if (/android:allowBackup="[^"]*"/.test(appTag)) {
   xml = xml.replace("<application", '<application android:allowBackup="false"');
 }
 if (!/<application\b[^>]*android:allowBackup="false"/.test(xml)) fail("Az allowBackup=false nem került be");
+
+// Appon belüli frissítés: a letöltött APK-t a rendszer telepítője csak FileProvideren át olvashatja.
+if (!xml.includes('${applicationId}.updates')) {
+  const provider =
+    '<provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.updates" android:exported="false" android:grantUriPermissions="true">' +
+    '<meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/privateplace_update_paths" /></provider>';
+  if (!xml.includes("</application>")) fail("Nem található a </application> zárás az AndroidManifestben");
+  xml = xml.replace("</application>", `    ${provider}\n    </application>`);
+}
+mkdirSync("android/app/src/main/res/xml", { recursive: true });
+writeFileSync(
+  "android/app/src/main/res/xml/privateplace_update_paths.xml",
+  '<?xml version="1.0" encoding="utf-8"?>\n<paths>\n    <cache-path name="updates" path="updates/" />\n</paths>\n',
+);
+if (!xml.includes('${applicationId}.updates')) fail("A frissítés FileProvidere nem került be");
 
 writeFileSync(manifestPath, xml);
 for (const e of entries) if (!xml.includes(e)) fail(`Hiányzó engedély: ${e}`);
