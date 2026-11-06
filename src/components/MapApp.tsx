@@ -75,7 +75,7 @@ import { TransportControl, TRANSPORT_DEMO_EVENT } from "@/components/TransportCo
 import { useSmoothHeight } from "@/lib/useSmoothHeight";
 import { hybridHeading, type HeadingState } from "@/lib/heading";
 import { watchCompass, watchBattery, watchWalking, requestCompassPermission } from "@/lib/deviceSensors";
-import { watchNativeStop, setNativeLocationInterval, reapplyNativeLocationInterval, downloadAndInstallUpdate } from "@/lib/nativeRuntime";
+import { watchNativeStop, setNativeLocationInterval, reapplyNativeLocationInterval, downloadAndInstallUpdate, installedVersionCode } from "@/lib/nativeRuntime";
 import { CALM_AFTER_MS, desiredGpsIntervalMs, movementWake } from "@/lib/powerMode";
 import { updateTransport, type TransportMode, type TransportState } from "@/lib/transport";
 import { createDriftFilter, type StopState } from "@/lib/stationary";
@@ -209,18 +209,36 @@ export default function MapApp() {
       window.location.href = availableUpdate.apk;
     }
   };
-  // Induláskor (csak a telepített appban) megnézzük, van-e újabb kiadás; a hibát csendben elnyeljük.
+  const [updateCheck, setUpdateCheck] = useState<"idle" | "checking" | "latest" | "error">("idle");
+  // Frissítés keresése: induláskor, az előtérbe visszatéréskor (legfeljebb 10 percenként) és a Beállításokban kézzel.
+  // Kézi kereséskor az eredményt a Beállítások sora mutatja.
+  const lastUpdateCheckRef = useRef(0);
+  const checkForUpdate = useCallback(async (manual: boolean) => {
+    const repo = releaseRepository();
+    if (!repo) { if (manual) setUpdateCheck("error"); return; }
+    if (manual) setUpdateCheck("checking");
+    try {
+      const [release, installed] = await Promise.all([latestRelease(repo), installedVersionCode()]);
+      if (release && needsUpdate(installed, release.versionCode)) {
+        setAvailableUpdate(release);
+        setUpdateCheck("idle");
+      } else if (manual) setUpdateCheck("latest");
+      else setUpdateCheck("idle");
+    } catch {
+      setUpdateCheck(manual ? "error" : "idle");
+    }
+  }, []);
   useEffect(() => {
     if (!mounted || !nativeApp) return;
-    const repo = releaseRepository();
-    if (!repo) return;
-    const installed = Number(import.meta.env["VITE_APP_VERSION_CODE"] ?? 0);
-    const controller = new AbortController();
-    void latestRelease(repo, controller.signal)
-      .then((release) => { if (release && needsUpdate(installed, release.versionCode)) setAvailableUpdate(release); })
-      .catch(() => {});
-    return () => controller.abort();
-  }, [mounted, nativeApp]);
+    const look = () => {
+      if (document.visibilityState !== "visible" || Date.now() - lastUpdateCheckRef.current < 10 * 60 * 1000) return;
+      lastUpdateCheckRef.current = Date.now();
+      void checkForUpdate(false);
+    };
+    look();
+    document.addEventListener("visibilitychange", look);
+    return () => document.removeEventListener("visibilitychange", look);
+  }, [mounted, nativeApp, checkForUpdate]);
   const selfMetaRef = useRef(selfMeta);
   selfMetaRef.current = selfMeta;
   const publishSelf = () => {
@@ -1002,6 +1020,30 @@ export default function MapApp() {
                     </Button>
                   </div>
 
+                  {nativeApp && (
+                    <div className="glass-inset flex items-center gap-3 rounded-2xl p-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold">Frissítés</p>
+                        <p className="text-xs text-muted-foreground">
+                          {updateCheck === "checking" ? "Keresés…"
+                            : updateCheck === "latest" ? "A legújabb verzió van telepítve."
+                            : updateCheck === "error" ? "A frissítések most nem érhetők el."
+                            : availableUpdate ? `Új verzió érhető el (${availableUpdate.version || "új"}).`
+                            : "Új verzió keresése a GitHub kiadásai között."}
+                        </p>
+                      </div>
+                      {availableUpdate && updateCheck !== "checking" ? (
+                        <Button size="sm" className="shrink-0 rounded-full" disabled={updateStatus === "downloading"} onClick={() => void startUpdate()}>
+                          {updateStatus === "downloading" ? `Letöltés…${updatePercent !== null ? ` ${updatePercent}%` : ""}` : "Letöltés"}
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="outline" className="glass-button shrink-0 rounded-full" disabled={updateCheck === "checking"} onClick={() => void checkForUpdate(true)}>
+                          Keresés
+                        </Button>
+                      )}
+                    </div>
+                  )}
+
                   <p className="text-center text-[11px] text-muted-foreground">
                     Private Place · {(import.meta.env["VITE_APP_VERSION"] as string | undefined) || "webes változat"}
                   </p>
@@ -1511,7 +1553,8 @@ function JoinPanel({ initial, repository, onJoin, onReject }: { initial: { token
       setAppTry(left || document.hidden ? "idle" : "missing");
     }, 1800);
   };
-  const installed = Number(import.meta.env["VITE_APP_VERSION_CODE"] ?? 0);
+  const [installed, setInstalled] = useState(() => Number(import.meta.env["VITE_APP_VERSION_CODE"] ?? 0));
+  useEffect(() => { void installedVersionCode().then(setInstalled); }, []);
   const update = isNativeApp() && release && needsUpdate(installed, release.versionCode);
 
   return (
