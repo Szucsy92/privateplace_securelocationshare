@@ -39,6 +39,11 @@ function defaultRandom(n: number) {
   return bytes;
 }
 
+/** A QR-kód csak a szoba kulcsát tartalmazza (link, név, szín és egyéb adat nélkül). */
+export function roomQrValue(token: string): string {
+  return token;
+}
+
 /** Olvasható csoportosítás: ABCDE-FGHJK-… */
 export function formatRoomToken(token: string): string {
   return token.match(/.{1,5}/g)?.join("-") ?? token;
