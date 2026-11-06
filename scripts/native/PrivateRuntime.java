@@ -219,6 +219,18 @@ public class PrivateRuntime extends Plugin {
     private static final Pattern APK_URL = Pattern.compile("^https://github\\.com/[\\w.-]+/[\\w.-]+/releases/download/[^/]+/[\\w.-]+\\.apk$");
     private volatile boolean updating;
 
+    /** A telepített APK versionCode-ja: ehhez hasonlítjuk a legújabb kiadás build számát. */
+    @PluginMethod public void versionCode(PluginCall call) {
+        JSObject data = new JSObject();
+        try {
+            PackageInfo info = getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), 0);
+            data.put("versionCode", (int) androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(info));
+        } catch (Exception e) {
+            data.put("versionCode", 0);
+        }
+        call.resolve(data);
+    }
+
     @PluginMethod public void downloadAndInstall(PluginCall call) {
         String url = call.getString("url", "");
         if (url == null || !APK_URL.matcher(url).matches()) { call.reject("Invalid update URL"); return; }
