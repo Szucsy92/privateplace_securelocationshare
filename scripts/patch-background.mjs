@@ -157,7 +157,7 @@ if (!manifest.includes('android:scheme="privateplace"')) {
   writeFileSync(manifestPath, manifest);
 }
 mkdirSync(java, { recursive: true });
-for (const name of ["PrivateCompass", "PrivateRuntime"]) cpSync(`scripts/native/${name}.java`, `${java}/${name}.java`);
+for (const name of ["PrivateCompass", "PrivateRuntime", "UpdateFileProvider"]) cpSync(`scripts/native/${name}.java`, `${java}/${name}.java`);
 patch(`${java}/MainActivity.java`, "public class MainActivity extends BridgeActivity {}", `public class MainActivity extends BridgeActivity {
     // Private Place runtime patch
     @Override public void onCreate(android.os.Bundle savedInstanceState) {

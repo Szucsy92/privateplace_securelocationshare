@@ -44,7 +44,7 @@ if (!/<application\b[^>]*android:allowBackup="false"/.test(xml)) fail("Az allowB
 // Appon belüli frissítés: a letöltött APK-t a rendszer telepítője csak FileProvideren át olvashatja.
 if (!xml.includes('${applicationId}.updates')) {
   const provider =
-    '<provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.updates" android:exported="false" android:grantUriPermissions="true">' +
+    '<provider android:name=".UpdateFileProvider" android:authorities="${applicationId}.updates" android:exported="false" android:grantUriPermissions="true">' +
     '<meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/privateplace_update_paths" /></provider>';
   if (!xml.includes("</application>")) fail("Nem található a </application> zárás az AndroidManifestben");
   xml = xml.replace("</application>", `    ${provider}\n    </application>`);
