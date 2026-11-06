@@ -6,7 +6,8 @@ interface RoundedQRCodeProps {
   value: string;
   size?: number;
   fgColor: string;
-  bgColor: string;
+  /** Már nem rajzolunk háttérnégyzetet: a keret (.qr-frame) adja a hátteret, így nem lóg ki a sarkokon. */
+  bgColor?: string;
   className?: string;
   style?: CSSProperties;
 }
@@ -62,7 +63,6 @@ export function RoundedQRCode({
   value,
   size = 210,
   fgColor,
-  bgColor,
   className,
   style,
 }: RoundedQRCodeProps) {
@@ -98,7 +98,7 @@ export function RoundedQRCode({
         value={value}
         size={size}
         level="M"
-        bgColor={bgColor}
+        bgColor="transparent"
         fgColor={fgColor}
         marginSize={0}
         className={className}
@@ -118,7 +118,6 @@ export function RoundedQRCode({
       aria-label="QR-kód"
       shapeRendering="geometricPrecision"
     >
-      <rect width={paths.count} height={paths.count} fill={bgColor} />
       <path d={paths.dots} fill={fgColor} />
       <path d={paths.finders} fill={fgColor} fillRule="evenodd" />
     </svg>
