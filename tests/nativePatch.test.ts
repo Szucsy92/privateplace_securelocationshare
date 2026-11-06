@@ -43,6 +43,7 @@ test("native stop actions, compass and deep link are applied once in generated A
     expect(readFileSync(join(dir, java, "MainActivity.java"), "utf8")).toContain("registerPlugin(PrivateCompass.class)");
     expect(readFileSync(join(dir, java, "PrivateRuntime.java"), "utf8")).toContain("requestPreciseLocation");
     expect(readFileSync(join(dir, java, "PrivateRuntime.java"), "utf8")).toContain("downloadAndInstall");
+    expect(readFileSync(join(dir, java, "UpdateFileProvider.java"), "utf8")).toContain("extends FileProvider");
     expect(readFileSync(join(dir, "android/app/src/main/AndroidManifest.xml"), "utf8")).toContain('android:scheme="privateplace"');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
