@@ -75,7 +75,7 @@ import { TransportControl, TRANSPORT_DEMO_EVENT } from "@/components/TransportCo
 import { useSmoothHeight } from "@/lib/useSmoothHeight";
 import { hybridHeading, type HeadingState } from "@/lib/heading";
 import { watchCompass, watchBattery, watchWalking, requestCompassPermission } from "@/lib/deviceSensors";
-import { watchNativeStop, setNativeLocationInterval, reapplyNativeLocationInterval } from "@/lib/nativeRuntime";
+import { watchNativeStop, setNativeLocationInterval, reapplyNativeLocationInterval, downloadAndInstallUpdate } from "@/lib/nativeRuntime";
 import { CALM_AFTER_MS, desiredGpsIntervalMs, movementWake } from "@/lib/powerMode";
 import { updateTransport, type TransportMode, type TransportState } from "@/lib/transport";
 import { createDriftFilter, type StopState } from "@/lib/stationary";
@@ -192,6 +192,23 @@ export default function MapApp() {
   const invitationRepoRef = useRef<string | null>(null);
   const [availableUpdate, setAvailableUpdate] = useState<AppRelease | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<"idle" | "downloading" | "permission">("idle");
+  const [updatePercent, setUpdatePercent] = useState<number | null>(null);
+  const startUpdate = async () => {
+    if (!availableUpdate || updateStatus === "downloading") return;
+    setUpdateStatus("downloading");
+    setUpdatePercent(null);
+    const state = await downloadAndInstallUpdate(availableUpdate.apk, setUpdatePercent);
+    if (state === "installing") { setUpdateStatus("idle"); setUpdateDismissed(true); }
+    else if (state === "needsPermission") setUpdateStatus("permission");
+    else {
+      // Tartalék: ha az appon belüli letöltés nem megy, a böngésző veszi át.
+      toast.error("Az appon belüli letöltés nem sikerült, megnyitom a böngészőben.");
+      setUpdateStatus("idle");
+      setUpdateDismissed(true);
+      window.location.href = availableUpdate.apk;
+    }
+  };
   // Induláskor (csak a telepített appban) megnézzük, van-e újabb kiadás; a hibát csendben elnyeljük.
   useEffect(() => {
     if (!mounted || !nativeApp) return;
@@ -788,13 +805,20 @@ export default function MapApp() {
 
       <Dialog
         open={availableUpdate !== null && !updateDismissed && dialog !== "welcome" && dialog !== "permissions"}
-        onOpenChange={(open) => { if (!open) setUpdateDismissed(true); }}
+        onOpenChange={(open) => { if (!open && updateStatus !== "downloading") setUpdateDismissed(true); }}
       >
-        <DialogContent className="glass-dialog w-[calc(100%-1.5rem)] max-w-[340px] gap-0 p-0">
-          <PanelHeader title="Új frissítés elérhető" description={availableUpdate?.version ? `Elérhető verzió: ${availableUpdate.version}` : "A Private Place új verziója letölthető."} />
+        <DialogContent className="glass-dialog w-[calc(100%-1.5rem)] max-w-[340px] gap-0 p-0" onInteractOutside={(e) => updateStatus === "downloading" && e.preventDefault()} onEscapeKeyDown={(e) => updateStatus === "downloading" && e.preventDefault()}>
+          <PanelHeader
+            title="Új frissítés elérhető"
+            description={
+              updateStatus === "downloading" ? `Letöltés…${updatePercent !== null ? ` ${updatePercent}%` : ""}`
+              : updateStatus === "permission" ? "Engedélyezd a telepítést a Private Place számára, majd koppints újra a Letöltésre."
+              : availableUpdate?.version ? `Elérhető verzió: ${availableUpdate.version}` : "A Private Place új verziója letölthető."
+            }
+          />
           <div className="flex justify-end gap-2 p-5">
-            <Button variant="outline" className="glass-button rounded-full" onClick={() => setUpdateDismissed(true)}>Később</Button>
-            <Button className="rounded-full" onClick={() => { if (availableUpdate) window.location.href = availableUpdate.apk; setUpdateDismissed(true); }}>Letöltés</Button>
+            <Button variant="outline" className="glass-button rounded-full" disabled={updateStatus === "downloading"} onClick={() => setUpdateDismissed(true)}>Később</Button>
+            <Button className="rounded-full" disabled={updateStatus === "downloading"} onClick={() => void startUpdate()}>Letöltés</Button>
           </div>
         </DialogContent>
       </Dialog>
