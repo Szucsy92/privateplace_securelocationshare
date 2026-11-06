@@ -43,3 +43,28 @@ export function reapplyNativeLocationInterval(): void {
   appliedGpsMs = 1000;
   if (wantedGpsMs !== 1000) setNativeLocationInterval(wantedGpsMs, true);
 }
+
+type UpdateRuntime = {
+  downloadAndInstall(options: { url: string }): Promise<{ state: UpdateState }>;
+  addListener(event: "updateProgress", callback: (data: { percent: number }) => void): Promise<{ remove(): Promise<void> }>;
+};
+export type UpdateState = "installing" | "needsPermission" | "failed";
+/**
+ * Az új APK letöltése az appon belül, majd a rendszer telepítőjének indítása.
+ * installing = a telepítő megnyílt; needsPermission = az „ismeretlen forrás” engedély oldala nyílt meg; failed = nem sikerült.
+ */
+export async function downloadAndInstallUpdate(url: string, onProgress: (percent: number) => void): Promise<UpdateState> {
+  if (!isNativeApp()) return "failed";
+  let listener: { remove(): Promise<void> } | null = null;
+  try {
+    const { registerPlugin } = await import("@capacitor/core");
+    const runtime = registerPlugin<UpdateRuntime>("PrivateRuntime");
+    listener = await runtime.addListener("updateProgress", ({ percent }) => onProgress(percent));
+    const result = await runtime.downloadAndInstall({ url });
+    return result.state;
+  } catch {
+    return "failed";
+  } finally {
+    await listener?.remove().catch(() => {});
+  }
+}
