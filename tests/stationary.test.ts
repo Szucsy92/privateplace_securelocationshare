@@ -401,3 +401,36 @@ test("ritkított (3 s) mérésnél a sebességadat nélküli séta is felismerhe
   for (let t = t0; t <= t0 + 60; t += 3) { mode = f(fx((t - t0 + 3) * 1.3, 0, t, { speed: null })).mode; if (mode === "moving") { tMove = t - t0 + 3; break; } }
   expect(tMove > 0 && tMove <= 20).toBe(true);
 });
+
+// --- Megállás menetből: a kijelzett sebesség nem ragadhat be ---
+/** 23 km/h-val (6,4 m/s) halad északra `t = 1..20`, utána a (0, 128) pontban áll, zajos pozícióval. */
+function driveThenStop(f: ReturnType<typeof createDriftFilter>, stopExtra: Partial<RawFix>, seconds = 25): FilteredFix[] {
+  const r = rng(7);
+  for (let t = 1; t <= 20; t++) f(fx(6.4 * t, 0, t, { speed: 6.4, bearing: 0, acc: 5 }));
+  const outs: FilteredFix[] = [];
+  for (let t = 21; t < 21 + seconds; t++) outs.push(f(fx(128 + gauss(r) * 2.5, gauss(r) * 2.5, t, { acc: 5, ...stopExtra })));
+  return outs;
+}
+test("menetből megállva a Doppler-0 azonnal 0 km/h-t ad, a Kalman-maradék nem látszik", () => {
+  const outs = driveThenStop(createDriftFilter(), { speed: 0.05, bearing: null });
+  for (const o of outs.slice(1)) expect(o.speed).toBe(0);
+});
+test("menetből megállva, Doppler nélkül sem marad tartósan 1,2 m/s fölötti sebesség", () => {
+  const outs = driveThenStop(createDriftFilter(), { speed: null, bearing: null }, 30);
+  for (const o of outs.slice(8)) expect(o.speed ?? 0).toBeLessThan(1.2);
+});
+test("irány nélküli lassú Doppler (0,6 m/s) nem tart fenn nagy Kalman-sebességet", () => {
+  const outs = driveThenStop(createDriftFilter(), { speed: 0.6, bearing: null });
+  for (const o of outs.slice(3)) expect(o.speed ?? 0).toBeLessThan(1);
+});
+test("menetből megállva a tartósan hamis 1,4 m/s Doppler (5 km/h) néhány mp után 0-ra esik, és az állás felveszi", () => {
+  const outs = driveThenStop(createDriftFilter(), { speed: 1.4, bearing: null }, 40);
+  for (const o of outs.slice(12)) expect(o.speed).toBe(0);
+  expect(outs.at(-1)!.mode).toBe("still");
+});
+test("valódi gyaloglás (1,4 m/s, Doppler + elmozdulás) nem lesz hamis Doppler-nek minősítve", () => {
+  const f = createDriftFilter(); const r = rng(11); let out!: FilteredFix;
+  for (let t = 1; t <= 40; t++) out = f(fx(1.4 * t + gauss(r) * 1.5, gauss(r) * 1.5, t, { speed: 1.4, bearing: 0, acc: 6 }));
+  expect(out.mode).toBe("moving");
+  expect(out.speed ?? 0).toBeGreaterThan(1.2);
+});
