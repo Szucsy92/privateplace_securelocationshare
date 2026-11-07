@@ -21,6 +21,8 @@ export function useElasticOverscroll<T extends HTMLElement>(axis: "x" | "y") {
       return t ? (axis === "x" ? t.clientX : t.clientY) : 0;
     };
     const apply = (value: number, animate: boolean) => {
+      if (value) el.dataset.pull = "true";
+      else delete el.dataset.pull;
       const node = target();
       if (!node) return;
       node.style.transition = animate ? "transform 520ms cubic-bezier(0.22, 1.25, 0.36, 1)" : "none";
