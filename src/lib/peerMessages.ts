@@ -7,6 +7,8 @@ export type HelloMessage = {
   deviceId: string;
   name: string;
   avatar: string | null;
+  /** Igaz: a küldő nem ismeri a fogadót, és kéri, hogy az is mutatkozzon be (nem válaszolunk rá újra). */
+  want?: boolean;
 };
 
 export type LocationMessage = {
@@ -45,7 +47,7 @@ export function parseHello(data: unknown): HelloMessage | null {
     /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(avatar)
       ? avatar
       : null;
-  return { deviceId, name: cleanName || "Névtelen", avatar: cleanAvatar };
+  return { deviceId, name: cleanName || "Névtelen", avatar: cleanAvatar, ...(d["want"] === true ? { want: true } : {}) };
 }
 
 export function parseLocation(data: unknown): LocMessage | undefined {
@@ -56,6 +58,8 @@ export function parseLocation(data: unknown): LocMessage | undefined {
   const lng = finiteOrNull(d["lng"]);
   const t = finiteOrNull(d["t"]);
   if (lat == null || lng == null || t == null) return undefined;
+  // Értelmetlen időbélyeg (negatív vagy távoli jövő) nem kerülhet az állapotba: a „legújabb mérés” védelme minden későbbi valódi mérést eldobna.
+  if (t < 0 || t > Date.now() + 5 * 60_000) return undefined;
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return undefined;
   const acc = finiteOrNull(d["acc"]);
   const speed = finiteOrNull(d["speed"]);

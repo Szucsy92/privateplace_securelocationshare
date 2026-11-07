@@ -21,16 +21,27 @@ export function loadProfile(): LocalProfile | null {
 }
 
 export function saveProfile(profile: LocalProfile) {
-  localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+  try {
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+  } catch {
+    /* nem kritikus: a profil a futás alatt megmarad */
+  }
 }
 
+let memoryDeviceId: string | null = null;
+
 export function getDeviceId(): string {
-  let id = localStorage.getItem(DEVICE_KEY);
+  let id: string | null = null;
+  try { id = localStorage.getItem(DEVICE_KEY); } catch { /* tiltott tárhely */ }
   if (!id || !/^[A-Za-z0-9_-]{8,64}$/.test(id)) {
-    const bytes = new Uint8Array(16);
-    crypto.getRandomValues(bytes);
-    id = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-    localStorage.setItem(DEVICE_KEY, id);
+    id = memoryDeviceId;
+    if (!id) {
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      id = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+      memoryDeviceId = id;
+    }
+    try { localStorage.setItem(DEVICE_KEY, id); } catch { /* az azonosító a futás alatt stabil marad */ }
   }
   return id;
 }
@@ -45,7 +56,11 @@ export function loadPrefs(): Prefs {
 }
 
 export function savePrefs(prefs: Prefs) {
-  localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+  } catch {
+    /* nem kritikus */
+  }
 }
 
 /** Kép kicsinyítése kör alakú jelölőhöz (kis méret, hogy gyorsan átküldhető legyen). */

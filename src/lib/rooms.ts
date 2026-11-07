@@ -96,7 +96,11 @@ export function loadRooms(): SavedRoom[] {
 }
 
 export function saveRooms(rooms: SavedRoom[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(rooms));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(rooms));
+  } catch {
+    /* tele vagy tiltott tárhely: a szobák a futás alatt memóriában megmaradnak, az alkalmazás nem omolhat össze */
+  }
 }
 
 export function addRoom(rooms: SavedRoom[], room: SavedRoom): SavedRoom[] {

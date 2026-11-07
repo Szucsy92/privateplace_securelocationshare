@@ -152,7 +152,8 @@ export function startLocationWatch(opts: {
     };
   }
 
-  void (async () => {
+  let nativeRetry: ReturnType<typeof setTimeout> | undefined;
+  const startNative = async (attempt: number): Promise<void> => {
     try {
       const { Geolocation } = await import("@capacitor/geolocation");
       const { checkPermission, requestPreciseLocation } = await import("./permissions");
@@ -185,6 +186,7 @@ export function startLocationWatch(opts: {
           .catch(() => undefined).finally(() => { quickPending = false; });
       };
       quickFix();
+      clearInterval(retryTimer);
       retryTimer = setInterval(() => {
         if (!stopped && document.visibilityState === "visible" && Date.now() - latestAt > 10000) quickFix();
       }, 12000);
@@ -208,12 +210,17 @@ export function startLocationWatch(opts: {
       opts.onWatcherStarted?.();
     } catch (err) {
       const code = typeof err === "object" && err !== null && "code" in err ? String(err.code) : "";
-      reportError(code === "OS-PLUG-GLOC-0003" || code === "NOT_AUTHORIZED" ? "denied" : "error");
+      const denied = code === "OS-PLUG-GLOC-0003" || code === "NOT_AUTHORIZED";
+      reportError(denied ? "denied" : "error");
+      // Átmeneti natív hiba (pl. a szolgáltatás épp újraindul): a követés nem maradhat örökre leállva, ezért néhányszor újrapróbáljuk.
+      if (!denied && !stopped && attempt < 4) nativeRetry = setTimeout(() => void startNative(attempt + 1), 3000 * (attempt + 1));
     }
-  })();
+  };
+  void startNative(0);
   return () => {
     stopped = true;
     clearTimeout(acquisitionTimer);
+    clearTimeout(nativeRetry);
     clearInterval(retryTimer);
     cleanup();
   };

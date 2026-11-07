@@ -24,7 +24,9 @@ const CONTROL_KEY = "privateplace.room-controls.v1";
 export function loadRoomControls(): RoomControl[] {
   try { const items = JSON.parse(localStorage.getItem(CONTROL_KEY) ?? "[]"); return Array.isArray(items) ? items : []; } catch { return []; }
 }
+const MAX_CONTROLS = 500;
 export function rememberRoomControl(control: RoomControl) {
   const controls = loadRoomControls();
-  if (!controls.some((c) => c.nonce === control.nonce)) localStorage.setItem(CONTROL_KEY, JSON.stringify([...controls, control]));
+  if (controls.some((c) => c.nonce === control.nonce)) return;
+  try { localStorage.setItem(CONTROL_KEY, JSON.stringify([...controls, control].slice(-MAX_CONTROLS))); } catch { /* nem kritikus */ }
 }
