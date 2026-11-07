@@ -974,7 +974,9 @@ export default function MapApp() {
       >
         <DialogContent
           ref={dialogRef}
-          className={`glass-dialog w-[calc(100%-1.5rem)] max-w-[390px] max-h-[94dvh] overflow-hidden gap-0 p-0${dialog === "settings" || dialog === "rooms" || dialog === "share" ? " compact-panel" : ""}`}
+          data-panel={dialog ?? undefined}
+          data-view={dialog === "settings" ? settingsView : undefined}
+          className={`land-wide glass-dialog w-[calc(100%-1.5rem)] max-w-[390px] max-h-[94dvh] overflow-hidden gap-0 p-0${dialog === "settings" || dialog === "rooms" || dialog === "share" ? " compact-panel" : ""}`}
           onInteractOutside={(e) => dialog === "welcome" && e.preventDefault()}
           onEscapeKeyDown={(e) => dialog === "welcome" && e.preventDefault()}
         >
@@ -1088,7 +1090,7 @@ export default function MapApp() {
                   ))}
                 </div>
               </ElasticScroll>
-              <div className="grid shrink-0 grid-cols-2 gap-2 p-4 pt-3">
+              <div className="rooms-actions grid shrink-0 grid-cols-2 gap-2 p-4 pt-3">
                 <Button size="sm" className="rounded-full" onClick={() => void createRoom()}>
                   <Plus className="mr-1.5 h-4 w-4" />
                   Új szoba
@@ -1105,7 +1107,8 @@ export default function MapApp() {
             <>
               <PanelHeader compact title="Beállítások" />
               <ElasticScroll className="px-4 pb-4 pt-4">
-                <div className="space-y-2.5">
+                <div className="settings-cols space-y-2.5">
+<div className="space-y-2.5">
                   <div className="glass-inset rounded-2xl p-3">
                     <ProfileForm
                       compact
@@ -1130,19 +1133,6 @@ export default function MapApp() {
                     <ChevronRight className="h-4 w-4" />
                   </Button>
 
-                  <div className="glass-inset space-y-2 rounded-2xl p-3">
-                    <label className="flex items-center gap-3 text-sm font-semibold">
-                      <Checkbox checked={prefs.debug} onCheckedChange={(v) => updatePrefs({ debug: v === true })} />
-                      Hibakereső réteg a térképen
-                    </label>
-                    <p className="text-xs text-muted-foreground">Piros pont: a telefon nyers GPS-pozíciója; piros kör: a jelentett pontosság; zöld gyűrű: a szűrő horgonya; a felirat az eltérést mutatja méterben és égtájjal.</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Button size="sm" variant="outline" className="glass-button rounded-full" onClick={() => void sendDebugLog(false)}>Napló küldése</Button>
-                      <Button size="sm" variant="outline" className="glass-button rounded-full" onClick={() => void sendDebugLog(true)}>Szöveg másolása</Button>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground">A napló nem tartalmaz koordinátát, csak méterben megadott eltéréseket. Küldés előtt készíts képernyőképet is a térképről.</p>
-                  </div>
-
                   <div className="grid grid-cols-2 gap-2">
                     <Button size="sm" variant="outline" className="glass-button rounded-full" onClick={() => setDialog("permissions")}>
                       <ShieldCheck className="mr-1.5 h-4 w-4" />
@@ -1161,6 +1151,21 @@ export default function MapApp() {
                       <HelpCircle className="mr-1.5 h-4 w-4" />
                       Súgó
                     </Button>
+                  </div>
+
+</div>
+<div className="space-y-2.5">
+                  <div className="glass-inset space-y-2 rounded-2xl p-3">
+                    <label className="flex items-center gap-3 text-sm font-semibold">
+                      <Checkbox checked={prefs.debug} onCheckedChange={(v) => updatePrefs({ debug: v === true })} />
+                      Hibakereső réteg a térképen
+                    </label>
+                    <p className="text-xs text-muted-foreground">Piros pont: a telefon nyers GPS-pozíciója; piros kör: a jelentett pontosság; zöld gyűrű: a szűrő horgonya; a felirat az eltérést mutatja méterben és égtájjal.</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button size="sm" variant="outline" className="glass-button rounded-full" onClick={() => void sendDebugLog(false)}>Napló küldése</Button>
+                      <Button size="sm" variant="outline" className="glass-button rounded-full" onClick={() => void sendDebugLog(true)}>Szöveg másolása</Button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">A napló nem tartalmaz koordinátát, csak méterben megadott eltéréseket. Küldés előtt készíts képernyőképet is a térképről.</p>
                   </div>
 
                   {nativeApp && (
@@ -1190,6 +1195,7 @@ export default function MapApp() {
                   <p className="text-center text-[11px] text-muted-foreground">
                     Private Place · {(import.meta.env["VITE_APP_VERSION"] as string | undefined) || "webes változat"}
                   </p>
+</div>
                 </div>
               </ElasticScroll>
             </>
@@ -1387,7 +1393,7 @@ function PermissionsPanel({ native, onDone, addressConsent, onAddressConsent, on
         description="Hogy a Private Place rendesen működjön, ezekhez kér hozzáférést. Semmi nem kerül központi helyre."
       />
       <ElasticScroll className="max-h-[52dvh] px-5">
-        <div className="space-y-2.5 pb-1">
+        <div className="perm-list space-y-2.5 pb-1">
           {keys.map((key) => {
             const info = PERM_INFO[key];
             const Icon = info.icon;
@@ -1623,7 +1629,7 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
   };
 
   return (
-    <div className="flex max-h-[94dvh] flex-col overflow-hidden">
+    <div className="share-panel flex max-h-[94dvh] flex-col overflow-hidden">
       <DialogHeader className="shrink-0 flex-row items-center space-y-0 gap-1 px-3 pt-3 pb-1 pr-12 text-left">
         <Button
           size="icon"
@@ -1642,14 +1648,11 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
         </DialogDescription>
       </DialogHeader>
 
-      <div className="flex min-h-0 flex-col items-center gap-2 px-4 pb-3 pt-2">
+      <div className="share-body flex min-h-0 flex-col items-center gap-2 px-4 pb-3 pt-2">
         {/* QR-kód */}
         <div
-          className="qr-frame mx-auto w-full shrink-0"
-          style={{
-            width: "min(100%, 210px)",
-            padding: 6,
-          }}
+          className="qr-frame share-qr mx-auto w-full shrink-0"
+          style={{ padding: 6 }}
         >
           {qrBackground && qrColor && (
             <RoundedQRCode
@@ -1666,6 +1669,7 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
           )}
         </div>
 
+        <div className="share-side flex w-full flex-col items-center gap-2">
         {/* Szobakód */}
         <div className="glass-inset w-full shrink-0 rounded-2xl px-3 py-1.5 text-center">
           <p className="text-[9px] uppercase tracking-[0.2em] text-muted-foreground">
@@ -1712,6 +1716,7 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
           Csak az látja a helyzetedet, akinek ezt elküldöd.
           Bármikor törölheted a szobát.
         </p>
+        </div>
       </div>
     </div>
   );
@@ -1760,7 +1765,7 @@ function JoinPanel({ initial, repository, onJoin, onReject }: { initial: { token
       />
       <ElasticScroll className="max-h-[70dvh] px-5 pb-5">
         <form
-          className="space-y-3"
+          className="join-form space-y-3"
           onSubmit={(e) => {
             e.preventDefault();
             if (parsed) onJoin(parsed.token, name, parsed.color ?? initial?.color, parsed.ownerKey ?? (parsed.token === initial?.token ? initial.ownerKey : undefined));
