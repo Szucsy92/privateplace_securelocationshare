@@ -41,7 +41,7 @@ export function stopLabel(since: number | null | undefined, now: number, moving 
 }
 
 /* ------------------------------------------------------------------ */
-/* Drift-szűrő v2: „horgony + bizonyíték” állapotgép                    */
+/* Drift-szűrő: „horgony + bizonyíték” állapotgép                       */
 /* ------------------------------------------------------------------ */
 
 /*
@@ -52,6 +52,12 @@ export function stopLabel(since: number | null | undefined, now: number, moving 
  *      c) „távoli klaszter”: ha a Doppler végig áll-t mond, a pozíció-ugrás (multipath) csak 45 s tartós elmozdulás után fogadódik el.
  *  - MOZGÁS: állandó sebesség modellű Kalman-szűrő, a HORGONYBÓL indítva (nem a nyers fixből), Doppler-sebességgel javítva.
  *  - A `stoppedSince` ugyanebből az állapotgépből jön, a bizonyíték kezdetére visszadátumozva – nincs külön megállás-detektor.
+ *  - INDÍTÁS (`init`): az első fixből nincs azonnali horgony. Több, időben elkülönülő jó fixet gyűjtünk, geometriai mediánnal
+ *    kiugrás-mentes klasztert keresünk, és csak stabil klaszterre horgonyozunk. Amíg nincs klaszter, a jelölő a futó mediánt mutatja,
+ *    megállás-jelzés (`stoppedSince`) nélkül; ha 20 s alatt sem áll össze, a Kalman-szűrő viszi tovább (nem mutat hamis pontosságot).
+ *  - ÁLLÁS, három koordináta: `anchor` (stabil referencia), `cand` (ellenőrzés alatt álló, tartósan máshol mérő klaszter) és
+ *    `shown` (a ténylegesen kirajzolt pont, ami az anchor felé finoman csúszik). A horgony csak hosszú, szűk, a horgonyt nem érintő
+ *    klaszterre korrigálódik; a rövid multipath-eltolódást nem követi.
  */
 export type RawFix = {
   lat: number; lng: number; acc: number | null; speed: number | null; speedAcc?: number | null; bearing?: number | null; at?: number; src?: "gps" | "network";
@@ -81,6 +87,27 @@ const SPEED_NOISE_FLOOR = 1.2;
 const SIGMA_A_MIN = 0.8, SIGMA_A_MAX = 4;
 const GAP_RESET_MS = 60000;    // mozgásban ennyi csend után a Kalman újraindul
 
+// Indítás (horgony felvétele több mérésből)
+const ACQ_MAX_ACC = 25;        // m: ennél rosszabb pontosságú fix nem alapozza meg a horgonyt
+const ACQ_MIN_FIXES = 5;       // ennyi használható (klaszterbe eső) fix kell
+const ACQ_MIN_MS = 12000;      // a mérési ablak minimális hossza
+const ACQ_MAX_MS = 20000;      // ennyi idő után, ha nincs stabil klaszter, a Kalman-szűrő veszi át
+const ACQ_INLIER_MIN_M = 8, ACQ_INLIER_MAX_M = 20, ACQ_INLIER_K = 1.5;   // klaszter-sugár a mediántól
+const ACQ_MIN_SHARE = 0.6;     // a fixek legalább ekkora hányadának a klaszterbe kell esnie
+const ACQ_MAX_RMS = 12;        // m: a klaszter szórása
+const ACQ_STEP_FIXES = 2;      // sebességadat nélküli járás-jelzés: ennyi fix elég az indításkori mozgáshoz
+
+// Álló helyzet: adaptív horgonykorrekció (anchor / cand / shown)
+const CAND_MAX_ACC = 20;       // m: csak jó pontosságú fix számít jelöltnek
+const CAND_NEAR_M = 7;         // m: ettől (és a fix pontosságától) távolabbi mérés lehet jelölt
+const CAND_VISIT_M = 4.5;      // m: ennél közelebb a horgonyhoz mért fix „a horgonynál jártunk” (hiszterézis a kettő közt)
+const CAND_AGREE_M = 7;        // m: a jelölt-klaszter tagjai ennyin belül egyeznek
+const CAND_MIN_FIXES = 25, CAND_MIN_MS = 60000;   // tartós, egyező mérések a korrekcióhoz
+const CAND_MAX_RMS = 4.5;      // m: a jelölt-klaszternek szűknek kell lennie (a vándorló drift nem az)
+const CAND_NEAR_RESET = 3;     // ennyi, a horgonynál mért fix eldobja a jelöltet (a horgony „él”, a távoli mérés csak epizód)
+const CAND_START_FIXES = 8;    // induláskor ennyi egyező jelölt-fixtől indul a mozgás a jelöltből a horgony helyett
+const SHOWN_EASE_MIN_M = 1.5;  // m/fix: a megjelenített pont csúszási sebessége az új horgony felé
+
 type Vec = { x: number; y: number };
 type Axis = { p: number; v: number; Ppp: number; Ppv: number; Pvv: number };
 const M_LAT = 110540;
@@ -103,6 +130,10 @@ export function createDriftFilter() {
   let far: { p: Vec; at: number; dopStill: boolean; afterGap: boolean }[] = [];
   let pendingFar: Vec | null = null;
   let recent: { p: Vec; w: number; at: number; speed: number | null }[] = [];
+  let acq: { p: Vec; w: number; at: number; speed: number | null; acc: number }[] = [];
+  let acqStepHits = 0, initAt: number | null = null;
+  let cand: { p: Vec; at: number }[] = [];
+  let candMiss = 0, candNear = 0;
 
   const newAxis = (p: number, v: number, pp: number, pv: number): Axis => ({ p, v, Ppp: pp, Ppv: 0, Pvv: pv });
   const predict = (a: Axis, dt: number, sa: number) => {
@@ -130,6 +161,40 @@ export function createDriftFilter() {
     for (const q of pts) { sw += q.w; sx += q.p.x * q.w; sy += q.p.y * q.w; }
     return sw > 0 ? { x: sx / sw, y: sy / sw } : { x: 0, y: 0 };
   };
+  const geoMedian = (pts: { p: Vec; w: number }[]): Vec => {
+    let c = wmean(pts);
+    for (let i = 0; i < 25; i++) {
+      let sw = 0, sx = 0, sy = 0;
+      for (const q of pts) { const k = q.w / Math.max(0.5, Math.hypot(q.p.x - c.x, q.p.y - c.y)); sw += k; sx += q.p.x * k; sy += q.p.y * k; }
+      const n = { x: sx / sw, y: sy / sw };
+      const moved = Math.hypot(n.x - c.x, n.y - c.y);
+      c = n;
+      if (moved < 0.01) break;
+    }
+    return c;
+  };
+  const rmsAround = (pts: { p: Vec }[], c: Vec) => Math.sqrt(pts.reduce((s, q) => s + (q.p.x - c.x) ** 2 + (q.p.y - c.y) ** 2, 0) / Math.max(1, pts.length));
+  /** Indítási klaszter: a medián körüli belső fixek; null, ha nincs elég egyező, időben elnyúló, szűk csoport. */
+  const acqCluster = (pts: typeof acq): { c: Vec; inl: typeof acq; rms: number } | null => {
+    if (pts.length < ACQ_MIN_FIXES) return null;
+    const c0 = geoMedian(pts);
+    const accs = pts.map((q) => q.acc).sort((a, b) => a - b);
+    const thr = Math.min(ACQ_INLIER_MAX_M, Math.max(ACQ_INLIER_MIN_M, ACQ_INLIER_K * accs[Math.floor(accs.length / 2)]!));
+    const inl = pts.filter((q) => Math.hypot(q.p.x - c0.x, q.p.y - c0.y) <= thr);
+    if (inl.length < ACQ_MIN_FIXES || inl.length < ACQ_MIN_SHARE * pts.length) return null;
+    if (inl[inl.length - 1]!.at - inl[0]!.at < ACQ_MIN_MS * 0.75) return null;
+    const c = wmean(inl);
+    const rms = rmsAround(inl, c);
+    if (rms > ACQ_MAX_RMS) return null;
+    if (inl.some((q) => q.speed === null)) {          // sebességadat nélkül a nettó elmozdulás is számít (lassú séta ne legyen horgony)
+      const third = Math.max(1, Math.floor(inl.length / 3));
+      const c1 = wmean(inl.slice(0, third)), c2 = wmean(inl.slice(-third));
+      if (Math.hypot(c1.x - c2.x, c1.y - c2.y) > 3 + 0.5 * rms) return null;
+    }
+    return { c, inl, rms };
+  };
+  const resetCand = () => { cand = []; candMiss = 0; candNear = 0; };
+  const candCenter = () => wmean(cand.map((q) => ({ p: q.p, w: 1 })));
   const emit = (fix: RawFix, pos: LatLngPoint, at: number, extra: Partial<RawFix> = {}): FilteredFix => {
     const m = mode === "still" ? "still" : "moving";
     last = { ...fix, ...pos, ...extra, at, mode: m, stoppedSince: m === "still" ? stillSince : null };
@@ -139,13 +204,13 @@ export function createDriftFilter() {
   function toMoving(pos: Vec, posVar: number) {
     mode = "moving"; stillSince = null;
     kx = newAxis(pos.x, 0, posVar, 4); ky = newAxis(pos.y, 0, posVar, 4);
-    fastHist = []; far = []; pendingFar = null; recent = [];
+    fastHist = []; far = []; pendingFar = null; recent = []; acq = []; acqStepHits = 0; resetCand();
   }
   function toStill(pos: Vec, spread2: number, since: number) {
     mode = "still"; stillSince = since;
     anchor = { ...pos }; shown = { ...pos };
     rms2 = Math.max(spread2, 9);
-    fastHist = []; far = []; pendingFar = null;
+    fastHist = []; far = []; pendingFar = null; acq = []; acqStepHits = 0; resetCand();
   }
 
   return function filter(fix: RawFix): FilteredFix {
@@ -178,13 +243,24 @@ export function createDriftFilter() {
         return emit(fix, fix, at);
       }
       lastAt = at;
-      if (sp === null || sp < STILL_SPEED) {
-        toStill(z, 9, at);
-        recent = [{ p: z, w, at, speed: sp }];
+      // Már induláskor mozgó (Doppler) vagy végig csak durva fix: nincs mit horgonyozni, a Kalman viszi; megállást később, bizonyítékkal állít.
+      if (rough || (sp !== null && sp >= STILL_SPEED)) { toMoving(z, sigma * sigma); return emit(fix, fix, at); }
+      initAt ??= at;
+      if (fix.acc !== null && fix.acc <= ACQ_MAX_ACC) {
+        acq.push({ p: z, w, at, speed: sp, acc: fix.acc });
+        if (acq.length > 40) acq.shift();
+        if (sp === null && fix.stepping === true) acqStepHits++;
+      }
+      const est = acq.length ? geoMedian(acq) : z;
+      if (acqStepHits >= ACQ_STEP_FIXES) { toMoving(est, sigma * sigma); return emit(fix, toLL(est), at); }
+      const cl = acqCluster(acq);
+      if (cl && at - acq[0]!.at >= ACQ_MIN_MS) {
+        toStill(cl.c, cl.rms * cl.rms, cl.inl[0]!.at);
+        recent = cl.inl.slice(-8).map((q) => ({ p: q.p, w: q.w, at: q.at, speed: q.speed }));
         return emit(fix, toLL(shown), at, { speed: 0 });
       }
-      toMoving(z, sigma * sigma);
-      return emit(fix, fix, at);
+      if (at - initAt >= ACQ_MAX_MS) { toMoving(est, sigma * sigma); return emit(fix, toLL(est), at); }
+      return emit(fix, toLL(est), at, { speed: 0 });   // gyűjtés közben: futó medián, megállás-jelzés nélkül
     }
 
     /* ---------- ÁLLÁS ---------- */
@@ -231,13 +307,40 @@ export function createDriftFilter() {
             const proj = r4.map((r) => (r.p.x - anchor.x) * u.x + (r.p.y - anchor.y) * u.y);
             const lat = r4.map((r) => Math.abs(-(r.p.x - anchor.x) * u.y + (r.p.y - anchor.y) * u.x));
             const lateral = Math.sqrt(lat.reduce((s, l) => s + l * l, 0) / lat.length);
-            leave = proj[3]! >= proj[0]! + 1 && proj[3]! >= thr && lateral <= 0.6 * dl;
+            // Egyetlen kiugró fix a 4-es átlagot is messzire húzná: legalább 3 fixnek tartósan a küszöb felén túl kell lennie.
+            const persistent = [...proj].sort((a, b) => a - b)[1]! >= 0.5 * thr;
+            leave = persistent && proj[3]! >= proj[0]! + 1 && proj[3]! >= thr && lateral <= 0.6 * dl;
           if (leave) relocate = c;
           }
         }
       }
 
       if (!leave) {
+        // Adaptív horgonykorrekció: a horgonytól tartósan máshol, egymással egyező, szűk klaszterben mérő fixek (jelölt).
+        // Rövid multipath-eltolódás vagy vándorló drift nem elég; mozgásra utaló jel esetén nem gyűjtünk jelöltet.
+        const walkEv = (dopplerOk && sp! >= GO_SPEED) || (fix.stepping === true && !dopStill);
+        if (fix.src !== "network" && (fix.acc ?? 999) <= CAND_MAX_ACC && !walkEv) {
+          const nearThr = Math.max(CAND_NEAR_M, fix.acc ?? 10), visitThr = Math.max(CAND_VISIT_M, 0.6 * (fix.acc ?? 10));
+          if (d >= nearThr && d < farThr) {
+            if (!cand.length) cand.push({ p: z, at });
+            else {
+              const cc = candCenter();
+              if (Math.hypot(z.x - cc.x, z.y - cc.y) <= CAND_AGREE_M) cand.push({ p: z, at });
+              else if (++candMiss > 2 + 0.25 * cand.length) { resetCand(); cand.push({ p: z, at }); }
+            }
+            if (cand.length > 300) cand.shift();
+          } else if (d < visitThr && cand.length && ++candNear >= CAND_NEAR_RESET) resetCand();
+          if (cand.length >= CAND_MIN_FIXES && at - cand[0]!.at >= CAND_MIN_MS) {
+            const cc = candCenter();
+            if (rmsAround(cand, cc) <= CAND_MAX_RMS) { anchor = cc; resetCand(); far = []; }   // kontrollált horgonykorrekció; a stillSince marad
+          }
+        }
+        // A `shown` finoman csúszik az anchor felé (nincs ugrás); korrekció nélkül shown === anchor.
+        const gap = Math.hypot(anchor.x - shown.x, anchor.y - shown.y);
+        if (gap > 0) {
+          const step = Math.min(gap, Math.max(SHOWN_EASE_MIN_M, 0.25 * gap));
+          shown = step >= gap ? { ...anchor } : { x: shown.x + ((anchor.x - shown.x) * step) / gap, y: shown.y + ((anchor.y - shown.y) * step) / gap };
+        }
         // A horgony szándékosan nem „finomodik”: a korrelált (multipath/légköri) hiba rövid átlagolással nem csökken,
         // a finomítás csak vándoroltatná a jelölőt, és elnyelné a lassú indulást. A zajszint viszont tanulódik.
         const dl = Math.min(d, 1.5 * rms + 3);
@@ -255,7 +358,13 @@ export function createDriftFilter() {
       }
       const v0 = sp !== null && fix.bearing != null && sp >= GO_SPEED
         ? { x: sp * Math.sin((fix.bearing * Math.PI) / 180), y: sp * Math.cos((fix.bearing * Math.PI) / 180) } : { x: 0, y: 0 };
-      toMoving(relocate ?? anchor, relocate ? sigma * sigma : Math.max(rms2, 9));
+      // Induláskor a Kalman a megbízhatóbb pozícióból indul: áthelyeződés > érett jelölt-klaszter > horgony.
+      let start: Vec = relocate ?? anchor, startVar = relocate ? sigma * sigma : Math.max(rms2, 9);
+      if (!relocate && cand.length >= CAND_START_FIXES && at - cand[cand.length - 1]!.at <= 15000) {
+        const cc = candCenter(), cr = rmsAround(cand, cc);
+        if (cr <= CAND_MAX_RMS) { start = cc; startVar = Math.max(cr * cr, 9); }
+      }
+      toMoving(start, startVar);
       kx!.v = v0.x; ky!.v = v0.y;
       void wasStillSince;
       // → tovább a MOZGÁS ágon ugyanezzel a fixszel
