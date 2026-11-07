@@ -87,6 +87,7 @@ const ACC_FLOOR = 6, ACC_TRUST = 1.3;
 const STILL_SPEED = 0.5;       // m/s: ennél lassabb Doppler = „áll” bizonyíték
 const GO_SPEED = 0.8;          // m/s: gyalogos indulás (lassú séta is)
 const FAST_SPEED = 2.5;        // m/s: ennyinél egyetlen fix is elég (jármű indul)
+const STEP_MOVE_MIN_M = 2, STEP_MOVE_ACC_K = 0.4;   // m: köztes Doppler mellett a lépésjelzéshez ennyi nyers elmozdulás kell az utóbbi ~5 fixben
 const GO_FIXES = 2;            // az utolsó 3 fixből ennyi gyors kell a feloldáshoz (egyedi sebességtüske nem indít)
 const ENTER_MS = 5000, ENTER_FIXES = 4;
 const NO_SPEED_ENTER_MS = 20000; // sebességadat nélkül hosszabb ablak kell az „áll” döntéshez
@@ -328,7 +329,12 @@ export function createDriftFilter() {
 
       // a) Doppler-indulás: az utolsó 3 fixből 2 gyalogos tempójú; egyetlen tüske nem indít.
       // A járás-jelzés a Doppler hiányában (vagy ha az nem mond ellent) felgyorsítja az indulást; Doppler-„áll” mellett nem számít.
-      fastHist.push(dopGo || (fix.stepping === true && !dopStill));
+      // Köztes Doppler-tartományban (0,5–0,8 m/s) a lépésjelzés csak akkor bizonyíték, ha a nyers pozíció is elmozdult az utóbbi ~5 fixben:
+      // állva a zajos lépésérzékelő nem oldja fel az állást, a lassú séta viszont pár másodperc alatt felismerhető marad.
+      const back = recent[Math.max(0, recent.length - 6)]!;
+      const movedRecently = recent.length >= 4 && Math.hypot(z.x - back.p.x, z.y - back.p.y) >= Math.max(STEP_MOVE_MIN_M, STEP_MOVE_ACC_K * (fix.acc ?? 6));
+      const stepEv = fix.stepping === true && !dopStill && (!dopplerOk || movedRecently);
+      fastHist.push(dopGo || stepEv);
       if (fastHist.length > 3) fastHist.shift();
       const bothSensors = dopGo && fix.stepping === true && (fix.acc ?? 999) <= GO_FIX_ACC;   // Doppler és járás-jelzés egyszerre: két független bizonyíték
       let leave = fastHist.filter(Boolean).length >= GO_FIXES || (dopplerOk && sp! >= FAST_SPEED) || bothSensors;
@@ -377,7 +383,7 @@ export function createDriftFilter() {
       if (!leave) {
         // Adaptív horgonykorrekció: a horgonytól tartósan máshol, egymással egyező, szűk klaszterben mérő fixek (jelölt).
         // Rövid multipath-eltolódás vagy vándorló drift nem elég; mozgásra utaló jel esetén nem gyűjtünk jelöltet.
-        const walkEv = dopGo || (fix.stepping === true && !dopStill);
+        const walkEv = dopGo || stepEv;
         if (fix.src !== "network" && (fix.acc ?? 999) <= CAND_MAX_ACC && !walkEv) {
           const nearThr = (fix.acc ?? 999) <= FAST_ACC_MAX ? Math.max(FAST_NEAR_M, FAST_NEAR_K * (fix.acc ?? 3)) : Math.max(CAND_NEAR_M, fix.acc ?? 10), visitThr = Math.max(CAND_VISIT_M, 0.6 * (fix.acc ?? 10));
           if (d >= nearThr && d < farThr) {
