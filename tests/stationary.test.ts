@@ -318,3 +318,86 @@ test("sorrend-hibás vagy ismétlődő időbélyegű fix nem rontja el az állap
   const c = f(fx(40, 40, 9));
   expect([b.lat, c.lat]).toEqual([a.lat, a.lat]);
 });
+
+// --- Közös viselkedés: gyűjtés, két független jelzés, hullámzó drift, ritkított mérés ---
+/** Álló telefon (0,0)-ban `step` s-os mérési közzel `from..to` mp-ig. */
+function settleSparse(f: ReturnType<typeof createDriftFilter>, step: number, from: number, to: number, extra: Partial<RawFix> = {}, seed = 1): FilteredFix {
+  const r = rng(seed); let out!: FilteredFix;
+  for (let t = from; t <= to; t += step) out = f(fx(gauss(r) * 1.2, gauss(r) * 1.2, t, { speed: 0.05, ...extra }));
+  return out;
+}
+test("gyűjtés közben a sebesség ismeretlen: sem „áll”, sem „mozgásban” felirat nem jelenik meg", () => {
+  const f = createDriftFilter(); let out!: FilteredFix;
+  for (let t = 1; t <= 8; t++) out = f(fx(0, 0, t, { speed: 0.05 }));
+  expect(out.speed).toBe(null);
+  expect(out.stoppedSince).toBe(null);
+});
+test("a Doppler és a járás-jelzés együtt (két független bizonyíték) egyetlen fixből is indít", () => {
+  const f = createDriftFilter();
+  settle(f, 1, 15);
+  expect(f(fx(1, 0, 16, { speed: 1.3, bearing: 0, stepping: true })).mode).toBe("moving");
+});
+test("a Doppler + járás-jelzés pontatlan (25 m) fixnél nem indít egyetlen fixből", () => {
+  const f = createDriftFilter();
+  settle(f, 1, 15);
+  expect(f(fx(1, 0, 16, { speed: 1.3, bearing: 0, stepping: true, acc: 25 })).mode).toBe("still");
+});
+test("lassú, hullámzó drift (±18 m, 220 s-os periódus) 10 percig sem csúsztatja el a jelölőt", () => {
+  const f = createDriftFilter(); const r = rng(13);
+  const anchor = settle(f, 1, 25);
+  for (let t = 26; t <= 625; t++) {
+    const drift = 18 * Math.sin((2 * Math.PI * t) / 220);
+    const out = f(fx(drift * 0.8 + gauss(r) * 1.5, drift * 0.6 + gauss(r) * 1.5, t, { speed: 0.05, acc: 8 }));
+    expect([out.lat, out.lng]).toEqual([anchor.lat, anchor.lng]);
+  }
+});
+test("ritkított (3 s) mérésnél a hullámzó drift sem csúsztatja el a jelölőt", () => {
+  const f = createDriftFilter(); const r = rng(14);
+  const anchor = settleSparse(f, 3, 1, 25);
+  for (let t = 28; t <= 628; t += 3) {
+    const drift = 13 * Math.sin((2 * Math.PI * t) / 140);
+    const out = f(fx(drift * 0.8 + gauss(r) * 1.5, drift * 0.6 + gauss(r) * 1.5, t, { speed: 0.05, acc: 8 }));
+    expect([out.lat, out.lng]).toEqual([anchor.lat, anchor.lng]);
+  }
+});
+test("megálláskor egyetlen kiugró fix az ablakban nem rontja el az új horgonyt", () => {
+  const f = createDriftFilter(); const r = rng(17);
+  let t = 1; for (; t <= 30; t++) f(fx(0, t * 1.3, t, { speed: 1.3, bearing: 90 }));
+  let out!: FilteredFix; let k = 0;
+  for (; t <= 70; t++) out = f(fx((k++ === 1 ? 30 : 0) + gauss(r) * 1.2, 30 * 1.3 + gauss(r) * 1.2, t, { speed: 0.05 }));
+  expect(out.mode).toBe("still");
+  expect(distM(out, 0, 30 * 1.3) < 2.5).toBe(true);
+});
+test("ritkított (3 s) mérésnél megállás után feláll az állás, és a megállás kezdete a megálláshoz datálódik", () => {
+  const f = createDriftFilter(); const r = rng(19);
+  let t = 1; for (; t <= 40; t += 3) f(fx(0, t * 1.3, t, { speed: 1.3, bearing: 90 }));
+  const stopT = t; let stillAt = -1; let since = -1;
+  for (; t <= stopT + 60; t += 3) {
+    const out = f(fx(gauss(r) * 1.2, 40 * 1.3 + gauss(r) * 1.2, t, { speed: 0.05 }));
+    if (stillAt < 0 && out.mode === "still") { stillAt = t - stopT; since = out.stoppedSince! / 1000 - stopT; }
+  }
+  expect(stillAt >= 0 && stillAt <= 20).toBe(true);
+  expect(Math.abs(since) <= 3).toBe(true);
+});
+test("ritkított (5 s) mérésnél a hibás első fix nem rögzül rossz horgonynak, és az állás feláll", () => {
+  const f = createDriftFilter();
+  f(fx(40, 0, 1, { speed: 0.05 }));
+  const out = settleSparse(f, 5, 6, 60);
+  expect(out.mode).toBe("still");
+  expect(distM(out, 0, 0) < 2.5).toBe(true);
+});
+test("ritkított (3 s) mérésnél a tartós, szűk eltolódás is kontrolláltan korrigál", () => {
+  const f = createDriftFilter(); const r = rng(23);
+  settleSparse(f, 3, 1, 30);
+  let out!: FilteredFix;
+  for (let t = 33; t <= 300; t += 3) out = f(fx(12 + gauss(r) * 1, gauss(r) * 1, t, { speed: 0.05, acc: 8 }));
+  expect(distM(out, 12, 0) < 2).toBe(true);
+  expect(out.mode).toBe("still");
+});
+test("ritkított (3 s) mérésnél a sebességadat nélküli séta is felismerhető", () => {
+  const f = createDriftFilter();
+  settleSparse(f, 3, 1, 40, { speed: null });
+  let mode = "still"; let tMove = -1; const t0 = 43;
+  for (let t = t0; t <= t0 + 60; t += 3) { mode = f(fx((t - t0 + 3) * 1.3, 0, t, { speed: null })).mode; if (mode === "moving") { tMove = t - t0 + 3; break; } }
+  expect(tMove > 0 && tMove <= 20).toBe(true);
+});
