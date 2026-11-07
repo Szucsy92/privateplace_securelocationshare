@@ -459,3 +459,19 @@ test("rövid (10 s) pontos kiugrás nem korrigál", () => {
   for (let t = 37; t <= 50; t++) out = f(fx(0, 0, t, { acc: 4, speed: 0 }));
   expect(distM(out, 0, 0) < 3).toBe(true);
 });
+
+// --- Valós napló 19:03: ±3 m pontosság, 7 m-es állandó eltérés ---
+test("±3 m pontosságú fixek 7 m-re a horgonytól: 30 s alatt korrigál", () => {
+  const f = createDriftFilter();
+  settle(f, 1, 25);
+  const r = rng(11); let out!: FilteredFix;
+  for (let t = 26; t <= 60; t++) out = f(fx(-5 + gauss(r) * 0.3, 5 + gauss(r) * 0.3, t, { acc: 3, speed: 0 }));
+  expect(distM(out, -5, 5) < 3).toBe(true);
+});
+test("±3 m pontosságú, 4 m-es eltérés nem korrigál (zajszint)", () => {
+  const f = createDriftFilter();
+  settle(f, 1, 25);
+  let out!: FilteredFix;
+  for (let t = 26; t <= 80; t++) out = f(fx(-3, 3, t, { acc: 3, speed: 0 }));
+  expect(distM(out, 0, 0) < 3).toBe(true);
+});
