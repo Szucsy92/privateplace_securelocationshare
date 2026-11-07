@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { PersonBubble } from "./PersonBubble";
 import type { Map as MlMap, Marker as MlMarker, GeoJSONSource } from "maplibre-gl";
@@ -46,6 +46,8 @@ type Props = {
   mirrorRef?: RefObject<HTMLCanvasElement | null>;
   /** Hibakereső réteg: nyers GPS-pont, pontossági kör, horgony és az eltérés felirata. null = kikapcsolva. */
   debug?: DebugOverlay | null;
+  /** Kívülről hívható: a térkép (az éles ablak) közepének földrajzi helye; a „Saját helyek” kijelöléséhez. */
+  centerRef?: MutableRefObject<(() => { lat: number; lng: number } | null) | null>;
 };
 
 export type MapPadding = { top: number; right: number; bottom: number; left: number };
@@ -136,7 +138,7 @@ function applyMapContrast(map: MlMap, theme: "dark" | "light") {
   }
 }
 
-export default function LiveMap({ people, follow, showTrails, trailIds, orientation, theme, onUserPan, compassRef, addressAllowed, onAllowAddress, padding, mirrorRef, debug }: Props) {
+export default function LiveMap({ people, follow, showTrails, trailIds, orientation, theme, onUserPan, compassRef, addressAllowed, onAllowAddress, padding, mirrorRef, debug, centerRef }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MlMap | null>(null);
   const markerCtorRef = useRef<typeof MlMarker | null>(null);
@@ -248,6 +250,7 @@ export default function LiveMap({ people, follow, showTrails, trailIds, orientat
           touchPitch: false,
         });
         if (propsRef.current.padding) map.setPadding(propsRef.current.padding);
+        if (centerRef) { const mm = map; centerRef.current = () => { const c = mm.getCenter(); return { lat: c.lat, lng: c.lng }; }; }
         map.touchZoomRotate.disableRotation();
         map.keyboard.disableRotation();
         // A WebGL-vászon alatt a backdrop-filter nem mos megbízhatóan (WebKit/WebView), ezért minden kép után

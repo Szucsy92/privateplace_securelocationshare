@@ -38,6 +38,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ElasticScroll } from "@/components/ElasticScroll";
+import PlacesPanel from "@/components/PlacesPanel";
+import { applyPlaces, loadPlaces, newSpot, savePlaces, type FixLite, type Place } from "@/lib/places";
 import { QrScanner, canScanQr } from "@/components/QrScanner";
 import type { MapPerson, Orientation, TrackPoint } from "@/components/LiveMap";
 import { usePeerNetwork, type RemotePerson } from "@/hooks/usePeerNetwork";
@@ -206,8 +208,30 @@ export default function MapApp() {
   const [stopped, setStopped] = useState(false);
   const addressAllowed = prefs.addressConsent === "yes";
   const [addressAskHidden, setAddressAskHidden] = useState(false);
-  const [settingsView, setSettingsView] = useState<"main" | "trails">("main");
-  useEffect(() => { if (dialog !== "settings") setSettingsView("main"); }, [dialog]);
+  const [settingsView, setSettingsView] = useState<"main" | "trails" | "places">("main");
+  // Saját helyek: a korrekció a szűrt pozíción fut; a tanuláshoz a korrekció előtti fixeket őrizzük.
+  const [places, setPlaces] = useState<Place[]>([]);
+  const placesRef = useRef<Place[]>([]);
+  const recentFixesRef = useRef<FixLite[]>([]);
+  const centerRef = useRef<(() => { lat: number; lng: number } | null) | null>(null);
+  const [pickTarget, setPickTarget] = useState<{ placeId: string; spotId: string | null } | null>(null);
+  const [placesOpenId, setPlacesOpenId] = useState<string | null>(null);
+  useEffect(() => { const loaded = loadPlaces(); placesRef.current = loaded; setPlaces(loaded); }, []);
+  const changePlaces = useCallback((next: Place[]) => { placesRef.current = next; setPlaces(next); savePlaces(next); }, []);
+  const confirmPick = () => {
+    const t = pickTarget;
+    const c = centerRef.current?.();
+    if (!t || !c) { toast.warning("A térkép még nem áll készen."); return; }
+    changePlaces(placesRef.current.map((pl) => pl.id !== t.placeId ? pl : {
+      ...pl,
+      spots: t.spotId
+        ? pl.spots.map((sp) => (sp.id === t.spotId ? { ...sp, lat: c.lat, lng: c.lng, bias: null, learnedAt: null, samples: 0 } : sp))
+        : [...pl.spots, newSpot(c, `Pont ${pl.spots.length + 1}`)],
+    }));
+    finishPick(t.placeId);
+  };
+  const finishPick = (placeId: string) => { setPickTarget(null); setPlacesOpenId(placeId); setSettingsView("places"); setDialog("settings"); };
+  useEffect(() => { if (dialog !== "settings" && !pickTarget) setSettingsView("main"); }, [dialog, pickTarget]);
   const [nativeStopReady, setNativeStopReady] = useState(false);
   const invitationRepoRef = useRef<string | null>(null);
   const [availableUpdate, setAvailableUpdate] = useState<AppRelease | null>(null);
@@ -463,10 +487,13 @@ export default function MapApp() {
         const steppedFix = { ...rawFix, stepping: walkingRef.current };
         const fix = driftFilter(steppedFix);
         debugRef.current.push(steppedFix, fix);
+        // A tanuláshoz a korrekció előtti, szűrt pozíciót őrizzük (utolsó ~25 fix).
+        recentFixesRef.current = [...recentFixesRef.current.slice(-24), { lat: fix.lat, lng: fix.lng, acc: fix.acc }];
+        const placed = applyPlaces(placesRef.current, fix);
         if (prefsRef.current.debug) setDebugView(overlayFrom(debugRef.current.entries()));
         const now = Date.now();
         const at = fix.at ?? now;
-        const point = { lat: fix.lat, lng: fix.lng, t: at };
+        const point = { lat: placed.point.lat, lng: placed.point.lng, t: at };
         selfTrackRef.current = appendTrackPoint(selfTrackRef.current, point, now);
         setSelfTrack(selfTrackRef.current);
         setSelfMeta({ speed: fix.speed, acc: fix.acc, at });
@@ -769,9 +796,26 @@ export default function MapApp() {
             padding={mapPadding}
             mirrorRef={mirrorRef}
             debug={prefs.debug ? debugView : null}
+            centerRef={centerRef}
           />
         </Suspense>
       </div>
+      {pickTarget && win && (
+        <>
+          <div className="pointer-events-none absolute z-20" style={{ left: win.x + win.w / 2, top: win.y + win.h / 2, transform: "translate(-50%, -50%)" }} aria-hidden="true">
+            <div className="relative h-10 w-10">
+              <span className="absolute left-1/2 top-0 h-full w-0.5 -translate-x-1/2 bg-red-500" />
+              <span className="absolute left-0 top-1/2 h-0.5 w-full -translate-y-1/2 bg-red-500" />
+              <span className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-red-500" />
+            </div>
+          </div>
+          <div className="glass absolute inset-x-3 z-20 flex items-center gap-2 rounded-2xl p-3" style={{ top: win.y + 8 }}>
+            <p className="min-w-0 flex-1 text-xs">Told a térképet úgy, hogy a célkereszt a valódi helyed legyen, majd koppints az „Ide” gombra.</p>
+            <Button size="sm" variant="outline" className="glass-button shrink-0 rounded-full" onClick={() => finishPick(pickTarget.placeId)}>Mégse</Button>
+            <Button size="sm" className="shrink-0 rounded-full" onClick={confirmPick}>Ide</Button>
+          </div>
+        </>
+      )}
       <div className="map-veil" style={win ? veilStyle(win) : { visibility: "hidden" }} aria-hidden="true">
         <canvas ref={mirrorRef} className="map-mirror" />
       </div>
@@ -1078,6 +1122,11 @@ export default function MapApp() {
                     <ChevronRight className="h-4 w-4" />
                   </Button>
 
+                  <Button size="sm" variant="outline" className="glass-button w-full justify-between rounded-full" onClick={() => { setPlacesOpenId(null); setSettingsView("places"); }}>
+                    <span className="flex items-center gap-1.5"><MapPin className="h-4 w-4" />Saját helyek{places.length ? ` (${places.length})` : ""}</span>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+
                   <div className="glass-inset space-y-2 rounded-2xl p-3">
                     <label className="flex items-center gap-3 text-sm font-semibold">
                       <Checkbox checked={prefs.debug} onCheckedChange={(v) => updatePrefs({ debug: v === true })} />
@@ -1141,6 +1190,17 @@ export default function MapApp() {
                 </div>
               </ElasticScroll>
             </>
+          )}
+
+          {dialog === "settings" && profile && settingsView === "places" && (
+            <PlacesPanel
+              places={places}
+              onChange={changePlaces}
+              getRecent={() => recentFixesRef.current}
+              onPick={(t) => { setPickTarget(t); setDialog(null); }}
+              openId={placesOpenId}
+              onBack={() => setSettingsView("main")}
+            />
           )}
 
           {dialog === "settings" && profile && settingsView === "trails" && (
