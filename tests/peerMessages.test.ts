@@ -36,3 +36,15 @@ describe("megosztáskérés", () => {
     expect(parseShareRequest({ ask: true })).toBe(false);
   });
 });
+
+describe("időbélyeg- és bemutatkozás-védelem", () => {
+  test("a távoli jövőbeli vagy negatív időbélyeg elutasítva", () => {
+    expect(parseLocation({ lat: 47, lng: 19, t: Date.now() + 3_600_000 })).toBeUndefined();
+    expect(parseLocation({ lat: 47, lng: 19, t: -1 })).toBeUndefined();
+    expect(parseLocation({ lat: 47, lng: 19, t: Date.now() + 30_000 })).toBeDefined();
+  });
+  test("a want jelző csak pontosan true értékkel marad meg", () => {
+    expect(parseHello({ deviceId: "abcdef123456", name: "A", avatar: null, want: true })?.want).toBe(true);
+    expect(parseHello({ deviceId: "abcdef123456", name: "A", avatar: null, want: "igen" })?.want).toBeUndefined();
+  });
+});
