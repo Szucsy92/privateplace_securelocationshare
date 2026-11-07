@@ -31,6 +31,7 @@ import {
   Palette,
   Trash2,
   Users,
+  Bug,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -83,7 +84,8 @@ import { watchCompass, watchBattery, watchWalking, requestCompassPermission } fr
 import { watchNativeStop, setNativeLocationInterval, reapplyNativeLocationInterval, downloadAndInstallUpdate, installedVersionCode } from "@/lib/nativeRuntime";
 import { CALM_AFTER_MS, desiredGpsIntervalMs, movementWake } from "@/lib/powerMode";
 import { updateTransport, type TransportMode, type TransportState } from "@/lib/transport";
-import { createDriftFilter, type StopState } from "@/lib/stationary";
+import { createDriftFilter, stopLabel, type StopState } from "@/lib/stationary";
+import { buildReport, buildReportHtml, createDebugRecorder, deliverReport, overlayFrom, type DebugOverlay, type ScreenContext } from "@/lib/debugLog";
 import { latestRelease, releaseRepository, needsUpdate, appLink, isAndroidBrowser, type AppRelease } from "@/lib/invitations";
 import { headingFromTrack } from "@/lib/mapMath";
 import { isNativeApp, prepareSharing, startLocationWatch } from "@/lib/locationSource";
@@ -189,6 +191,9 @@ export default function MapApp() {
   const stopRef = useRef<StopState | null>(null);
   // A szűrő állapota (horgony, álló-óra) túléli a figyelő újraindításait (visszatérés a háttérből, engedélyváltás).
   const driftFilterRef = useRef<ReturnType<typeof createDriftFilter> | null>(null);
+  // Hibakereső napló: a nyers és a szűrt pozíció (csak a memóriában, küldésig nem hagyja el a telefont).
+  const debugRef = useRef(createDebugRecorder());
+  const [debugView, setDebugView] = useState<DebugOverlay | null>(null);
   const walkingRef = useRef(false);
   const sinceRef = useRef<number | null>(null);
   const manualRef = useRef<TransportMode | null>(null);
@@ -255,6 +260,7 @@ export default function MapApp() {
     return () => document.removeEventListener("visibilitychange", look);
   }, [mounted, nativeApp, checkForUpdate]);
   const selfMetaRef = useRef(selfMeta);
+  useEffect(() => { setDebugView(prefs.debug ? overlayFrom(debugRef.current.entries()) : null); }, [prefs.debug]);
   selfMetaRef.current = selfMeta;
   const publishSelf = () => {
     const last = selfTrackRef.current.at(-1);
@@ -266,6 +272,30 @@ export default function MapApp() {
     if (!shouldPublishLocation(true, sendNow, lastSentRef.current, interval)) return;
     lastSentRef.current = sendNow;
     net.sendLocation({ lat: last.lat, lng: last.lng, t: last.t, speed: selfMetaRef.current?.speed ?? null, acc: selfMetaRef.current?.acc ?? null, heading: headingRef.current.angle, battery: batteryRef.current, since: sinceRef.current, stoppedSince: stopRef.current?.since ?? null, transport: transportRef.current.mode });
+  };
+  const debugContext = (): ScreenContext => ({
+    stopText: stopLabel(stopRef.current?.since ?? null, Date.now(), false),
+    speedText: selfMetaRef.current ? kmh(selfMetaRef.current.speed) : "",
+    gpsStatus: String(gpsStatus),
+    sharing: prefsRef.current.sharing,
+    following: follow?.id === SELF,
+    orientation: prefsRef.current.orientation,
+    trails: prefsRef.current.showTrails,
+    debugLayer: prefsRef.current.debug,
+    theme: prefsRef.current.mapTheme,
+    visible: document.visibilityState === "visible",
+    version: (import.meta.env["VITE_APP_VERSION"] as string | undefined) || "webes változat",
+    userAgent: navigator.userAgent,
+  });
+  const sendDebugLog = async (textOnly: boolean) => {
+    const es = debugRef.current.entries();
+    if (!es.length) { toast.info("Még nincs rögzített GPS-adat."); return; }
+    const now = Date.now(), ctx = debugContext();
+    const stamp = new Date(now).toISOString().slice(0, 16).replace(/[-:T]/g, "");
+    const result = await deliverReport(buildReport(es, ctx, now), buildReportHtml(es, ctx, now), stamp, { textOnly });
+    if (result === "copied") toast.success("A napló a vágólapra került – illeszd be az üzenetbe.");
+    else if (result === "downloaded") toast.success("A napló fájlként letöltődött.");
+    else if (result === "failed") toast.error("A naplót nem sikerült elküldeni.");
   };
   const publishRef = useRef(publishSelf);
   publishRef.current = publishSelf;
@@ -430,7 +460,10 @@ export default function MapApp() {
       background: backgroundSharing,
       onWatcherStarted: () => { reapplyNativeLocationInterval(); powerRef.current(); },
       onFix: (rawFix) => {
-        const fix = driftFilter({ ...rawFix, stepping: walkingRef.current });
+        const steppedFix = { ...rawFix, stepping: walkingRef.current };
+        const fix = driftFilter(steppedFix);
+        debugRef.current.push(steppedFix, fix);
+        if (prefsRef.current.debug) setDebugView(overlayFrom(debugRef.current.entries()));
         const now = Date.now();
         const at = fix.at ?? now;
         const point = { lat: fix.lat, lng: fix.lng, t: at };
@@ -735,6 +768,7 @@ export default function MapApp() {
             onAllowAddress={() => updatePrefs({ addressConsent: "yes" })}
             padding={mapPadding}
             mirrorRef={mirrorRef}
+            debug={prefs.debug ? debugView : null}
           />
         </Suspense>
       </div>
@@ -779,6 +813,15 @@ export default function MapApp() {
             <span className="address-ask-text">Cím megjelenítése?</span>
             <Button size="sm" variant="ghost" className="h-8 rounded-full px-3 text-xs" onClick={() => updatePrefs({ addressConsent: "no" })}>Nem</Button>
             <Button size="sm" variant="ghost" className="indicator h-8 rounded-full px-3 text-xs" data-state="on" onClick={() => updatePrefs({ addressConsent: "yes" })}>Igen</Button>
+          </div>
+        )}
+        {prefs.debug && (
+          <div className="map-overlay glass absolute left-3 top-3 flex max-w-[62%] items-center gap-2 rounded-2xl px-3 py-1.5 text-[11px] leading-tight" role="status" aria-label="Hibakereső állapot">
+            <Bug className="h-4 w-4 shrink-0" />
+            <span className="min-w-0">
+              {debugView ? <>nyers GPS: <b>{debugView.offsetLabel}</b>{debugView.acc != null && <> · ±{Math.round(debugView.acc)} m</>}<br />{debugRef.current.last()?.out.mode === "still" ? "áll" : "mozog"}{debugRef.current.last()?.distrust ? " · Doppler cáfolva" : ""}</> : "várakozás GPS-re…"}
+            </span>
+            <Button size="sm" variant="ghost" className="h-7 shrink-0 rounded-full px-2 text-[11px]" onClick={() => void sendDebugLog(false)}>Napló</Button>
           </div>
         )}
         <button
@@ -1034,6 +1077,19 @@ export default function MapApp() {
                     Útvonalak rajzolása a térképen
                     <ChevronRight className="h-4 w-4" />
                   </Button>
+
+                  <div className="glass-inset space-y-2 rounded-2xl p-3">
+                    <label className="flex items-center gap-3 text-sm font-semibold">
+                      <Checkbox checked={prefs.debug} onCheckedChange={(v) => updatePrefs({ debug: v === true })} />
+                      Hibakereső réteg a térképen
+                    </label>
+                    <p className="text-xs text-muted-foreground">Piros pont: a telefon nyers GPS-pozíciója; piros kör: a jelentett pontosság; zöld gyűrű: a szűrő horgonya; a felirat az eltérést mutatja méterben és égtájjal.</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button size="sm" variant="outline" className="glass-button rounded-full" onClick={() => void sendDebugLog(false)}>Napló küldése</Button>
+                      <Button size="sm" variant="outline" className="glass-button rounded-full" onClick={() => void sendDebugLog(true)}>Szöveg másolása</Button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">A napló nem tartalmaz koordinátát, csak méterben megadott eltéréseket. Küldés előtt készíts képernyőképet is a térképről.</p>
+                  </div>
 
                   <div className="grid grid-cols-2 gap-2">
                     <Button size="sm" variant="outline" className="glass-button rounded-full" onClick={() => setDialog("permissions")}>

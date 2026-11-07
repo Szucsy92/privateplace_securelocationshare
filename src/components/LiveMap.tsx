@@ -4,6 +4,7 @@ import { PersonBubble } from "./PersonBubble";
 import type { Map as MlMap, Marker as MlMarker, GeoJSONSource } from "maplibre-gl";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import { animationDurationMs, headingFromTrack, lerpPoint, smoothAngle } from "@/lib/mapMath";
+import { circlePolygon, type DebugOverlay } from "@/lib/debugLog";
 
 export type TrackPoint = { lat: number; lng: number; t: number };
 
@@ -43,6 +44,8 @@ type Props = {
   padding?: MapPadding | undefined;
   /** Kis tükör-canvas: minden renderelt képkockát ide másolunk, a MapApp ezt mossa el a térképablakon kívül. */
   mirrorRef?: RefObject<HTMLCanvasElement | null>;
+  /** Hibakereső réteg: nyers GPS-pont, pontossági kör, horgony és az eltérés felirata. null = kikapcsolva. */
+  debug?: DebugOverlay | null;
 };
 
 export type MapPadding = { top: number; right: number; bottom: number; left: number };
@@ -133,13 +136,14 @@ function applyMapContrast(map: MlMap, theme: "dark" | "light") {
   }
 }
 
-export default function LiveMap({ people, follow, showTrails, trailIds, orientation, theme, onUserPan, compassRef, addressAllowed, onAllowAddress, padding, mirrorRef }: Props) {
+export default function LiveMap({ people, follow, showTrails, trailIds, orientation, theme, onUserPan, compassRef, addressAllowed, onAllowAddress, padding, mirrorRef, debug }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MlMap | null>(null);
   const markerCtorRef = useRef<typeof MlMarker | null>(null);
   const markersRef = useRef(new Map<string, MarkerState>());
   const headingsRef = useRef(new Map<string, number>());
   const flyingRef = useRef(false);
+  const debugLabelRef = useRef<MlMarker | null>(null);
   const didCenterRef = useRef(false);
   const propsRef = useRef({ follow, orientation, onUserPan, padding, mirrorRef });
   propsRef.current = { follow, orientation, onUserPan, padding, mirrorRef };
@@ -337,6 +341,8 @@ export default function LiveMap({ people, follow, showTrails, trailIds, orientat
       bubbleRef.current?.root.unmount();
       bubbleRef.current?.marker.remove();
       bubbleRef.current = null;
+      debugLabelRef.current?.remove();
+      debugLabelRef.current = null;
       map?.remove();
       mapRef.current = null;
     };
@@ -429,6 +435,44 @@ export default function LiveMap({ people, follow, showTrails, trailIds, orientat
       }
     }
   }, [people, ready, showTrails, trailIds]);
+
+  // Hibakereső réteg: nyers GPS-pont (piros), pontossági kör, előző nyers pontok (szürke), horgony (zöld gyűrű), eltérés-felirat.
+  useEffect(() => {
+    const map = mapRef.current;
+    const Marker = markerCtorRef.current;
+    if (!map || !Marker || !ready) return;
+    const clearLabel = () => { debugLabelRef.current?.remove(); debugLabelRef.current = null; };
+    const src = map.getSource("dbg") as GeoJSONSource | undefined;
+    if (!debug) { src?.setData({ type: "FeatureCollection", features: [] }); clearLabel(); return; }
+    if (!src) {
+      map.addSource("dbg", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      const is = (kind: string): ["==", ["get", string], string] => ["==", ["get", "kind"], kind];
+      map.addLayer({ id: "dbg-acc-fill", type: "fill", source: "dbg", filter: is("acc"), paint: { "fill-color": "#f87171", "fill-opacity": 0.12 } });
+      map.addLayer({ id: "dbg-acc-line", type: "line", source: "dbg", filter: is("acc"), paint: { "line-color": "#f87171", "line-opacity": 0.75, "line-width": 1.5 } });
+      map.addLayer({ id: "dbg-line", type: "line", source: "dbg", filter: is("line"), paint: { "line-color": "#f87171", "line-width": 2, "line-dasharray": [2, 2] } });
+      map.addLayer({ id: "dbg-trail", type: "circle", source: "dbg", filter: is("trail"), paint: { "circle-radius": 2.5, "circle-color": "#c9cfe8", "circle-opacity": 0.65 } });
+      map.addLayer({ id: "dbg-anchor", type: "circle", source: "dbg", filter: is("anchor"), paint: { "circle-radius": 10, "circle-color": "#34d399", "circle-opacity": 0.12, "circle-stroke-color": "#34d399", "circle-stroke-width": 2 } });
+      map.addLayer({ id: "dbg-raw", type: "circle", source: "dbg", filter: is("raw"), paint: { "circle-radius": 5.5, "circle-color": "#f87171", "circle-stroke-color": "#ffffff", "circle-stroke-width": 1.5 } });
+    }
+    type Feat = { type: "Feature"; properties: { kind: string }; geometry: { type: "Point"; coordinates: number[] } | { type: "LineString"; coordinates: number[][] } | { type: "Polygon"; coordinates: number[][][] } };
+    const feats: Feat[] = [];
+    const pt = (kind: string, p: { lat: number; lng: number }): Feat => ({ type: "Feature", properties: { kind }, geometry: { type: "Point", coordinates: [p.lng, p.lat] } });
+    if (debug.acc != null && debug.acc > 0) feats.push({ type: "Feature", properties: { kind: "acc" }, geometry: { type: "Polygon", coordinates: [circlePolygon(debug.raw, debug.acc)] } });
+    feats.push({ type: "Feature", properties: { kind: "line" }, geometry: { type: "LineString", coordinates: [[debug.shown.lng, debug.shown.lat], [debug.raw.lng, debug.raw.lat]] } });
+    for (const t of debug.trail) feats.push(pt("trail", t));
+    if (debug.anchor) feats.push(pt("anchor", debug.anchor));
+    feats.push(pt("raw", debug.raw));
+    (map.getSource("dbg") as GeoJSONSource).setData({ type: "FeatureCollection", features: feats });
+    // Felirat a két pont felezőjén (DOM-elem: nem függ a stílus betűkészleteitől).
+    const mid = { lng: (debug.raw.lng + debug.shown.lng) / 2, lat: (debug.raw.lat + debug.shown.lat) / 2 };
+    if (!debugLabelRef.current) {
+      const el = document.createElement("div");
+      el.style.cssText = "pointer-events:none;padding:2px 7px;border-radius:9px;background:rgba(18,22,31,.88);color:#fecaca;font:600 11px/1.3 sans-serif;white-space:nowrap;border:1px solid rgba(248,113,113,.6)";
+      debugLabelRef.current = new Marker({ element: el, anchor: "bottom", offset: [0, -8] }).setLngLat([mid.lng, mid.lat]).addTo(map);
+    }
+    debugLabelRef.current.setLngLat([mid.lng, mid.lat]);
+    debugLabelRef.current.getElement().textContent = `nyers GPS: ${debug.offsetLabel}${debug.acc != null ? ` · ±${Math.round(debug.acc)} m` : ""}`;
+  }, [debug, ready]);
 
   useEffect(() => {
     const map = mapRef.current;
