@@ -39,7 +39,7 @@ public class PrivateRuntime extends Plugin {
             JSObject data = new JSObject();
             data.put("exit", intent.getBooleanExtra("exit", false));
             notifyListeners("sharingStopped", data, true);
-            if (intent.getBooleanExtra("exit", false)) getActivity().finishAndRemoveTask();
+            if (intent.getBooleanExtra("exit", false) && getActivity() != null) getActivity().finishAndRemoveTask();
         }
     };
     @Override public void load() {
