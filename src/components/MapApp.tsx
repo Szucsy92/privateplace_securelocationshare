@@ -28,6 +28,7 @@ import {
   Settings2,
   Share2,
   ShieldCheck,
+  Palette,
   Trash2,
   Users,
 } from "lucide-react";
@@ -44,6 +45,8 @@ import { appendTrackPoint, clearTrackHistory, publishIntervalMs, shouldPublishLo
 import { useVisibleClock } from "@/hooks/useVisibleClock";
 import { SELF_COLOR, colorForDevice } from "@/lib/peerMessages";
 import type { RosterEntry } from "@/lib/roomRoster";
+import { loadPersonColors, savePersonColors, setPersonColor, SELF_COLOR_KEY, type PersonColors } from "@/lib/personColors";
+import { PersonColorPicker } from "@/components/PersonColorPicker";
 import {
   addRoom,
   customizeRoom,
@@ -143,6 +146,16 @@ export default function MapApp() {
   const [rooms, setRooms] = useState<SavedRoom[]>([]);
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [shareToken, setShareToken] = useState<string | null>(null);
+  /** Helyi jelölőszín-átállítások (a saját és mások színe); csak ezen a telefonon érvényesek. */
+  const [personColors, setPersonColors] = useState<PersonColors>({});
+  const selfColor = personColors[SELF_COLOR_KEY] ?? SELF_COLOR;
+  const changePersonColor = useCallback((id: string, color: string | null) => {
+    setPersonColors((prev) => {
+      const next = setPersonColor(prev, id, color);
+      if (next !== prev) savePersonColors(next);
+      return next;
+    });
+  }, []);
   const [pendingJoin, setPendingJoin] = useState<{ token: string; name: string | null; color?: RoomColor; ownerKey?: string } | null>(null);
   const [follow, setFollow] = useState<{ id: string; request: number } | null>(null);
   const [selfTrack, setSelfTrack] = useState<TrackPoint[]>([]);
@@ -326,6 +339,7 @@ export default function MapApp() {
     const p = loadProfile();
     setProfile(p);
     setPrefs(loadPrefs());
+    setPersonColors(loadPersonColors());
     setRooms(loadRooms());
     invitationRepoRef.current = releaseRepository(window.location.hash);
     const parsed = window.location.hash ? parseRoomInput(window.location.hash) : null;
@@ -531,20 +545,22 @@ export default function MapApp() {
 
   const remote = useMemo(
     () =>
-      Object.values(net.people).sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name, "hu")),
-    [net.people],
+      Object.values(net.people)
+        .map((p) => (personColors[p.deviceId] ? { ...p, color: personColors[p.deviceId] ?? p.color } : p))
+        .sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name, "hu")),
+    [net.people, personColors],
   );
 
   const mapPeople: MapPerson[] = useMemo(() => {
     const list: MapPerson[] = [];
     if (profile && selfTrack.length)
-      list.push({ id: SELF, name: profile.name, avatarUrl: profile.avatar, color: SELF_COLOR, points: selfTrack, isSelf: true, heading: selfHeading, battery, stoppedSince: stopRef.current?.since ?? null, speed: selfMeta?.speed ?? null });
+      list.push({ id: SELF, name: profile.name, avatarUrl: profile.avatar, color: selfColor, points: selfTrack, isSelf: true, heading: selfHeading, battery, stoppedSince: stopRef.current?.since ?? null, speed: selfMeta?.speed ?? null });
     for (const p of remote) {
       if (p.sharing && p.points.length)
         list.push({ id: p.deviceId, name: p.name, avatarUrl: p.avatar, color: p.color, points: p.points, heading: p.heading, battery: p.battery, stoppedSince: p.stoppedSince, speed: p.speed });
     }
     return list;
-  }, [profile, selfTrack, remote, selfHeading, battery, selfMeta]);
+  }, [profile, selfTrack, remote, selfHeading, battery, selfMeta, selfColor]);
 
   const trailPeople = useMemo(() => [{ id: SELF, name: "Én" }, ...remote.map((p) => ({ id: p.deviceId, name: p.name }))], [remote]);
   const trailChecked = (id: string) => prefs.showTrails || prefs.trailIds.includes(id);
@@ -799,7 +815,7 @@ export default function MapApp() {
                 name="Én"
                 avatar={profile.avatar}
                 fallback={profile.name}
-                color={SELF_COLOR}
+                color={selfColor}
                 active={follow?.id === SELF}
                 dot={selfFresh ? "on" : gpsStatus === "denied" || gpsStatus === "error" ? "warn" : "wait"}
                 status={selfMeta ? kmh(selfMeta.speed) : ""}
@@ -967,7 +983,9 @@ export default function MapApp() {
                       key={room.token}
                       room={room}
                       peers={net.roomPeers[room.token] ?? 0}
-                      members={roomMemberList(net.roster[room.token] ?? [], net.roomMembers[room.token] ?? [], net.people, net.avatars)}
+                      members={roomMemberList(net.roster[room.token] ?? [], net.roomMembers[room.token] ?? [], net.people, net.avatars, personColors)}
+                      self={profile ? { name: profile.name, avatar: profile.avatar, color: selfColor, custom: personColors[SELF_COLOR_KEY] !== undefined } : null}
+                      onColor={changePersonColor}
                       onKick={p => void kickPerson(room, p)}
                       onForget={p => net.forgetMember(room.token, p.deviceId)}
                       onShare={() => {
@@ -1001,6 +1019,7 @@ export default function MapApp() {
                   <div className="glass-inset rounded-2xl p-3">
                     <ProfileForm
                       compact
+                      color={selfColor}
                       initial={profile}
                       submitLabel="Profil mentése"
                       onSave={(p) => {
@@ -1374,20 +1393,20 @@ function PersonCapsule(props: {
   );
 }
 
-type RoomMember = { deviceId: string; name: string; avatar: string | null; color: string; online: boolean; lastSeen: number };
+type RoomMember = { deviceId: string; name: string; avatar: string | null; color: string; custom: boolean; online: boolean; lastSeen: number };
 
 /** A névsor és az éppen kapcsolódók egyesítése: elöl az online tagok, utánuk a legutóbb látottak. */
-function roomMemberList(entries: RosterEntry[], onlineIds: string[], people: Record<string, RemotePerson>, avatars: Record<string, string>): RoomMember[] {
+function roomMemberList(entries: RosterEntry[], onlineIds: string[], people: Record<string, RemotePerson>, avatars: Record<string, string>, colors: PersonColors): RoomMember[] {
   const online = new Set(onlineIds);
   const known = new Set<string>();
   const list: RoomMember[] = entries.map((e) => {
     known.add(e.deviceId);
     const p = people[e.deviceId];
-    return { deviceId: e.deviceId, name: p?.name ?? e.name, avatar: p?.avatar ?? avatars[e.deviceId] ?? null, color: p?.color ?? colorForDevice(e.deviceId), online: online.has(e.deviceId), lastSeen: e.lastSeen };
+    return { deviceId: e.deviceId, name: p?.name ?? e.name, avatar: p?.avatar ?? avatars[e.deviceId] ?? null, color: colors[e.deviceId] ?? p?.color ?? colorForDevice(e.deviceId), custom: colors[e.deviceId] !== undefined, online: online.has(e.deviceId), lastSeen: e.lastSeen };
   });
   for (const id of onlineIds) {
     const p = people[id];
-    if (p && !known.has(id)) list.push({ deviceId: id, name: p.name, avatar: p.avatar, color: p.color, online: true, lastSeen: 0 });
+    if (p && !known.has(id)) list.push({ deviceId: id, name: p.name, avatar: p.avatar, color: colors[id] ?? p.color, custom: colors[id] !== undefined, online: true, lastSeen: 0 });
   }
   return list.sort((a, b) => Number(b.online) - Number(a.online) || b.lastSeen - a.lastSeen);
 }
@@ -1401,12 +1420,14 @@ function lastSeenText(at: number, now: number): string {
   return `${Math.floor(hours / 24)} napja`;
 }
 
-function RoomRow({ room, peers, members, onKick, onForget, onShare, onDelete, onSave }: { room: SavedRoom; peers: number; members: RoomMember[]; onKick: (person: RoomMember) => void; onForget: (person: RoomMember) => void; onShare: () => void; onDelete: () => void; onSave: (name: string, color: RoomColor) => void }) {
+function RoomRow({ room, peers, members, self, onColor, onKick, onForget, onShare, onDelete, onSave }: { room: SavedRoom; peers: number; members: RoomMember[]; self: { name: string; avatar: string | null; color: string; custom: boolean } | null; onColor: (id: string, color: string | null) => void; onKick: (person: RoomMember) => void; onForget: (person: RoomMember) => void; onShare: () => void; onDelete: () => void; onSave: (name: string, color: RoomColor) => void }) {
   const [editing, setEditing] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [name, setName] = useState(room.name);
   const [color, setColor] = useState<RoomColor>(room.color ?? DEFAULT_ROOM_COLOR);
   const [confirm, setConfirm] = useState(false);
+  const [pickerFor, setPickerFor] = useState<string | null>(null);
+  const togglePicker = (id: string) => setPickerFor((cur) => (cur === id ? null : id));
   return <div className="room-row glass-inset rounded-lg p-3">
     <div className="flex items-center gap-3">
       <Button variant="ghost" className={`room-name-circle room-${room.color ?? DEFAULT_ROOM_COLOR}`} aria-label={`Szoba szerkesztése: ${room.name}`} onClick={() => { setName(room.name); setColor(room.color ?? DEFAULT_ROOM_COLOR); setEditing(v => !v); }}><span>{room.name}</span></Button>
@@ -1420,7 +1441,17 @@ function RoomRow({ room, peers, members, onKick, onForget, onShare, onDelete, on
     </form></div></div>
     <div className="room-expansion" data-open={expanded}><div className="min-h-0 overflow-hidden">
       <div className="flex justify-between items-center border-t border-border mt-3 pt-2"><span className="text-xs text-muted-foreground">{peers} kapcsolódva</span><Button variant="ghost" size="icon" className="text-destructive rounded-full" aria-label={room.owner ? `Szoba törlése: ${room.name}` : `Kilépés: ${room.name}`} onClick={() => setConfirm(true)}>{room.owner ? <Trash2 /> : <LogOut />}</Button></div>
-      <ElasticScroll className="max-h-44"><div className="space-y-2 py-2">{members.length === 0 && <p className="text-xs text-muted-foreground">Még senki nem csatlakozott.</p>}{members.map(p => <div key={p.deviceId} className="flex items-center gap-2"><span className="capsule-avatar viewer-avatar" style={{ "--person-color": p.color } as React.CSSProperties}>{p.avatar ? <img src={p.avatar} alt="" /> : p.name.charAt(0).toUpperCase()}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm">{p.name}</span>{!p.online && p.lastSeen > 0 && <span className="block text-[10px] text-muted-foreground">Utoljára: {lastSeenText(p.lastSeen, Date.now())}</span>}</span><span className="status-dot" data-state={p.online ? "on" : "off"} />{!p.online && <Button variant="ghost" size="icon" aria-label={`Törlés a listából: ${p.name}`} title="Törlés a listából" onClick={() => onForget(p)}><Trash2 /></Button>}{room.owner && room.ownerPrivateKey && <Button variant="ghost" size="icon" aria-label={`Eltávolítás a szobából: ${p.name}`} title="Eltávolítás a szobából" onClick={() => onKick(p)}><X /></Button>}</div>)}</div></ElasticScroll>
+      <ElasticScroll className="max-h-56"><div className="space-y-2 py-2">
+        {self && <div>
+          <div className="flex items-center gap-2"><span className="capsule-avatar viewer-avatar" style={{ "--person-color": self.color } as React.CSSProperties}>{self.avatar ? <img src={self.avatar} alt="" /> : self.name.charAt(0).toUpperCase()}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm">{self.name}</span><span className="block text-[10px] text-muted-foreground">Te</span></span><Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Saját jelölőszín" aria-expanded={pickerFor === SELF_COLOR_KEY} title="Jelölőszín" onClick={() => togglePicker(SELF_COLOR_KEY)}><Palette /></Button></div>
+          {pickerFor === SELF_COLOR_KEY && <PersonColorPicker value={self.color} custom={self.custom} onChange={(c) => onColor(SELF_COLOR_KEY, c)} />}
+        </div>}
+        {members.length === 0 && <p className="text-xs text-muted-foreground">Még senki nem csatlakozott.</p>}
+        {members.map(p => <div key={p.deviceId}>
+          <div className="flex items-center gap-2"><span className="capsule-avatar viewer-avatar" style={{ "--person-color": p.color } as React.CSSProperties}>{p.avatar ? <img src={p.avatar} alt="" /> : p.name.charAt(0).toUpperCase()}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm">{p.name}</span>{!p.online && p.lastSeen > 0 && <span className="block text-[10px] text-muted-foreground">Utoljára: {lastSeenText(p.lastSeen, Date.now())}</span>}</span><span className="status-dot" data-state={p.online ? "on" : "off"} /><Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Jelölőszín: ${p.name}`} aria-expanded={pickerFor === p.deviceId} title="Jelölőszín" onClick={() => togglePicker(p.deviceId)}><Palette /></Button>{!p.online && <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Törlés a listából: ${p.name}`} title="Törlés a listából" onClick={() => onForget(p)}><Trash2 /></Button>}{room.owner && room.ownerPrivateKey && <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Eltávolítás a szobából: ${p.name}`} title="Eltávolítás a szobából" onClick={() => onKick(p)}><X /></Button>}</div>
+          {pickerFor === p.deviceId && <PersonColorPicker value={p.color} custom={p.custom} onChange={(c) => onColor(p.deviceId, c)} />}
+        </div>)}
+      </div></ElasticScroll>
       {confirm && <div className="space-y-2"><p className="text-xs text-muted-foreground">{room.owner ? "Törlöd a szobát? A jelenleg kapcsolódó tagok értesülnek a törlésről." : "Kilépsz a szobából?"}</p><div className="flex gap-2"><Button size="sm" variant="destructive" onClick={onDelete}>{room.owner ? "Törlés" : "Kilépés"}</Button><Button size="sm" variant="outline" onClick={() => setConfirm(false)}>Mégsem</Button></div></div>}
     </div></div>
   </div>;
@@ -1662,6 +1693,7 @@ function JoinPanel({ initial, repository, onJoin, onReject }: { initial: { token
 }
 
 function ProfileForm(props: {
+  color?: string | undefined;
   title?: string;
   description?: string;
   initial: LocalProfile | null;
@@ -1687,7 +1719,7 @@ function ProfileForm(props: {
         <button
           type="button"
           className="capsule-avatar profile-avatar"
-          style={{ "--person-color": SELF_COLOR } as React.CSSProperties}
+          style={{ "--person-color": props.color ?? SELF_COLOR } as React.CSSProperties}
           aria-label="Profilkép választása"
           onClick={() => fileRef.current?.click()}
         >
