@@ -5,7 +5,7 @@ import { colorForDevice, parseHello, parseLocation, parseRoomControl, parseShare
 import { appendTrackPoint, clearTrackHistory } from "@/lib/tracking";
 import { turnConfigFromEnv } from "@/lib/turn";
 import { loadRoomControls, rememberRoomControl, verifyRoomControl, type RoomControl } from "@/lib/moderation";
-import { freshLocation, acceptMeasurement } from "@/lib/locationFreshness";
+import { freshLocation, acceptMeasurement, announcement } from "@/lib/locationFreshness";
 import type { TransportMode } from "@/lib/transport";
 
 export type TrackPoint = { lat: number; lng: number; t: number };
@@ -70,11 +70,21 @@ export function usePeerNetwork(opts: {
   const [roomPeers, setRoomPeers] = useState<Record<string, number>>({});
   const [roomMembers, setRoomMembers] = useState<Record<string, string[]>>({});
   const [connectIssues, setConnectIssues] = useState(0);
+  /** Növelésével a hiányzó szobák újracsatlakoznak (a főeffekt csak a még nem csatlakozott tokeneket építi fel). */
+  const [epoch, setEpoch] = useState(0);
   const joinedRef = useRef(new Map<string, Joined>());
   const peerDeviceRef = useRef(new Map<string, string>());
   const pendingLocRef = useRef(new Map<string, LocMessage>());
   /** Szobánként azok az eszközök, amelyek már bemutatkoztak: a kilépéskor akkor is eltávolíthatók, ha közben lekapcsolódtak. */
   const roomDevicesRef = useRef(new Map<string, Set<string>>());
+  /** Szobánként: mikor csatlakoztunk utoljára, és hányszor próbáltuk már újra (a visszalépéshez). */
+  const joinedAtRef = useRef(new Map<string, number>());
+  const triesRef = useRef(new Map<string, number>());
+  /** A még folyamatban lévő kilépések: azonos tokennel csak ezek befejezése után lehet újra csatlakozni. */
+  const leavingRef = useRef(new Map<string, Promise<void>>());
+  /** A „kérem a bemutatkozásodat” üzenetek korlátozása résztvevőnként. */
+  const wantHelloRef = useRef(new Map<string, number>());
+  const nullTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const helloRef = useRef<HelloMessage | null>(null);
   const lastLocRef = useRef<LocMessage>(null);
   const roomsRef = useRef(rooms);
@@ -112,7 +122,7 @@ export function usePeerNetwork(opts: {
       if (m === null) return { ...prev, [dev]: { ...p, sharing: false, online: true, points: [], at: null, heading: null, since: null, measurementAt: null } };
       const now = Date.now();
       if (p.measurementAt !== null && m.t < p.measurementAt) return prev;
-      if (!acceptMeasurement(p.measurementAt, m)) return { ...prev, [dev]: { ...p, heading: m.heading ?? p.heading, battery: m.battery ?? p.battery, transport: m.transport ?? p.transport, stoppedSince: m.stoppedSince ?? p.stoppedSince } };
+      if (!acceptMeasurement(p.measurementAt, m)) return { ...prev, [dev]: { ...p, online: true, heading: m.heading ?? p.heading, battery: m.battery ?? p.battery, transport: m.transport ?? p.transport, stoppedSince: m.stoppedSince ?? p.stoppedSince } };
       const age = Math.max(0, now - m.t);
       return {
         ...prev,
@@ -144,9 +154,12 @@ export function usePeerNetwork(opts: {
   const leaveRoom = useCallback(
     (token: string, removePeople: boolean) => {
       const j = joinedRef.current.get(token);
-      if (!j) return;
+      if (!j) return Promise.resolve();
       joinedRef.current.delete(token);
-      void j.room.leave().catch(() => undefined);
+      joinedAtRef.current.delete(token);
+      const leaving: Promise<void> = Promise.resolve().then(() => j.room.leave()).catch(() => undefined);
+      leavingRef.current.set(token, leaving);
+      void leaving.then(() => { if (leavingRef.current.get(token) === leaving) leavingRef.current.delete(token); });
       const devs = new Set<string>(roomDevicesRef.current.get(token) ?? []);
       roomDevicesRef.current.delete(token);
       for (const peerId of j.peers) {
@@ -159,6 +172,8 @@ export function usePeerNetwork(opts: {
         return false;
       };
       const gone = [...devs].filter((d) => !stillThere(d));
+      // Már sehol sem szereplő kapcsolatok bejegyzései törölhetők (különben újracsatlakozásonként gyűlnének).
+      for (const peerId of j.peers) if (!peerInAnyRoom(peerId)) { peerDeviceRef.current.delete(peerId); pendingLocRef.current.delete(peerId); wantHelloRef.current.delete(peerId); }
       if (gone.length) {
         setPeople((prev) => {
           const next = { ...prev };
@@ -171,31 +186,73 @@ export function usePeerNetwork(opts: {
         });
       }
       refreshCounts();
+      return leaving;
     },
     [refreshCounts],
   );
+
+  /**
+   * Elakadt szobák újracsatlakoztatása: ha senki nem kapcsolódik, a jelzőkapcsolat vagy a hálózat közben megszakadhatott
+   * (háttérbe kerülés, hálózatváltás). Visszalépéssel próbálkozik, hogy ne terhelje az akkumulátort, ha a másik fél egyszerűen offline.
+   */
+  const reconnectStalled = useCallback((force: boolean) => {
+    const now = Date.now();
+    for (const [token, j] of [...joinedRef.current]) {
+      if (j.peers.size > 0) { triesRef.current.delete(token); continue; }
+      const tries = triesRef.current.get(token) ?? 0;
+      const wait = force ? 8000 : Math.min(30000 * 2 ** tries, 180000);
+      if (now - (joinedAtRef.current.get(token) ?? 0) < wait) continue;
+      triesRef.current.set(token, tries + 1);
+      void leaveRoom(token, false).then(() => setEpoch((n) => n + 1));
+    }
+  }, [leaveRoom]);
 
   const tokensKey = rooms.map((r) => r.token).join(",");
   const ready = Boolean(profile && deviceId);
 
   useEffect(() => {
-    if (!ready) { for (const token of [...joinedRef.current.keys()]) leaveRoom(token, true); return; }
+    if (!ready) { for (const token of [...joinedRef.current.keys()]) void leaveRoom(token, true); return; }
     let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     const wanted = new Set(tokensKey ? tokensKey.split(",") : []);
-    for (const token of [...joinedRef.current.keys()]) if (!wanted.has(token)) leaveRoom(token, true);
+    for (const token of [...joinedRef.current.keys()]) if (!wanted.has(token)) void leaveRoom(token, true);
 
     void (async () => {
-      const { joinRoom } = await import("trystero");
+      let joinRoom: typeof import("trystero").joinRoom;
+      try {
+        ({ joinRoom } = await import("trystero"));
+      } catch (e) {
+        // Betöltési hiba (pl. rossz hálózat): nem hagyjuk végleg csatlakozás nélkül.
+        console.warn("A kapcsolati modul nem töltődött be", e);
+        setConnectIssues((n) => n + 1);
+        if (!cancelled) retryTimer = setTimeout(() => setEpoch((n) => n + 1), 5000);
+        return;
+      }
       if (cancelled) return;
       const turnConfig = turnConfigFromEnv();
       for (const token of wanted) {
         if (joinedRef.current.has(token)) continue;
-        const room = joinRoom({ appId: APP_ID, password: token, ...(turnConfig ? { turnConfig } : {}) }, token, {
-          onJoinError: (e) => {
-            console.warn("Szoba csatlakozási hiba", e);
-            setConnectIssues((n) => n + 1);
-          },
-        }) as unknown as MinimalRoom;
+        // Azonos tokennel nem lehet új csatlakozást indítani, amíg a régi kilépés nem fejeződött be.
+        const pendingLeave = leavingRef.current.get(token);
+        if (pendingLeave) {
+          await pendingLeave;
+          if (cancelled) return;
+          if (joinedRef.current.has(token)) continue;
+        }
+        let room: MinimalRoom;
+        try {
+          room = joinRoom({ appId: APP_ID, password: token, ...(turnConfig ? { turnConfig } : {}) }, token, {
+            onJoinError: (e) => {
+              console.warn("Szoba csatlakozási hiba", e);
+              setConnectIssues((n) => n + 1);
+            },
+          }) as unknown as MinimalRoom;
+        } catch (e) {
+          // Egy szoba hibája nem akadályozhatja a többi szoba csatlakozását.
+          console.warn("Szoba létrehozási hiba", e);
+          setConnectIssues((n) => n + 1);
+          continue;
+        }
         const j: Joined = {
           room,
           hello: room.makeAction<HelloMessage>("hello"),
@@ -206,9 +263,11 @@ export function usePeerNetwork(opts: {
         };
         room.onPeerJoin = (peerId) => {
           j.peers.add(peerId);
+          triesRef.current.delete(token);
           refreshCounts();
           if (helloRef.current) void j.hello.send(helloRef.current, { target: peerId }).catch(() => undefined);
-          void j.loc.send(freshLocation(lastLocRef.current, Date.now()), { target: peerId }).catch(() => undefined);
+          const first = announcement(lastLocRef.current, Date.now());
+          if (first !== undefined) void j.loc.send(first, { target: peerId }).catch(() => undefined);
         };
         room.onPeerLeave = (peerId) => {
           j.peers.delete(peerId);
@@ -216,6 +275,8 @@ export function usePeerNetwork(opts: {
           refreshCounts();
           if (peerInAnyRoom(peerId)) return;
           const dev = peerDeviceRef.current.get(peerId);
+          peerDeviceRef.current.delete(peerId);
+          wantHelloRef.current.delete(peerId);
           if (dev) setPeople((prev) => (prev[dev] ? { ...prev, [dev]: { ...prev[dev], online: false } } : prev));
         };
         j.hello.onMessage = (data, { peerId }) => {
@@ -232,6 +293,8 @@ export function usePeerNetwork(opts: {
             return { ...prev, [h.deviceId]: { ...p, name: h.name, avatar: h.avatar, online: true } };
           });
           refreshCounts();
+          // A másik fél kérte a bemutatkozásunkat (az övé nálunk már megvan): egyszer válaszolunk, így nincs oda-vissza küldözgetés.
+          if (h.want && helloRef.current) void j.hello.send(helloRef.current, { target: peerId }).catch(() => undefined);
           const pending = pendingLocRef.current.get(peerId);
           if (pending !== undefined) {
             pendingLocRef.current.delete(peerId);
@@ -245,6 +308,12 @@ export function usePeerNetwork(opts: {
           const dev = peerDeviceRef.current.get(peerId);
           if (!dev) {
             pendingLocRef.current.set(peerId, m);
+            // Az ismeretlen küldő bemutatkozása elveszhetett: néhány másodpercenként újra elkérjük.
+            const now = Date.now();
+            if (helloRef.current && now - (wantHelloRef.current.get(peerId) ?? 0) > 4000) {
+              wantHelloRef.current.set(peerId, now);
+              void j.hello.send({ ...helloRef.current, want: true }, { target: peerId }).catch(() => undefined);
+            }
             return;
           }
           applyLocation(dev, m);
@@ -258,7 +327,7 @@ export function usePeerNetwork(opts: {
             if (c.kind === "close") onClosedRef.current(token, "closed");
             else if (c.target === deviceId) onClosedRef.current(token, "kicked");
             else if (c.target) { rememberRoomControl(c); dropDevice(token, c.target); }
-          });
+          }).catch(() => undefined);
         };
         j.ask.onMessage = (data, { peerId }) => {
           if (!j.peers.has(peerId) || !parseShareRequest(data)) return;
@@ -266,18 +335,21 @@ export function usePeerNetwork(opts: {
           if (dev) onAskRef.current?.(dev);
         };
         joinedRef.current.set(token, j);
+        joinedAtRef.current.set(token, Date.now());
       }
       refreshCounts();
-    })();
+    })().catch((e) => console.warn("Szobacsatlakozási hiba", e));
 
     return () => {
       cancelled = true;
+      clearTimeout(retryTimer);
     };
-  }, [tokensKey, ready, deviceId, leaveRoom, refreshCounts, applyLocation, dropDevice]);
+  }, [tokensKey, ready, deviceId, epoch, leaveRoom, refreshCounts, applyLocation, dropDevice]);
 
   useEffect(
     () => () => {
-      for (const token of [...joinedRef.current.keys()]) leaveRoom(token, true);
+      for (const token of [...joinedRef.current.keys()]) void leaveRoom(token, true);
+      for (const t of nullTimersRef.current) clearTimeout(t);
     },
     [leaveRoom],
   );
@@ -288,31 +360,55 @@ export function usePeerNetwork(opts: {
     for (const j of joinedRef.current.values()) void j.hello.send(h).catch(() => undefined);
   }, [profile?.name, profile?.avatar]);
 
-  const sendLocation = useCallback((m: LocMessage) => {
-    lastLocRef.current = m;
+  const broadcastLoc = useCallback((m: LocMessage) => {
     for (const j of joinedRef.current.values()) {
       if (j.peers.size) void j.loc.send(m).catch(() => undefined);
     }
   }, []);
 
-  // A connected observer receives metadata updates even while the owner is stationary.
-  // Repeat the original timestamp: never disguise a stale fix as a new measurement.
+  const sendLocation = useCallback((m: LocMessage) => {
+    lastLocRef.current = m;
+    for (const t of nullTimersRef.current) clearTimeout(t);
+    nullTimersRef.current = [];
+    broadcastLoc(m);
+    // A „megosztás leállt” jelzés elveszhet (épp újracsatlakozó kapcsolat): röviden megismételjük, amíg a megosztás ki van kapcsolva.
+    if (m === null) {
+      nullTimersRef.current = [1500, 5000].map((ms) => setTimeout(() => { if (lastLocRef.current === null) broadcastLoc(null); }, ms));
+    }
+  }, [broadcastLoc]);
+
+  // A csatlakozott nézők metaadat-frissítést akkor is kapnak, ha a küldő áll.
+  // Az eredeti mérési időt ismételjük: elavult mérést sosem álcázunk frissnek.
   useEffect(() => {
     const timer = setInterval(() => {
       const latest = lastLocRef.current;
       if (!latest || !freshLocation(latest, Date.now())) return;
       for (const j of joinedRef.current.values()) if (j.peers.size) void j.loc.send(latest).catch(() => undefined);
     }, 5000);
+    // Elakadt szobák ellenőrzése akkor is, ha nem osztunk meg semmit.
+    const watchdog = setInterval(() => reconnectStalled(false), 15000);
     const announce = () => {
+      const msg = announcement(lastLocRef.current, Date.now());
       for (const j of joinedRef.current.values()) {
         if (helloRef.current) void j.hello.send(helloRef.current).catch(() => undefined);
-        void j.loc.send(freshLocation(lastLocRef.current, Date.now())).catch(() => undefined);
+        // Elavult (de bekapcsolt) megosztásnál nem küldünk „leállt” jelzést: az a nézőnél törölné a jelölőt és az útvonalat.
+        if (msg !== undefined) void j.loc.send(msg).catch(() => undefined);
       }
     };
-    window.addEventListener("online", announce);
-    window.addEventListener("pageshow", announce);
-    return () => { clearInterval(timer); window.removeEventListener("online", announce); window.removeEventListener("pageshow", announce); };
-  }, []);
+    const wake = () => { announce(); reconnectStalled(true); };
+    const onVisible = () => { if (document.visibilityState === "visible") wake(); };
+    window.addEventListener("online", wake);
+    window.addEventListener("pageshow", wake);
+    document.addEventListener("visibilitychange", onVisible);
+    document.addEventListener("resume", onVisible);
+    return () => {
+      clearInterval(timer); clearInterval(watchdog);
+      window.removeEventListener("online", wake);
+      window.removeEventListener("pageshow", wake);
+      document.removeEventListener("visibilitychange", onVisible);
+      document.removeEventListener("resume", onVisible);
+    };
+  }, [reconnectStalled]);
 
   /** Aláírt tulajdonosi művelet elküldése és helyi alkalmazása. */
   const sendControl = useCallback(async (control: RoomControl) => {
