@@ -512,7 +512,7 @@ export default function MapApp() {
     }
     const last = selfTrackRef.current[selfTrackRef.current.length - 1];
     if (last && Date.now() - last.t < 15000) {
-      lastSentRef.current = Date.now();
+      lastSentRef.current = 0; // a küldési köz-ellenőrzés különben (now - now < köz) elnyelné az azonnali küldést
       publishRef.current();
     }
   };
