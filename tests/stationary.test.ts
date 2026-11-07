@@ -434,3 +434,28 @@ test("valódi gyaloglás (1,4 m/s, Doppler + elmozdulás) nem lesz hamis Doppler
   expect(out.mode).toBe("moving");
   expect(out.speed ?? 0).toBeGreaterThan(1.2);
 });
+
+// --- Gyors horgonykorrekció (valós napló: 18:08, ±4 m pontosság, 14 m-re a horgonytól) ---
+test("pontos (±4 m) fixek 14 m-re a horgonytól: ~30 s alatt korrigál, nem 2 perc alatt", () => {
+  const f = createDriftFilter();
+  settle(f, 1, 25);
+  const r = rng(7); let out!: FilteredFix;
+  for (let t = 26; t <= 60; t++) out = f(fx(-4 + gauss(r) * 0.4, -13 + gauss(r) * 0.4, t, { acc: 4, speed: 0 }));
+  expect(out.mode).toBe("still");
+  expect(distM(out, -4, -13) < 3).toBe(true);
+});
+test("pontatlan (±29 m) elúszó fixek nem húzzák el a horgonyt", () => {
+  const f = createDriftFilter();
+  settle(f, 1, 25);
+  const r = rng(9); let out!: FilteredFix;
+  for (let t = 26; t <= 120; t++) out = f(fx(19 + gauss(r) * 1.5, -2 + gauss(r) * 1.5, t, { acc: 29, speed: 0 }));
+  expect(distM(out, 0, 0) < 3).toBe(true);
+});
+test("rövid (10 s) pontos kiugrás nem korrigál", () => {
+  const f = createDriftFilter();
+  settle(f, 1, 25);
+  let out!: FilteredFix;
+  for (let t = 26; t <= 36; t++) out = f(fx(-4, -13, t, { acc: 4, speed: 0 }));
+  for (let t = 37; t <= 50; t++) out = f(fx(0, 0, t, { acc: 4, speed: 0 }));
+  expect(distM(out, 0, 0) < 3).toBe(true);
+});
