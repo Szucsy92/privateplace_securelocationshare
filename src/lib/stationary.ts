@@ -129,7 +129,8 @@ const CAND_START_FIXES = 8;    // induláskor ennyi egyező jelölt-fixtől indu
 const FAST_ACC_MAX = 5;        // m: gyors horgonykorrekció: csak ennél pontosabb fixekből (a drift ±6…50 m pontosságnál jelentkezik)
 const FAST_MIN_MS = 20000;     // a gyors korrekcióhoz szükséges egyező mérési ablak
 const FAST_MIN_FIXES = 10;     // ennyi egyező, pontos fix kell (ritkított mérésnél kevesebb)
-const FAST_DIST_K = 3;         // a horgonytól mért távolság legalább ennyiszerese a fixek pontosságának
+const FAST_DIST_K = 2;         // a horgonytól mért távolság legalább ennyiszerese a fixek pontosságának
+const FAST_NEAR_M = 5.5, FAST_NEAR_K = 2;   // pontos (≤ FAST_ACC_MAX) fixnél már ennyi eltérés is jelölt (a 7 m-es állandó eltolódás is látszik)
 const SHOWN_EASE_MIN_M = 1.5;  // m/fix: a megjelenített pont csúszási sebessége az új horgony felé
 
 type Vec = { x: number; y: number };
@@ -378,7 +379,7 @@ export function createDriftFilter() {
         // Rövid multipath-eltolódás vagy vándorló drift nem elég; mozgásra utaló jel esetén nem gyűjtünk jelöltet.
         const walkEv = dopGo || (fix.stepping === true && !dopStill);
         if (fix.src !== "network" && (fix.acc ?? 999) <= CAND_MAX_ACC && !walkEv) {
-          const nearThr = Math.max(CAND_NEAR_M, fix.acc ?? 10), visitThr = Math.max(CAND_VISIT_M, 0.6 * (fix.acc ?? 10));
+          const nearThr = (fix.acc ?? 999) <= FAST_ACC_MAX ? Math.max(FAST_NEAR_M, FAST_NEAR_K * (fix.acc ?? 3)) : Math.max(CAND_NEAR_M, fix.acc ?? 10), visitThr = Math.max(CAND_VISIT_M, 0.6 * (fix.acc ?? 10));
           if (d >= nearThr && d < farThr) {
             if (!cand.length) cand.push({ p: z, at, acc: fix.acc ?? 10 });
             else {
@@ -402,7 +403,7 @@ export function createDriftFilter() {
               const gc = wmean(good.map((q) => ({ p: q.p, w: 1 })));
               const grms = rmsAround(good, gc), gmv = Math.hypot(gc.x - anchor.x, gc.y - anchor.y);
               const gacc = good.map((q) => q.acc).sort((a, b) => a - b)[Math.floor(good.length / 2)]!;
-              if (gmv >= FAST_DIST_K * gacc && grms <= Math.max(2, CAND_RMS_ACC_K * gacc) && candFlat(good, grms)) {
+              if (gmv >= Math.max(FAST_NEAR_M, FAST_DIST_K * gacc) && grms <= Math.max(2, CAND_RMS_ACC_K * gacc) && candFlat(good, grms)) {
                 say(`Gyors horgonykorrekció ${f1(gmv)} m-rel: ${good.length} pontos fix (±${gacc} m) ${Math.round((at - good[0]!.at) / 1000)} s alatt`);
                 anchor = gc; resetCand(); far = [];
               }
