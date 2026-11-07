@@ -42,7 +42,8 @@ import { usePeerNetwork, type RemotePerson } from "@/hooks/usePeerNetwork";
 import { useElasticOverscroll } from "@/hooks/useElasticOverscroll";
 import { appendTrackPoint, clearTrackHistory, publishIntervalMs, shouldPublishLocation } from "@/lib/tracking";
 import { useVisibleClock } from "@/hooks/useVisibleClock";
-import { SELF_COLOR } from "@/lib/peerMessages";
+import { SELF_COLOR, colorForDevice } from "@/lib/peerMessages";
+import type { RosterEntry } from "@/lib/roomRoster";
 import {
   addRoom,
   customizeRoom,
@@ -56,6 +57,7 @@ import {
   parseRoomInput,
   removeRoom,
   roomQrValue,
+  roomShareCode,
   saveRooms,
   type SavedRoom,
 } from "@/lib/rooms";
@@ -82,7 +84,7 @@ import { createDriftFilter, type StopState } from "@/lib/stationary";
 import { latestRelease, releaseRepository, needsUpdate, appLink, isAndroidBrowser, type AppRelease } from "@/lib/invitations";
 import { headingFromTrack } from "@/lib/mapMath";
 import { isNativeApp, prepareSharing, startLocationWatch } from "@/lib/locationSource";
-import { createRoomAuthority, signRoomControl } from "@/lib/moderation";
+import { createRoomAuthority, loadRoomControls, signRoomControl } from "@/lib/moderation";
 import {
   checkAllPermissions,
   permissionDiagnostics,
@@ -606,8 +608,19 @@ export default function MapApp() {
   };
 
   const joinRoom = (token: string, name: string | null, color?: RoomColor, ownerKey?: string) => {
-    if (rooms.some((r) => r.token === token)) {
-      toast.info("Ebben a szobában már benne vagy.");
+    const existing = rooms.find((r) => r.token === token);
+    if (existing?.owner) {
+      // Ugyanarról az eszközről a saját szobánkba nem vehetjük fel magunkat tagként.
+      toast.info("Ez a te szobád: ugyanarról az eszközről nem veheted fel magad tagként.");
+    } else if (deviceId && loadRoomControls().some((c) => c.kind === "kick" && c.token === token && c.target === deviceId)) {
+      toast.error("Ebből a szobából a létrehozó eltávolított, ezért nem csatlakozhatsz újra.");
+    } else if (existing) {
+      if (!existing.ownerKey && ownerKey) {
+        updateRooms((prev) => prev.map((r) => (r.token === token && !r.ownerKey ? { ...r, ownerKey } : r)));
+        toast.success("A gazda kulcsa hozzáadva: a szoba törlése és az eltávolítások mostantól hozzád is megérkeznek.");
+      } else {
+        toast.info("Ebben a szobában már benne vagy.");
+      }
     } else {
       updateRooms((prev) => addRoom(prev, { token, name: name || "Meghívott szoba", owner: false, createdAt: Date.now(), color: color ?? DEFAULT_ROOM_COLOR, ...(ownerKey ? { ownerKey } : {}) }));
       toast.success("Csatlakoztál. Amint a többiek is online vannak, látjátok egymást.");
@@ -627,10 +640,12 @@ export default function MapApp() {
       }
     }
     updateRooms((prev) => removeRoom(prev, room.token));
+    net.forgetRoom(room.token);
     toast.success(room.owner ? room.ownerPrivateKey ? "A szoba törölve." : "A régi szobát eltávolítottam erről a készülékről." : "Kiléptél a szobából.");
   };
 
-  const kickPerson = async (room: SavedRoom, person: RemotePerson) => {
+  const kickPerson = async (room: SavedRoom, person: { deviceId: string; name: string }) => {
+    if (person.deviceId === deviceId) return;
     if (!room.owner || !room.ownerKey || !room.ownerPrivateKey || !window.confirm(`Biztosan eltávolítod ${person.name}-t a szobából?`)) return;
     try { await net.sendControl(await signRoomControl(room.token, { ownerKey: room.ownerKey, ownerPrivateKey: room.ownerPrivateKey }, "kick", person.deviceId)); }
     catch { toast.error("Az eltávolítás nem sikerült."); }
@@ -952,8 +967,9 @@ export default function MapApp() {
                       key={room.token}
                       room={room}
                       peers={net.roomPeers[room.token] ?? 0}
-                      members={(net.roomMembers[room.token] ?? []).map(id => net.people[id]).filter((p): p is RemotePerson => Boolean(p))}
+                      members={roomMemberList(net.roster[room.token] ?? [], net.roomMembers[room.token] ?? [], net.people, net.avatars)}
                       onKick={p => void kickPerson(room, p)}
+                      onForget={p => net.forgetMember(room.token, p.deviceId)}
                       onShare={() => {
                         setShareToken(room.token);
                         setDialog("share");
@@ -1358,7 +1374,34 @@ function PersonCapsule(props: {
   );
 }
 
-function RoomRow({ room, peers, members, onKick, onShare, onDelete, onSave }: { room: SavedRoom; peers: number; members: RemotePerson[]; onKick: (person: RemotePerson) => void; onShare: () => void; onDelete: () => void; onSave: (name: string, color: RoomColor) => void }) {
+type RoomMember = { deviceId: string; name: string; avatar: string | null; color: string; online: boolean; lastSeen: number };
+
+/** A névsor és az éppen kapcsolódók egyesítése: elöl az online tagok, utánuk a legutóbb látottak. */
+function roomMemberList(entries: RosterEntry[], onlineIds: string[], people: Record<string, RemotePerson>, avatars: Record<string, string>): RoomMember[] {
+  const online = new Set(onlineIds);
+  const known = new Set<string>();
+  const list: RoomMember[] = entries.map((e) => {
+    known.add(e.deviceId);
+    const p = people[e.deviceId];
+    return { deviceId: e.deviceId, name: p?.name ?? e.name, avatar: p?.avatar ?? avatars[e.deviceId] ?? null, color: p?.color ?? colorForDevice(e.deviceId), online: online.has(e.deviceId), lastSeen: e.lastSeen };
+  });
+  for (const id of onlineIds) {
+    const p = people[id];
+    if (p && !known.has(id)) list.push({ deviceId: id, name: p.name, avatar: p.avatar, color: p.color, online: true, lastSeen: 0 });
+  }
+  return list.sort((a, b) => Number(b.online) - Number(a.online) || b.lastSeen - a.lastSeen);
+}
+
+function lastSeenText(at: number, now: number): string {
+  const min = Math.max(0, Math.floor((now - at) / 60000));
+  if (min < 1) return "épp most";
+  if (min < 60) return `${min} perce`;
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return `${hours} órája`;
+  return `${Math.floor(hours / 24)} napja`;
+}
+
+function RoomRow({ room, peers, members, onKick, onForget, onShare, onDelete, onSave }: { room: SavedRoom; peers: number; members: RoomMember[]; onKick: (person: RoomMember) => void; onForget: (person: RoomMember) => void; onShare: () => void; onDelete: () => void; onSave: (name: string, color: RoomColor) => void }) {
   const [editing, setEditing] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [name, setName] = useState(room.name);
@@ -1377,7 +1420,7 @@ function RoomRow({ room, peers, members, onKick, onShare, onDelete, onSave }: { 
     </form></div></div>
     <div className="room-expansion" data-open={expanded}><div className="min-h-0 overflow-hidden">
       <div className="flex justify-between items-center border-t border-border mt-3 pt-2"><span className="text-xs text-muted-foreground">{peers} kapcsolódva</span><Button variant="ghost" size="icon" className="text-destructive rounded-full" aria-label={room.owner ? `Szoba törlése: ${room.name}` : `Kilépés: ${room.name}`} onClick={() => setConfirm(true)}>{room.owner ? <Trash2 /> : <LogOut />}</Button></div>
-      <ElasticScroll className="max-h-44"><div className="space-y-2 py-2">{members.map(p => <div key={p.deviceId} className="flex items-center gap-2"><span className="capsule-avatar viewer-avatar" style={{ "--person-color": p.color } as React.CSSProperties}>{p.avatar ? <img src={p.avatar} alt="" /> : p.name.charAt(0)}</span><span className="text-sm flex-1 min-w-0 truncate">{p.name}</span><span className="status-dot" data-state={p.online ? "on" : "off"} />{room.owner && room.ownerPrivateKey && <Button variant="ghost" size="icon" aria-label={`Eltávolítás: ${p.name}`} onClick={() => onKick(p)}><X /></Button>}</div>)}</div></ElasticScroll>
+      <ElasticScroll className="max-h-44"><div className="space-y-2 py-2">{members.length === 0 && <p className="text-xs text-muted-foreground">Még senki nem csatlakozott.</p>}{members.map(p => <div key={p.deviceId} className="flex items-center gap-2"><span className="capsule-avatar viewer-avatar" style={{ "--person-color": p.color } as React.CSSProperties}>{p.avatar ? <img src={p.avatar} alt="" /> : p.name.charAt(0).toUpperCase()}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm">{p.name}</span>{!p.online && p.lastSeen > 0 && <span className="block text-[10px] text-muted-foreground">Utoljára: {lastSeenText(p.lastSeen, Date.now())}</span>}</span><span className="status-dot" data-state={p.online ? "on" : "off"} />{!p.online && <Button variant="ghost" size="icon" aria-label={`Törlés a listából: ${p.name}`} title="Törlés a listából" onClick={() => onForget(p)}><Trash2 /></Button>}{room.owner && room.ownerPrivateKey && <Button variant="ghost" size="icon" aria-label={`Eltávolítás a szobából: ${p.name}`} title="Eltávolítás a szobából" onClick={() => onKick(p)}><X /></Button>}</div>)}</div></ElasticScroll>
       {confirm && <div className="space-y-2"><p className="text-xs text-muted-foreground">{room.owner ? "Törlöd a szobát? A jelenleg kapcsolódó tagok értesülnek a törlésről." : "Kilépsz a szobából?"}</p><div className="flex gap-2"><Button size="sm" variant="destructive" onClick={onDelete}>{room.owner ? "Törlés" : "Kilépés"}</Button><Button size="sm" variant="outline" onClick={() => setConfirm(false)}>Mégsem</Button></div></div>}
     </div></div>
   </div>;
@@ -1404,7 +1447,9 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
     : null;
   const link = rawLink && repo ? `${rawLink}&forras=${encodeURIComponent(repo)}` : rawLink;
   const code = formatRoomToken(room.token);
-  const text = link ?? code;
+  // A másolt és megosztott kód a gazda ellenőrző kulcsát is viszi, hogy a csatlakozók elfogadják a törlést és az eltávolítást.
+  const shareCode = roomShareCode(room.token, room.ownerKey);
+  const text = link ?? shareCode;
 
   const copy = async () => {
     try {
@@ -1419,7 +1464,7 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
     try {
       await navigator.share({
         title: "Private Place meghívó",
-        text: link ? "Csatlakozz a szobámhoz:" : `Szobakód: ${code}`,
+        text: link ? "Csatlakozz a szobámhoz:" : `Szobakód: ${shareCode}`,
         ...(link ? { url: link } : {}),
       });
     } catch {
@@ -1458,7 +1503,7 @@ function SharePanel({ room, onDone }: { room: SavedRoom | null; onDone: () => vo
         >
           {qrBackground && qrColor && (
             <RoundedQRCode
-              value={roomQrValue(room.token)}
+              value={roomQrValue(room.token, room.ownerKey)}
               size={210}
               bgColor={qrBackground}
               fgColor={qrColor}
@@ -1607,6 +1652,7 @@ function JoinPanel({ initial, repository, onJoin, onReject }: { initial: { token
               )}
             </>
           )}
+          {parsed && !parsed.ownerKey && !(parsed.token === initial?.token && initial?.ownerKey) && <p className="text-center text-xs text-muted-foreground">Gazdakulcs nélkül a szoba törlése és az eltávolítások nem érkeznek meg hozzád. Olvasd be a QR-kódot, vagy másold be a teljes megosztott kódot.</p>}
           <Button type="submit" className="w-full rounded-full" disabled={!parsed}>{update ? "Csatlakozás frissítés nélkül" : "Csatlakozás"}</Button>
           <Button type="button" variant="ghost" className="w-full rounded-full" onClick={onReject}>Elutasítás</Button>
         </form>
