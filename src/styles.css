@@ -740,3 +740,115 @@
   .sharing-control, .header-signal, .person-bubble, .transport-options, .address-ask { animation: none !important; }
   .room-expansion, .sharing-control { transition: none; }
 }
+
+/* ───────── Fekvő mód (telefon) ─────────
+ * Bal oldalt a térkép foglalja a képernyő nagy részét, jobb oldalt egy egy kapszula széles kezelősáv:
+ * felül a megosztás / szobák / beállítások, alul a függőlegesen görgethető személykapszulák (2 látszik, a többi elhalványul).
+ * A térkép körül ugyanaz a lekerekített, átlátszó keret és köz van, mint álló módban. */
+@media (orientation: landscape) and (max-height: 600px) {
+  .map-live {
+    --land-rail-w: 176px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--land-rail-w);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    column-gap: 0.5rem;
+    row-gap: 0;
+    padding:
+      max(0.5rem, env(safe-area-inset-top))
+      max(0.5rem, env(safe-area-inset-right))
+      max(0.5rem, env(safe-area-inset-bottom))
+      max(0.5rem, env(safe-area-inset-left));
+  }
+
+  .map-live > main { grid-column: 1; grid-row: 1 / -1; min-height: 0; }
+
+  /* Felső sáv → jobb oszlop teteje: nincs külön üvegpanel, a gombok maguk kapszulák */
+  .map-live > header {
+    grid-column: 2;
+    grid-row: 1;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 0.5rem;
+    padding: 0;
+    background: none;
+    border: 0;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-radius: 0;
+  }
+  .map-live > header > div:first-child { display: none; }
+  .map-live > header > div:last-child {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    width: 100%;
+  }
+  .map-live .sharing-control,
+  .map-live .sharing-control[data-expanded="true"] {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+    height: 44px;
+    padding: 0 14px;
+    gap: 8px;
+    justify-content: center;
+  }
+  .map-live .sharing-label,
+  .map-live .sharing-control[data-expanded="true"] .sharing-label { width: auto; opacity: 1; font-size: 12px; }
+  .map-live > header > div:last-child > button:not(.sharing-control) {
+    width: 100%;
+    height: 44px;
+    border-radius: 999px;
+    background-color: var(--glass-bg);
+    border: 1px solid var(--glass-edge);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08), 0 8px 22px color-mix(in oklch, var(--shade) 45%, transparent);
+  }
+  .map-live > header > div:last-child > button.indicator[data-state="on"]:not(.sharing-control) {
+    background-color: color-mix(in oklch, var(--primary) 16%, var(--glass-bg));
+    box-shadow: 0 0 0 1px oklch(0.82 0.19 165 / 0.55), 0 0 14px oklch(0.82 0.19 165 / 0.4);
+  }
+
+  /* Alsó személysáv → jobb oszlop alja, függőleges görgetés, a szélein halványítás (csak ha van még mit görgetni) */
+  .map-live .people-rail-wrap {
+    grid-column: 2;
+    grid-row: 3;
+    align-self: end;
+    margin: 0 -6px;
+  }
+  .map-live .people-rail-wrap::before,
+  .map-live .people-rail-wrap::after { display: none; }
+  .map-live .people-rail {
+    --fade-t: 0px;
+    --fade-b: 0px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    /* 8 + 72 + 10 + 72 = 2 teljes kapszula, alatta a harmadik halvány kikandikál */
+    max-height: 196px;
+    scroll-snap-type: y proximity;
+    scroll-padding-block: 8px;
+    -webkit-mask-image: linear-gradient(180deg, transparent 0, black var(--fade-t), black calc(100% - var(--fade-b)), transparent 100%);
+    mask-image: linear-gradient(180deg, transparent 0, black var(--fade-t), black calc(100% - var(--fade-b)), transparent 100%);
+  }
+  .map-live .people-rail[data-fade-top="true"] { --fade-t: 34px; }
+  .map-live .people-rail[data-fade-bottom="true"] { --fade-b: 34px; }
+  .map-live .people-track {
+    flex-direction: column;
+    width: 100%;
+    gap: 10px;
+    padding: 8px 6px;
+  }
+  .map-live .capsule { scroll-snap-align: start; }
+
+  /* Súgóbuborékok a fekvő elrendezéshez igazítva */
+  .map-live .hint-share { top: calc(max(0.5rem, env(safe-area-inset-top)) + 0.25rem); left: auto; right: calc(max(0.5rem, env(safe-area-inset-right)) + var(--land-rail-w) + 0.9rem); }
+  .map-live .hint-share::before { top: 1rem; left: auto; right: -0.4rem; bottom: auto; transform: rotate(135deg); }
+  .map-live .hint-transport { bottom: calc(max(0.5rem, env(safe-area-inset-bottom)) + 4.6rem); left: calc(max(0.5rem, env(safe-area-inset-left)) + 0.75rem); }
+  .map-live .hint-rail { bottom: calc(max(0.5rem, env(safe-area-inset-bottom)) + 1rem); left: auto; right: calc(max(0.5rem, env(safe-area-inset-right)) + var(--land-rail-w) + 0.9rem); }
+  .map-live .hint-rail::before { top: auto; bottom: 2.4rem; left: auto; right: -0.4rem; transform: rotate(135deg); }
+  .map-live .hint-address { bottom: calc(max(0.5rem, env(safe-area-inset-bottom)) + 4.6rem); left: 0; right: calc(var(--land-rail-w) + 1rem); }
+  .map-live .hint-marker { right: calc(var(--land-rail-w) + 1rem); }
+}
