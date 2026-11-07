@@ -4,7 +4,8 @@ import type { LocalProfile } from "@/lib/profile";
 import { colorForDevice, parseHello, parseLocation, parseRoomControl, parseShareRequest, type HelloMessage, type LocMessage } from "@/lib/peerMessages";
 import { appendTrackPoint, clearTrackHistory } from "@/lib/tracking";
 import { turnConfigFromEnv } from "@/lib/turn";
-import { loadRoomControls, rememberRoomControl, verifyRoomControl, type RoomControl } from "@/lib/moderation";
+import { kicksForRoom, loadRoomControls, rememberRoomControl, verifyRoomControl, type RoomControl } from "@/lib/moderation";
+import { dropRoster, keepAvatars, loadAvatars, loadRosters, removeMember, saveAvatars, saveRosters, setAvatar, touchMember, upsertMember, type Avatars, type Rosters } from "@/lib/roomRoster";
 import { freshLocation, acceptMeasurement, announcement } from "@/lib/locationFreshness";
 import type { TransportMode } from "@/lib/transport";
 
@@ -69,6 +70,12 @@ export function usePeerNetwork(opts: {
   const [people, setPeople] = useState<Record<string, RemotePerson>>({});
   const [roomPeers, setRoomPeers] = useState<Record<string, number>>({});
   const [roomMembers, setRoomMembers] = useState<Record<string, string[]>>({});
+  /** Szobánként a valaha bemutatkozott tagok (csak helyi névsor; az online állapotot a roomMembers adja). */
+  const [roster, setRoster] = useState<Rosters>({});
+  const rosterRef = useRef<Rosters>({});
+  /** A névsorban szereplő tagok profilképei (eszközazonosító szerint), hogy a lekapcsolódott tagok is látsszanak a képükkel. */
+  const [avatars, setAvatars] = useState<Avatars>({});
+  const avatarsRef = useRef<Avatars>({});
   const [connectIssues, setConnectIssues] = useState(0);
   /** Növelésével a hiányzó szobák újracsatlakoznak (a főeffekt csak a még nem csatlakozott tokeneket építi fel). */
   const [epoch, setEpoch] = useState(0);
@@ -94,6 +101,35 @@ export function usePeerNetwork(opts: {
   const onAskRef = useRef(opts.onShareRequest);
   onAskRef.current = opts.onShareRequest;
   helloRef.current = profile && deviceId ? { deviceId, name: profile.name, avatar: profile.avatar } : null;
+
+  const updateAvatars = useCallback((change: (current: Avatars) => Avatars) => {
+    const next = change(avatarsRef.current);
+    if (next === avatarsRef.current) return;
+    avatarsRef.current = next;
+    saveAvatars(next);
+    setAvatars(next);
+  }, []);
+
+  const updateRoster = useCallback((change: (current: Rosters) => Rosters) => {
+    const next = change(rosterRef.current);
+    if (next === rosterRef.current) return;
+    rosterRef.current = next;
+    saveRosters(next);
+    setRoster(next);
+    // Olyan tag képét, aki már egyik névsorban sem szerepel, nem tartjuk meg.
+    const members = new Set<string>();
+    for (const list of Object.values(next)) for (const e of list) members.add(e.deviceId);
+    updateAvatars((a) => keepAvatars(a, members));
+  }, [updateAvatars]);
+
+  useEffect(() => {
+    const loaded = loadRosters();
+    rosterRef.current = loaded;
+    setRoster(loaded);
+    const pictures = loadAvatars();
+    avatarsRef.current = pictures;
+    setAvatars(pictures);
+  }, []);
 
   const refreshCounts = useCallback(() => {
     const counts: Record<string, number> = {};
@@ -141,6 +177,7 @@ export function usePeerNetwork(opts: {
   }, []);
 
   const dropDevice = useCallback((token: string, dev: string) => {
+    updateRoster((r) => removeMember(r, token, dev));
     const j = joinedRef.current.get(token);
     if (!j) return;
     roomDevicesRef.current.get(token)?.delete(dev);
@@ -149,7 +186,7 @@ export function usePeerNetwork(opts: {
     for (const [peerId, d] of peerDeviceRef.current) if (d === dev && peerInAnyRoom(peerId)) elsewhere = true;
     if (!elsewhere) setPeople((prev) => { const next = { ...prev }; delete next[dev]; return next; });
     refreshCounts();
-  }, [refreshCounts]);
+  }, [refreshCounts, updateRoster]);
 
   const leaveRoom = useCallback(
     (token: string, removePeople: boolean) => {
@@ -268,8 +305,12 @@ export function usePeerNetwork(opts: {
           if (helloRef.current) void j.hello.send(helloRef.current, { target: peerId }).catch(() => undefined);
           const first = announcement(lastLocRef.current, Date.now());
           if (first !== undefined) void j.loc.send(first, { target: peerId }).catch(() => undefined);
+          // A gazda aláírt eltávolításait továbbadjuk: így a lemaradt tagok (és maga az eltávolított) is értesülnek, a gazda online léte nélkül is.
+          for (const kick of kicksForRoom(token)) void j.control.send(kick, { target: peerId }).catch(() => undefined);
         };
         room.onPeerLeave = (peerId) => {
+          const leftDevice = peerDeviceRef.current.get(peerId);
+          if (leftDevice) updateRoster((r) => touchMember(r, token, leftDevice, Date.now()));
           j.peers.delete(peerId);
           pendingLocRef.current.delete(peerId);
           refreshCounts();
@@ -285,6 +326,8 @@ export function usePeerNetwork(opts: {
           if (!h || h.deviceId === deviceId) return;
           if (isKicked(token, h.deviceId)) { j.peers.delete(peerId); refreshCounts(); return; }
           peerDeviceRef.current.set(peerId, h.deviceId);
+          updateRoster((r) => upsertMember(r, token, h, Date.now(), deviceId));
+          if (rosterRef.current[token]?.some((e) => e.deviceId === h.deviceId)) updateAvatars((a) => setAvatar(a, h.deviceId, h.avatar));
           let known = roomDevicesRef.current.get(token);
           if (!known) { known = new Set(); roomDevicesRef.current.set(token, known); }
           known.add(h.deviceId);
@@ -324,8 +367,8 @@ export function usePeerNetwork(opts: {
           if (!c || c.token !== token || !saved?.ownerKey) return;
           void verifyRoomControl(c, saved.ownerKey).then((ok) => {
             if (!ok) return;
-            if (c.kind === "close") onClosedRef.current(token, "closed");
-            else if (c.target === deviceId) onClosedRef.current(token, "kicked");
+            if (c.kind === "close") { updateRoster((r) => dropRoster(r, token)); onClosedRef.current(token, "closed"); }
+            else if (c.target === deviceId) { rememberRoomControl(c); updateRoster((r) => dropRoster(r, token)); onClosedRef.current(token, "kicked"); }
             else if (c.target) { rememberRoomControl(c); dropDevice(token, c.target); }
           }).catch(() => undefined);
         };
@@ -344,7 +387,7 @@ export function usePeerNetwork(opts: {
       cancelled = true;
       clearTimeout(retryTimer);
     };
-  }, [tokensKey, ready, deviceId, epoch, leaveRoom, refreshCounts, applyLocation, dropDevice]);
+  }, [tokensKey, ready, deviceId, epoch, leaveRoom, refreshCounts, applyLocation, dropDevice, updateRoster, updateAvatars]);
 
   useEffect(
     () => () => {
@@ -412,6 +455,8 @@ export function usePeerNetwork(opts: {
 
   /** Aláírt tulajdonosi művelet elküldése és helyi alkalmazása. */
   const sendControl = useCallback(async (control: RoomControl) => {
+    // Saját magunkat sosem távolítjuk el (ugyanarról az eszközről sem).
+    if (control.kind === "kick" && control.target === deviceId) return;
     const j = joinedRef.current.get(control.token);
     if (j?.peers.size) {
       await j.control.send(control).catch(() => undefined);
@@ -421,7 +466,13 @@ export function usePeerNetwork(opts: {
       rememberRoomControl(control);
       dropDevice(control.token, control.target);
     }
-  }, [dropDevice]);
+  }, [dropDevice, deviceId]);
+
+  /** Egy szoba névsorának törlése (szoba törlésekor vagy kilépéskor). */
+  const forgetRoom = useCallback((token: string) => updateRoster((r) => dropRoster(r, token)), [updateRoster]);
+
+  /** Egy tag törlése a helyi névsorból eltávolítás nélkül (csak lekapcsolódott tagnál van értelme: ha újra bemutatkozik, visszakerül). */
+  const forgetMember = useCallback((token: string, dev: string) => updateRoster((r) => removeMember(r, token, dev)), [updateRoster]);
 
   const requestShare = useCallback((dev: string) => {
     let sent = false;
@@ -439,5 +490,5 @@ export function usePeerNetwork(opts: {
     setPeople((prev) => (prev[dev] ? { ...prev, [dev]: { ...prev[dev], points: clearTrackHistory(prev[dev].points) } } : prev));
   }, []);
 
-  return { people, roomPeers, roomMembers, connectIssues, sendLocation, sendControl, requestShare, clearTrail };
+  return { people, roomPeers, roomMembers, roster, avatars, connectIssues, sendLocation, sendControl, forgetRoom, forgetMember, requestShare, clearTrail };
 }
