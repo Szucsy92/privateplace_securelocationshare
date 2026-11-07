@@ -831,7 +831,7 @@ export default function MapApp() {
                 color={p.color}
                 active={follow?.id === p.deviceId}
                 dot={!p.online ? "warn" : !p.sharing ? "off" : p.at && clock - p.at < 15000 ? "on" : "wait"}
-                status={personStatus(p)}
+                status={personStatus(p, clock)}
                 onClick={() => toggleFollow(p.deviceId)}
               />
             ))}
@@ -1772,10 +1772,14 @@ function ProfileForm(props: {
   );
 }
 
-function personStatus(p: RemotePerson) {
+function personStatus(p: RemotePerson, now: number) {
   if (!p.online) return "";
   if (!p.sharing) return "nem oszt meg";
   if (!p.at) return "";
+  // A küldő szűrője dönt az állásról: ha megállást jelez, a sebesség biztosan 0 (nem maradhat meg a régi érték).
+  if (p.stoppedSince != null) return kmh(0);
+  // Elavult mérés sebességét nem mutatjuk (a legutolsó érték nem ragadhat be).
+  if (now - p.at >= 15000) return kmh(null);
   return kmh(p.speed);
 }
 
