@@ -90,6 +90,9 @@ const SIGMA_A_MIN = 0.8, SIGMA_A_MAX = 4;
 const GAP_RESET_MS = 60000;    // mozgásban ennyi csend után a Kalman újraindul
 const SPARSE_DT = 2.5;         // s: ennél ritkább a mérés → ritkított ablakok
 const DT_SAMPLES = 5, DT_MAX_S = 20;   // fix-köz medián: utolsó 5 köz; ennél nagyobb szünet (jelvesztés) nem számít ütemnek
+const DOP_CHECK_MIN_MS = 5000; // ennyi pozíció-előzmény kell a Doppler hihetőségi ellenőrzéséhez (mozgás ágon)
+const DOP_CHECK_FACTOR = 0.3;  // a Doppler-sebesség szerint várt elmozdulásnak legalább ennyiszerese kell, hogy a pozíciókban is látsszon
+const DOP_CHECK_MAX_ACC = 20;  // m: ennél pontatlanabb fixnél nem ítéljük meg a Dopplert
 const GO_FIX_ACC = 15;         // m: két független jelzés (Doppler + járás) egyetlen fixből is indít, ha ennyire pontos
 
 // Indítás (horgony felvétele több mérésből)
@@ -142,6 +145,8 @@ export function createDriftFilter() {
   let cand: { p: Vec; at: number; acc: number }[] = [];
   let candMiss = 0, candNear: number[] = [];
   let dts: number[] = [];
+  /** Igaz, ha a Doppler-sebességet a pozíciók megcáfolták (tartós hamis 1–2 m/s): amíg nem igazolódik, nem indít és nem tart mozgásban. */
+  let dopDistrust = false;
 
   const newAxis = (p: number, v: number, pp: number, pv: number): Axis => ({ p, v, Ppp: pp, Ppv: 0, Pvv: pv });
   const predict = (a: Axis, dt: number, sa: number) => {
@@ -298,12 +303,14 @@ export function createDriftFilter() {
       recent.push({ p: z, w, at, speed: sp });
       if (recent.length > 8) recent.shift();
       const dopStill = dopplerOk && sp! < STILL_SPEED;
+      if (dopStill || (dopplerOk && sp! >= FAST_SPEED)) dopDistrust = false;   // hiteles Doppler (valódi 0 vagy jármű-sebesség) visszaadja a bizalmat
+      const dopGo = dopplerOk && sp! >= GO_SPEED && !(dopDistrust && sp! < FAST_SPEED);   // cáfolt Doppler nem „indulás”-bizonyíték
 
       // a) Doppler-indulás: az utolsó 3 fixből 2 gyalogos tempójú; egyetlen tüske nem indít.
       // A járás-jelzés a Doppler hiányában (vagy ha az nem mond ellent) felgyorsítja az indulást; Doppler-„áll” mellett nem számít.
-      fastHist.push((dopplerOk && sp! >= GO_SPEED) || (fix.stepping === true && !dopStill));
+      fastHist.push(dopGo || (fix.stepping === true && !dopStill));
       if (fastHist.length > 3) fastHist.shift();
-      const bothSensors = dopplerOk && sp! >= GO_SPEED && fix.stepping === true && (fix.acc ?? 999) <= GO_FIX_ACC;   // Doppler és járás-jelzés egyszerre: két független bizonyíték
+      const bothSensors = dopGo && fix.stepping === true && (fix.acc ?? 999) <= GO_FIX_ACC;   // Doppler és járás-jelzés egyszerre: két független bizonyíték
       let leave = fastHist.filter(Boolean).length >= GO_FIXES || (dopplerOk && sp! >= FAST_SPEED) || bothSensors;
       let relocate: Vec | null = null;
 
@@ -348,7 +355,7 @@ export function createDriftFilter() {
       if (!leave) {
         // Adaptív horgonykorrekció: a horgonytól tartósan máshol, egymással egyező, szűk klaszterben mérő fixek (jelölt).
         // Rövid multipath-eltolódás vagy vándorló drift nem elég; mozgásra utaló jel esetén nem gyűjtünk jelöltet.
-        const walkEv = (dopplerOk && sp! >= GO_SPEED) || (fix.stepping === true && !dopStill);
+        const walkEv = dopGo || (fix.stepping === true && !dopStill);
         if (fix.src !== "network" && (fix.acc ?? 999) <= CAND_MAX_ACC && !walkEv) {
           const nearThr = Math.max(CAND_NEAR_M, fix.acc ?? 10), visitThr = Math.max(CAND_VISIT_M, 0.6 * (fix.acc ?? 10));
           if (d >= nearThr && d < farThr) {
@@ -409,6 +416,32 @@ export function createDriftFilter() {
 
     /* ---------- MOZGÁS (Kalman, állandó sebesség modell) ---------- */
     if (prevAt !== null && at - prevAt > GAP_RESET_MS) { toMoving(z, sigma * sigma); }
+    // Doppler hihetőségi ellenőrzés: egyes telefonok megállás után is tartósan 1–2 m/s „sebességet” jelentenek (a szolgáltató a
+    // pozíciózajból számolja). Ha a Doppler ≥ GO_SPEED, de a pozíciók az elmúlt másodpercekben a várt elmozdulás töredékét sem
+    // tették meg, és a lépésérzékelő sem jelez járást, akkor a Doppler-érték nem bizonyíték: 0-nak vesszük, és a megcáfolás
+    // addig él (`dopDistrust`), amíg a pozíciók nem igazolják, vagy hiteles Doppler (0 / jármű-sebesség) nem érkezik.
+    if (sp !== null && sp < STILL_SPEED) dopDistrust = false;
+    else if (sp !== null && sp >= FAST_SPEED) dopDistrust = false;
+    else if (sp !== null && fix.stepping !== true && (fix.acc ?? 999) <= DOP_CHECK_MAX_ACC) {
+      const span = Math.max(8000, 3 * dtS * 1000);
+      const pts = [...recent.filter((r) => at - r.at <= span), { p: z, at }];
+      let verdict: "bad" | "ok" | "unknown" = "unknown";
+      if (pts.length >= 5 && at - pts[0]!.at >= DOP_CHECK_MIN_MS) {
+        const n = Math.max(1, Math.floor(pts.length / 3));
+        const head = pts.slice(0, n), tail = pts.slice(-n);
+        const c1 = wmean(head.map((q) => ({ p: q.p, w: 1 }))), c2 = wmean(tail.map((q) => ({ p: q.p, w: 1 })));
+        const el = (tail.reduce((q, r) => q + r.at, 0) / n - head.reduce((q, r) => q + r.at, 0) / n) / 1000;
+        if (el >= 3) {
+          // A küszöb zajérzékeny: a pozíciók szórásánál (kiugrásoktól megtisztítva) kisebb elmozdulás nem bizonyít mozgást.
+          const margin = Math.max(2, DOP_CHECK_FACTOR * sp * el, 1.2 * robustSpread(pts, geoMedian(pts.map((q) => ({ p: q.p, w: 1 })))));
+          const disp = Math.hypot(c2.x - c1.x, c2.y - c1.y);
+          verdict = disp < margin ? "bad" : disp >= 1.5 * margin ? "ok" : "unknown";   // köztes sáv: marad az eddigi döntés (nincs villogás)
+        }
+      }
+      if (verdict === "bad") dopDistrust = true;
+      else if (verdict === "ok") dopDistrust = false;
+      if (sp >= GO_SPEED && dopDistrust) sp = 0;
+    }
     const kxx = kx!, kyy = ky!;
     const v = Math.hypot(kxx.v, kyy.v);
     const sa = Math.min(SIGMA_A_MAX, Math.max(SIGMA_A_MIN, 0.5 + 0.35 * v));
@@ -432,8 +465,14 @@ export function createDriftFilter() {
       if (sp >= 0.7 && fix.bearing != null && Number.isFinite(fix.bearing)) {
         const b = (fix.bearing * Math.PI) / 180, R = 0.8 * 0.8 + (0.15 * sp) ** 2;
         updVel(kxx, sp * Math.sin(b), R); updVel(kyy, sp * Math.cos(b), R);
-      } else if (sp < STILL_SPEED) {
-        updVel(kxx, 0, 0.3 * 0.3); updVel(kyy, 0, 0.3 * 0.3);
+      } else if (sp < GO_SPEED) {
+        // Lassú / álló Doppler: a Kalman-sebesség gyorsan nullára húzódik (az előző nagy sebesség ne „csengjen utána”).
+        const R = sp < STILL_SPEED ? 0.3 * 0.3 : 0.5 * 0.5;
+        updVel(kxx, 0, R); updVel(kyy, 0, R);
+      } else {
+        // Irány nélküli Doppler: a sebesség nagyságát igazítjuk a mérthez (az irányt a Kalman tartja).
+        const cur = Math.hypot(kxx.v, kyy.v);
+        if (cur > 0.1) { const k = Math.min(1, sp / cur); kxx.v *= k; kyy.v *= k; }
       }
     }
 
@@ -460,17 +499,29 @@ export function createDriftFilter() {
     lastAt = at;
     const pos = toLL({ x: kxx.p, y: kyy.p });
     const spd = Math.hypot(kxx.v, kyy.v);
-    const speedWindow = recent.slice(-4);
-    let confirmedMove = false;
-    if (speedWindow.length >= 3) {
-      const a = speedWindow[0]!.p, b = speedWindow[speedWindow.length - 1]!.p;
-      const displacement = Math.hypot(b.x - a.x, b.y - a.y);
-      const elapsed = Math.max(0.5, (speedWindow[speedWindow.length - 1]!.at - speedWindow[0]!.at) / 1000);
-      confirmedMove = displacement >= Math.max(2.5, elapsed * 0.65);
+    // A Doppler-sebesség független a pozíciózajtól, ezért ha van, az a döntő: a Kalman-maradék és a pozíció-ugrálás
+    // nem jeleníthet meg „mozgást”, amikor a Doppler áll (pl. 23 km/h-s menetből megállva nem maradhat 5 km/h).
+    // Doppler nélkül a sebesség a pozíciók két felének súlypontja közti, zajszinttel korrigált elmozdulásból jön,
+    // és soha nem lehet nagyobb a Kalman-becslésnél.
+    let displaySpeed: number;
+    if (dopplerOk && sp !== null && (fix.acc ?? 999) <= WALK_MAX_ACC) {
+      displaySpeed = sp >= STILL_SPEED ? sp : 0;
+    } else {
+      const win = recent.slice(-6);
+      let est = 0;
+      if (win.length >= 4) {
+        const half = Math.floor(win.length / 2);
+        const a = win.slice(0, half), b = win.slice(-half);
+        const ca = wmean(a), cb = wmean(b);
+        const ta = a.reduce((q, r) => q + r.at, 0) / a.length, tb = b.reduce((q, r) => q + r.at, 0) / b.length;
+        const disp = Math.hypot(cb.x - ca.x, cb.y - ca.y);
+        const el = Math.max(0.5, (tb - ta) / 1000);
+        const margin = Math.max(2.5, 0.6 * (fix.acc ?? 15));
+        if (disp >= margin && disp / el >= SPEED_NOISE_FLOOR) est = Math.min(spd, disp / el);
+      }
+      displaySpeed = est >= SPEED_NOISE_FLOOR ? est : 0;
     }
-    const dopplerSpeed = sp !== null && sp >= GO_SPEED && (fix.acc ?? 999) <= WALK_MAX_ACC;
-    const displaySpeed = dopplerSpeed ? sp : (confirmedMove && spd >= SPEED_NOISE_FLOOR ? spd : 0);
-    const bearing = displaySpeed! >= 0.8 ? ((Math.atan2(kxx.v, kyy.v) * 180) / Math.PI + 360) % 360 : fix.bearing ?? lastBearing;
+    const bearing = displaySpeed >= 0.8 ? ((Math.atan2(kxx.v, kyy.v) * 180) / Math.PI + 360) % 360 : fix.bearing ?? lastBearing;
     return emit(fix, pos, at, { speed: displaySpeed, bearing });
   };
 }
