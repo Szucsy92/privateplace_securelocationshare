@@ -831,7 +831,7 @@ export default function MapApp() {
             description={
               updateStatus === "downloading" ? `Letöltés…${updatePercent !== null ? ` ${updatePercent}%` : ""}`
               : updateStatus === "permission" ? "Engedélyezd a telepítést a Private Place számára, majd koppints újra a Letöltésre."
-              : availableUpdate?.version ? `Elérhető verzió: ${availableUpdate.version}` : "A Private Place új verziója letölthető."
+              : undefined
             }
           />
           <div className="flex justify-end gap-2 p-5">
