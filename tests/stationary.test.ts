@@ -210,6 +210,20 @@ test("a járás-jelzés nem ront: a Doppler „áll” felülírja (helyben topo
   settle(f, 1, 15);
   for (let t = 16; t <= 30; t++) expect(f(fx(0, 0, t, { speed: 0.05, stepping: true })).mode).toBe("still");
 });
+test("a lépésérzékelő nem oldja fel az állást, ha a Doppler köztes tartományban van és a pozíció nem mozdul", () => {
+  const f = createDriftFilter();
+  settle(f, 1, 15);
+  for (let t = 16; t <= 40; t++) expect(f(fx(0, 0, t, { speed: 0.56, stepping: true })).mode).toBe("still");
+});
+test("lassú séta (köztes Doppler + lépésjelzés + elmozduló pozíció) pár másodperc alatt mozgásba vált", () => {
+  for (const v of [0.55, 0.65, 0.75]) {
+    const f = createDriftFilter();
+    settle(f, 1, 15);
+    let at = -1;
+    for (let t = 16; t <= 30 && at < 0; t++) if (f(fx((t - 15) * v, 0, t, { speed: v, stepping: true })).mode === "moving") at = t - 15;
+    expect(at > 0 && at <= 8).toBe(true);
+  }
+});
 test("sebességadat nélküli, tartós, egyirányú elmozdulást (séta) felismer", () => {
   const f = createDriftFilter();
   settle(f, 1, 15, { speed: null });
