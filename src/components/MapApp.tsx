@@ -44,6 +44,7 @@ import { QrScanner, canScanQr } from "@/components/QrScanner";
 import type { MapPerson, Orientation, TrackPoint } from "@/components/LiveMap";
 import { usePeerNetwork, type RemotePerson } from "@/hooks/usePeerNetwork";
 import { useElasticOverscroll } from "@/hooks/useElasticOverscroll";
+import { useLandscape, useScrollFade } from "@/hooks/useLandscape";
 import { appendTrackPoint, clearTrackHistory, publishIntervalMs, shouldPublishLocation } from "@/lib/tracking";
 import { useVisibleClock } from "@/hooks/useVisibleClock";
 import { SELF_COLOR, colorForDevice } from "@/lib/peerMessages";
@@ -185,7 +186,9 @@ export default function MapApp() {
   const prefsRef = useRef(prefs);
   prefsRef.current = prefs;
   const compassRef = useRef<HTMLSpanElement | null>(null);
-  const railRef = useElasticOverscroll<HTMLDivElement>("x");
+  const landscape = useLandscape();
+  const railRef = useElasticOverscroll<HTMLDivElement>(landscape ? "y" : "x");
+  useScrollFade(railRef, landscape);
   const headingRef = useRef<HeadingState>({ source: "gps", angle: null });
   const sensorRef = useRef<number | null>(null);
   const fixBearingRef = useRef<number | null>(null);
@@ -777,7 +780,7 @@ export default function MapApp() {
 
   return (
     <div
-      className="map-workspace glass-shell"
+      className="map-workspace glass-shell map-live"
       style={mapPadding ? ({ "--win-r": `${mapPadding.right}px`, "--win-b": `${mapPadding.bottom}px` } as CSSProperties) : undefined}
     >
       <div className="map-bg">
