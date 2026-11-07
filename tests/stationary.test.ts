@@ -205,6 +205,29 @@ test("a járás-jelzés sebességadat nélkül gyorsan feloldja az állást", ()
   f(fx(0, 0, 16, { speed: null, stepping: true }));
   expect(f(fx(1, 0, 17, { speed: null, stepping: true })).mode).toBe("moving");
 });
+
+test("álló helyzetben a tartós, hamis 1,4 m/s Doppler (≈5 km/h) nem oldja fel az állást", () => {
+  const f = createDriftFilter();
+  settle(f, 1, 15);
+  let out!: FilteredFix;
+  for (let t = 16; t <= 45; t++) {
+    out = f(fx(0.4 * Math.sin(t), 0.4 * Math.cos(t), t, { speed: 1.4, bearing: 90, stepping: false }));
+    expect(out.mode).toBe("still");
+    expect(out.speed).toBe(0);
+  }
+});
+
+test("nagyon lassú séta (0,55 m/s) pozíciós elmozdulással és lépésjelzéssel feloldja az állást", () => {
+  const f = createDriftFilter();
+  settle(f, 1, 15);
+  let out!: FilteredFix;
+  for (let t = 16; t <= 30; t++) {
+    out = f(fx((t - 15) * 0.55, 0, t, { speed: 0.55, bearing: 0, stepping: true }));
+    if (out.mode === "moving") break;
+  }
+  expect(out.mode).toBe("moving");
+});
+
 test("a járás-jelzés nem ront: a Doppler „áll” felülírja (helyben topogás)", () => {
   const f = createDriftFilter();
   settle(f, 1, 15);

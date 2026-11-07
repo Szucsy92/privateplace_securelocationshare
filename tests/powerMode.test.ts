@@ -27,6 +27,9 @@ describe("indulás-észlelés ritkított mérésnél", () => {
   test("gyalogos tempójú Doppler azonnal ébreszt", () => {
     expect(movementWake({ ...anchor, speed: 1.1, acc: 8 }, anchor)).toBe(true);
   });
+  test("lassú gyaloglás Doppler-je (0,6 m/s) is felébreszti a ritkított GPS-t", () => {
+    expect(movementWake({ ...anchor, speed: 0.6, acc: 8 }, anchor)).toBe(true);
+  });
   test("álló, jó fix nem ébreszt", () => {
     expect(movementWake({ ...anchor, speed: 0.1, acc: 8 }, anchor)).toBe(false);
   });

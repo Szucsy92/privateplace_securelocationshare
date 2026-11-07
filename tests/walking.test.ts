@@ -15,3 +15,10 @@ test("lassú, nagy lengés (autó fékezés) nem járás", () => {
 test("rövid minta nem elég", () => {
   expect(looksLikeWalking(sig(20, (t) => 2 * Math.sin(2 * Math.PI * 1.8 * t)), HZ)).toBe(false);
 });
+
+test("lassú járás kisebb gyorsulás-ingadozással is felismerhető", () => {
+  expect(looksLikeWalking(sig(150, (t) => 1.0 * Math.sin(2 * Math.PI * 1.45 * t)), HZ)).toBe(true);
+});
+test("kis amplitúdójú asztali rezgés nem lesz járás", () => {
+  expect(looksLikeWalking(sig(150, (t) => 0.2 * Math.sin(2 * Math.PI * 1.6 * t)), HZ)).toBe(false);
+});
