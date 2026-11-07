@@ -7,7 +7,7 @@ import { distanceMeters, type LatLngPoint } from "./mapMath";
 export type StopState = { anchor: LatLngPoint; since: number };
 
 /** Ennél gyorsabb haladás biztosan mozgás (m/s). */
-export const MOVING_SPEED = 0.8;
+export const MOVING_SPEED = 0.55;
 /** Ennél rosszabb pontosságú fixből nem döntünk a megállásról (m). */
 const UNRELIABLE_ACC = 50;
 
@@ -85,7 +85,7 @@ const SAT_FRESH_MS = 22000;    // ennyi ideig friss a műholdas fix; ennyi csend
 const INIT_ROUGH_MS = 8000;    // induláskor ennyit várunk jó fixre, mielőtt durva fixre horgonyoznánk
 const ACC_FLOOR = 6, ACC_TRUST = 1.3;
 const STILL_SPEED = 0.5;       // m/s: ennél lassabb Doppler = „áll” bizonyíték
-const GO_SPEED = 0.8;          // m/s: gyalogos indulás (lassú séta is)
+const GO_SPEED = 0.55;         // m/s: lassú gyaloglás; pozíciós/lépéses megerősítéssel
 const FAST_SPEED = 2.5;        // m/s: ennyinél egyetlen fix is elég (jármű indul)
 const STEP_MOVE_MIN_M = 2, STEP_MOVE_ACC_K = 0.4;   // m: köztes Doppler mellett a lépésjelzéshez ennyi nyers elmozdulás kell az utóbbi ~5 fixben
 const GO_FIXES = 2;            // az utolsó 3 fixből ennyi gyors kell a feloldáshoz (egyedi sebességtüske nem indít)
@@ -325,14 +325,18 @@ export function createDriftFilter() {
       if (recent.length > 8) recent.shift();
       const dopStill = dopplerOk && sp! < STILL_SPEED;
       if (dopStill || (dopplerOk && sp! >= FAST_SPEED)) dopDistrust = false;   // hiteles Doppler (valódi 0 vagy jármű-sebesség) visszaadja a bizalmat
-      const dopGo = dopplerOk && sp! >= GO_SPEED && !(dopDistrust && sp! < FAST_SPEED);   // cáfolt Doppler nem „indulás”-bizonyíték
 
-      // a) Doppler-indulás: az utolsó 3 fixből 2 gyalogos tempójú; egyetlen tüske nem indít.
-      // A járás-jelzés a Doppler hiányában (vagy ha az nem mond ellent) felgyorsítja az indulást; Doppler-„áll” mellett nem számít.
-      // Köztes Doppler-tartományban (0,5–0,8 m/s) a lépésjelzés csak akkor bizonyíték, ha a nyers pozíció is elmozdult az utóbbi ~5 fixben:
-      // állva a zajos lépésérzékelő nem oldja fel az állást, a lassú séta viszont pár másodperc alatt felismerhető marad.
       const back = recent[Math.max(0, recent.length - 6)]!;
       const movedRecently = recent.length >= 4 && Math.hypot(z.x - back.p.x, z.y - back.p.y) >= Math.max(STEP_MOVE_MIN_M, STEP_MOVE_ACC_K * (fix.acc ?? 6));
+      // Álló módban a GPS-szolgáltató által becsült Doppler önmagában nem elég:
+      // egyes Androidokon a helyben álló telefon is tartósan 1–1,5 m/s-ot (4–5 km/h) jelent.
+      // Lassú gyaloglásnál ezért legalább pozíciós elmozdulás vagy lépésjel kell; a gyors járműsebesség
+      // (≥ FAST_SPEED) továbbra is egy fixből feloldhatja az állást.
+      const dopGo = dopplerOk && sp! >= GO_SPEED && !(dopDistrust && sp! < FAST_SPEED)
+        && (sp! >= FAST_SPEED || movedRecently || fix.stepping === true);
+      // A járás-jelzés Doppler hiányában (vagy ha az nem mond ellent) segít; Doppler-„áll” mellett nem számít.
+      // Köztes Doppler-tartományban a lépésjelzés csak akkor bizonyíték, ha a nyers pozíció is elmozdult:
+      // a zajos lépésérzékelő önmagában nem oldja fel az állást.
       const stepEv = fix.stepping === true && !dopStill && (!dopplerOk || movedRecently);
       fastHist.push(dopGo || stepEv);
       if (fastHist.length > 3) fastHist.shift();

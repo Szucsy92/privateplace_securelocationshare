@@ -78,7 +78,7 @@ export function looksLikeWalking(mags: number[], hz: number): boolean {
   let cross = 0;
   for (let i = 1; i < dev.length; i++) if (dev[i - 1]! < 0 !== dev[i]! < 0) cross++;
   const perSec = cross / (mags.length / hz);
-  return rms >= 1 && perSec >= 2.4 && perSec <= 6;
+  return rms >= 0.65 && perSec >= 2.4 && perSec <= 5.5;
 }
 
 /** Igaz, ha az utóbbi ~3 s-ban járás-szerű mozgás volt. Előtérben működik; háttérben a natív érzékelő kell hozzá. */
