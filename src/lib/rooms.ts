@@ -39,9 +39,20 @@ function defaultRandom(n: number) {
   return bytes;
 }
 
-/** A QR-kód csak a szoba kulcsát tartalmazza (link, név, szín és egyéb adat nélkül). */
-export function roomQrValue(token: string): string {
-  return token;
+const OWNER_KEY_PATTERN = /^[A-Za-z0-9_-]{87}$/;
+
+/**
+ * A QR-kód a szoba kulcsát és a gazda nyilvános ellenőrző kulcsát tartalmazza (link, név, szín és egyéb adat nélkül).
+ * A nyilvános kulcs nem titok: csak az aláírások ellenőrzésére jó, így a QR-ral csatlakozók is elfogadják a gazda törlését és eltávolítását.
+ */
+export function roomQrValue(token: string, ownerKey?: string): string {
+  return ownerKey && OWNER_KEY_PATTERN.test(ownerKey) ? `${token}.${ownerKey}` : token;
+}
+
+/** Másolható és megosztható kód: olvasható csoportosítású szobakulcs + a gazda ellenőrző kulcsa. */
+export function roomShareCode(token: string, ownerKey?: string): string {
+  const grouped = formatRoomToken(token);
+  return ownerKey && OWNER_KEY_PATTERN.test(ownerKey) ? `${grouped}.${ownerKey}` : grouped;
 }
 
 /** Olvasható csoportosítás: ABCDE-FGHJK-… */
@@ -70,8 +81,15 @@ export function parseRoomInput(input: string): { token: string; name: string | n
       const name = params.get("nev");
       const color = params.get("szin");
       const ownerKey = params.get("gazda");
-      return { token, name: name ? name.slice(0, 40) : null, ...(isRoomColor(color) ? { color } : {}), ...(ownerKey && /^[A-Za-z0-9_-]{87}$/.test(ownerKey) ? { ownerKey } : {}) };
+      return { token, name: name ? name.slice(0, 40) : null, ...(isRoomColor(color) ? { color } : {}), ...(ownerKey && OWNER_KEY_PATTERN.test(ownerKey) ? { ownerKey } : {}) };
     }
+  }
+  const dot = text.lastIndexOf(".");
+  if (dot > 0) {
+    const key = text.slice(dot + 1).trim();
+    const token = normalizeToken(text.slice(0, dot));
+    if (token && OWNER_KEY_PATTERN.test(key)) return { token, name: null, ownerKey: key };
+    return null;
   }
   const token = normalizeToken(text);
   return token ? { token, name: null } : null;
@@ -81,7 +99,7 @@ export function buildRoomLink(base: string, token: string, name?: string, color?
   const params = new URLSearchParams({ szoba: token });
   if (name) params.set("nev", name);
   if (color && isRoomColor(color)) params.set("szin", color);
-  if (ownerKey && /^[A-Za-z0-9_-]{87}$/.test(ownerKey)) params.set("gazda", ownerKey);
+  if (ownerKey && OWNER_KEY_PATTERN.test(ownerKey)) params.set("gazda", ownerKey);
   return `${base.replace(/\/+$/, "")}/#${params.toString()}`;
 }
 

@@ -30,3 +30,7 @@ export function rememberRoomControl(control: RoomControl) {
   if (controls.some((c) => c.nonce === control.nonce)) return;
   try { localStorage.setItem(CONTROL_KEY, JSON.stringify([...controls, control].slice(-MAX_CONTROLS))); } catch { /* nem kritikus */ }
 }
+/** A szobához tartozó, helyben tárolt aláírt eltávolítások (csatlakozó társaknak továbbadjuk, hogy a lemaradt tagok is értesüljenek). */
+export function kicksForRoom(token: string, limit = 20): RoomControl[] {
+  return loadRoomControls().filter((c) => c.kind === "kick" && c.token === token).slice(-limit);
+}
