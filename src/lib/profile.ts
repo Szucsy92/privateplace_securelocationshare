@@ -5,9 +5,9 @@ const DEVICE_KEY = "elohely.device.v1";
 const PREFS_KEY = "elohely.prefs.v1";
 
 export type LocalProfile = { name: string; avatar: string | null };
-export type Prefs = { sharing: boolean; showTrails: boolean; trailIds: string[]; orientation: "north" | "heading"; mapTheme: "dark" | "light"; addressConsent: "ask" | "yes" | "no" };
+export type Prefs = { sharing: boolean; showTrails: boolean; trailIds: string[]; orientation: "north" | "heading"; mapTheme: "dark" | "light"; addressConsent: "ask" | "yes" | "no"; debug: boolean };
 
-export const DEFAULT_PREFS: Prefs = { sharing: false, showTrails: false, trailIds: [], orientation: "north", mapTheme: "dark", addressConsent: "ask" };
+export const DEFAULT_PREFS: Prefs = { sharing: false, showTrails: false, trailIds: [], orientation: "north", mapTheme: "dark", addressConsent: "ask", debug: false };
 
 export function loadProfile(): LocalProfile | null {
   try {
