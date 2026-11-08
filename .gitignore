@@ -35,3 +35,8 @@ dist-ssr
 dist-app
 android
 ios
+
+# Local environment secrets
+.env
+.env.*
+!.env.example
