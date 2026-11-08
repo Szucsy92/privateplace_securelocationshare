@@ -1,4 +1,4 @@
-// Statikus build az Android-alkalmazáshoz (Capacitor). A webes előnézet a vite.config.ts-t használja.
+// Statikus build az Android-alkalmazáshoz (Capacitor).
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
