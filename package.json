@@ -23,6 +23,8 @@
     "@capacitor/ios": "^8.5.3",
     "@capacitor/local-notifications": "^8",
     "@capawesome-team/capacitor-android-battery-optimization": "^8",
+    "@fontsource/dm-sans": "^5.2.0",
+    "@fontsource/space-grotesk": "^5.2.0",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
