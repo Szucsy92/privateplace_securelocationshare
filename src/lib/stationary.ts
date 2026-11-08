@@ -154,7 +154,7 @@ export function createDriftFilter() {
   let stillSince: number | null = null;
   let fastHist: boolean[] = [];
   let far: { p: Vec; at: number; dopStill: boolean; afterGap: boolean }[] = [];
-  let pendingFar: Vec | null = null;
+  let pendingFar: { p: Vec; at: number; acc: number | null }[] = [];
   let recent: { p: Vec; w: number; at: number; speed: number | null }[] = [];
   let acq: { p: Vec; w: number; at: number; speed: number | null; acc: number }[] = [];
   let acqStepHits = 0, initAt: number | null = null;
@@ -255,13 +255,13 @@ export function createDriftFilter() {
   function toMoving(pos: Vec, posVar: number) {
     mode = "moving"; stillSince = null;
     kx = newAxis(pos.x, 0, posVar, 4); ky = newAxis(pos.y, 0, posVar, 4);
-    fastHist = []; far = []; pendingFar = null; recent = []; acq = []; acqStepHits = 0; resetCand();
+    fastHist = []; far = []; pendingFar = []; recent = []; acq = []; acqStepHits = 0; resetCand();
   }
   function toStill(pos: Vec, spread2: number, since: number) {
     mode = "still"; stillSince = since;
     anchor = { ...pos }; shown = { ...pos };
     rms2 = Math.max(spread2, 9);
-    fastHist = []; far = []; pendingFar = null; acq = []; acqStepHits = 0; resetCand();
+    fastHist = []; far = []; pendingFar = []; acq = []; acqStepHits = 0; resetCand();
   }
 
   return function filter(fix: RawFix): FilteredFix {
@@ -354,7 +354,11 @@ export function createDriftFilter() {
           far.push({ p: z, at, dopStill, afterGap: prevAt !== null && at - prevAt > 20000 });
           const allStill = far.every((f) => f.dopStill);
           const stillCount = Math.min(15, Math.ceil(FAR_STILL_MS / 1000 / dtS));
-          if ((!allStill && far.length >= 3) || (far[0]!.afterGap && far.length >= 2) || (allStill && far.length >= stillCount && at - far[0]!.at >= FAR_STILL_MS)) {
+          // A rövid jelszünet utáni 2 fix, illetve a vegyes Dopplerű 3 fix nem elég
+          // egy több száz méteres áthelyezés elfogadásához: multipath is adhat stabil,
+          // de hamis távoli klasztert. Álló Doppler mellett csak hosszú, folyamatos
+          // klaszter igazolhat új helyet.
+          if (allStill && far.length >= stillCount && at - far[0]!.at >= FAR_STILL_MS) {
             relocate = wmean(far.map((f) => ({ p: f.p, w: 1 })));
             leave = true;
             why = `a pozíció tartósan ${f1(Math.hypot(relocate.x - anchor.x, relocate.y - anchor.y))} m-re van a horgonytól (${far.length} egyező fix)`;
@@ -502,18 +506,28 @@ export function createDriftFilter() {
     const nis = ((z.x - kxx.p) ** 2) / (kxx.Ppp + Rm) + ((z.y - kyy.p) ** 2) / (kyy.Ppp + Rm);
     const supported = sp !== null && sp >= 2;
     if (nis > 16 && !supported) {
-      if (pendingFar && Math.hypot(z.x - pendingFar.x, z.y - pendingFar.y) <= FAR_AGREE_M) {
-        const j = { x: (z.x + pendingFar.x) / 2, y: (z.y + pendingFar.y) / 2 };
+      // Egyetlen / két egyező távoli GPS-fix még nem bizonyít áthelyeződést:
+      // a multipath gyakran több másodpercig ugyanazon hamis koordinátát adja.
+      // Három egyező, jó minőségű fix és legalább 5 s tartó klaszter szükséges.
+      const pendingLast = pendingFar[pendingFar.length - 1];
+      if (pendingLast && Math.hypot(z.x - pendingLast.p.x, z.y - pendingLast.p.y) <= FAR_AGREE_M) {
+        pendingFar.push({ p: z, at, acc: fix.acc });
+      } else {
+        pendingFar = [{ p: z, at, acc: fix.acc }];
+      }
+      const pendingGood = pendingFar.filter((q) => q.acc !== null && q.acc <= 25);
+      if (pendingGood.length >= 3 && pendingGood[pendingGood.length - 1]!.at - pendingGood[0]!.at >= 5000) {
+        const j = wmean(pendingGood.map((q) => ({ p: q.p, w: 1 })));
         kxx.p = j.x; kyy.p = j.y; kxx.v = kyy.v = 0; kxx.Ppp = kyy.Ppp = Rm; kxx.Pvv = kyy.Pvv = 4; kxx.Ppv = kyy.Ppv = 0;
-        say("Pozícióugrás elfogadva (2 egyező távoli fix)");
-        pendingFar = null; recent = []; lastAt = at;
+        say(`Pozícióugrás elfogadva (${pendingGood.length} egyező fix, ${Math.round((pendingGood[pendingGood.length - 1]!.at - pendingGood[0]!.at) / 1000)} s)`);
+        pendingFar = []; recent = []; lastAt = at;
         return emit(fix, toLL(j), at, { speed: sp ?? 0, bearing: fix.bearing ?? lastBearing });
       }
-      say("Kiugró fix visszatartva (még nem fogadja el)");
-      pendingFar = z; lastAt = at;
+      say("Kiugró fix visszatartva (tartós klaszter megerősítésére vár)");
+      lastAt = at;
       return emit(fix, toLL({ x: kxx.p, y: kyy.p }), at, { speed: sp ?? Math.hypot(kxx.v, kyy.v), bearing: fix.bearing ?? lastBearing });
     }
-    pendingFar = null;
+    pendingFar = [];
     updPos(kxx, z.x, Rm); updPos(kyy, z.y, Rm);
     if (sp !== null) {
       if (sp >= 0.7 && fix.bearing != null && Number.isFinite(fix.bearing)) {
