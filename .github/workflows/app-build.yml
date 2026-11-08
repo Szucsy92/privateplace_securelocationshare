@@ -47,7 +47,7 @@ jobs:
           SDKM=$(ls "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n1)
           if [ -n "$SDKM" ]; then yes | "$SDKM" --licenses > /dev/null || true; fi
 
-      - run: npm ci
+      - run: npm install --no-audit --no-fund
 
       - name: Webes felület (statikus) építése
         env:
@@ -131,7 +131,7 @@ jobs:
         with:
           node-version: 22
 
-      - run: npm ci
+      - run: npm install --no-audit --no-fund
 
       - name: Webes felület (statikus) építése
         env:
