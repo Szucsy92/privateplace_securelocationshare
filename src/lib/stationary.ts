@@ -128,8 +128,8 @@ const CAND_RMS_ACC_K = 0.75;   // a klaszter-szórás határa legalább ennyisze
 const CAND_NEAR_RESET = 3, CAND_NEAR_WIN_MS = 20000;   // ennyi, a horgonynál ebben az időablakban mért fix eldobja a jelöltet (a horgony „él”, a távoli mérés csak epizód); elszórt, véletlen közeli fix nem számít
 const CAND_START_FIXES = 8;    // induláskor ennyi egyező jelölt-fixtől indul a mozgás a jelöltből a horgony helyett
 const FAST_ACC_MAX = 5;        // m: gyors horgonykorrekció: csak ennél pontosabb fixekből (a drift ±6…50 m pontosságnál jelentkezik)
-const FAST_MIN_MS = 20000;     // a gyors korrekcióhoz szükséges egyező mérési ablak
-const FAST_MIN_FIXES = 10;     // ennyi egyező, pontos fix kell (ritkított mérésnél kevesebb)
+const FAST_MIN_MS = 12000;     // gyors, de nem azonnali korrekció: legalább 12 s stabil, pontos klaszter
+const FAST_MIN_FIXES = 8;      // legalább 8 egyező, pontos fix kell (ritkított mérésnél az időablak is véd)
 const FAST_DIST_K = 2;         // a horgonytól mért távolság legalább ennyiszerese a fixek pontosságának
 const FAST_NEAR_M = 5.5, FAST_NEAR_K = 2;   // pontos (≤ FAST_ACC_MAX) fixnél már ennyi eltérés is jelölt (a 7 m-es állandó eltolódás is látszik)
 const SHOWN_EASE_MIN_M = 1.5;  // m/fix: a megjelenített pont csúszási sebessége az új horgony felé
@@ -408,8 +408,9 @@ export function createDriftFilter() {
             candNear = candNear.filter((x) => at - x <= win); candNear.push(at);
             if (candNear.length >= (dtS >= 2 ? 2 : CAND_NEAR_RESET)) resetCand();
           }
-          // Gyors ág: ha a pontosság hirtelen jó (≤ FAST_ACC_MAX), és a pontos fixek egyezően, a pontosság többszörösénél messzebb mérnek,
-          // az nem drift – nem kell kivárni a 2 percet.
+          // Gyors ág: pontos, stabil klaszter esetén rövidebb korrekciós ablak, hogy a jelölő ne maradjon
+          // 10–15 méterrel a jó nyers GPS mögött. A mozgásjelzés kizárja a jelöltgyűjtést; a klaszter
+          // egyezését és laposságát továbbra is ellenőrizzük, ezért egyetlen GPS-tüske nem elég.
           if (cand.length) {
             const good = cand.filter((q) => q.acc <= FAST_ACC_MAX);
             const fastMin = Math.max(5, Math.min(FAST_MIN_FIXES, Math.floor((0.8 * FAST_MIN_MS) / 1000 / dtS)));
