@@ -31,7 +31,6 @@ jobs:
       APP_VERSION_CODE: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -48,7 +47,7 @@ jobs:
           SDKM=$(ls "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n1)
           if [ -n "$SDKM" ]; then yes | "$SDKM" --licenses > /dev/null || true; fi
 
-      - run: bun install --frozen-lockfile
+      - run: npm ci
 
       - name: Webes felület (statikus) építése
         env:
@@ -57,7 +56,7 @@ jobs:
           VITE_TURN_URLS: ${{ secrets.TURN_URLS }}
           VITE_TURN_USERNAME: ${{ secrets.TURN_USERNAME }}
           VITE_TURN_CREDENTIAL: ${{ secrets.TURN_CREDENTIAL }}
-        run: VITE_APP_VERSION="$APP_VERSION_NAME" bun run build:app
+        run: VITE_APP_VERSION="$APP_VERSION_NAME" npm run build:app
 
       - name: Android projekt előkészítése (engedélyek, ikon, indítókép, verzió)
         run: |
@@ -128,12 +127,11 @@ jobs:
       BUILD_STAMP: ${{ needs.stamp.outputs.stamp }}
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - run: bun install --frozen-lockfile
+      - run: npm ci
 
       - name: Webes felület (statikus) építése
         env:
@@ -142,7 +140,7 @@ jobs:
           VITE_TURN_URLS: ${{ secrets.TURN_URLS }}
           VITE_TURN_USERNAME: ${{ secrets.TURN_USERNAME }}
           VITE_TURN_CREDENTIAL: ${{ secrets.TURN_CREDENTIAL }}
-        run: VITE_APP_VERSION="$APP_VERSION_NAME" bun run build:app
+        run: VITE_APP_VERSION="$APP_VERSION_NAME" npm run build:app
 
       - name: iOS projekt előkészítése
         run: |
