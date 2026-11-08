@@ -18,7 +18,6 @@ A Private Place-szel élőben, másodpercről másodpercre láthatod, merre jár
 ## Telepítő készítése (Android APK és iPhone IPA)
 
 1. GitHubon: **Actions** → **Private Place – APK és IPA építése** → **Run workflow**.
-2. (Opcionális) A `public_url` mezőbe a közzétett weboldal címét írva a meghívókban kattintható link is lesz.
 3. Kb. 10 perc múlva a **Releases** alatt (és a futás „Artifacts” részében) letölthető a dátumos `private-place-<dátum>.apk` és `private-place-<dátum>.ipa`.
 
 **Android:** engedélyezd az ismeretlen forrásból való telepítést, majd telepítsd az APK-t.
@@ -31,12 +30,11 @@ Ha két telefon szigorú mobilneten nem találja egymást, egy továbbító seg�
 - `TURN_URLS` – pl. `turn:turn.pelda.hu:3478,turns:turn.pelda.hu:5349`
 - `TURN_USERNAME`, `TURN_CREDENTIAL`
 
-## Fejlesztés
+## Fejlesztés (natív APK/IPA)
 
 ```sh
 bun install
-bun run dev        # webes változat
-bun run build:app  # telefonos csomag weboldali része
+bun run build:app  # telefonos alkalmazás beágyazott felülete
 bun test tests
 ```
 

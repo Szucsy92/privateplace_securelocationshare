@@ -28,7 +28,7 @@
 - [x] Engedélykérés első indításkor, Beállításokból újranyitható; Android-engedélyek.
 - [x] Egykoppintásos megosztás be/ki, „ki lát” lista, megosztáskérés értesítéssel, súgóbuborékok.
 - [x] Indítókép az ikonhoz igazítva.
-- [x] APK + IPA egy GitHub gombbal, közös kiadásban; README Lovable nélkül.
+- [x] APK + IPA egy GitHub gombbal, közös kiadásban; README natív kiadásra.
 - [x] Adatbázis-előzmények üresek (remix ellenőrizve).
 - [ ] Az új APK/IPA kipróbálása telefonon (háttérben futás, ikon).
 - [x] Háttérértesítés Android 10–14+: „hely” típusú előtérbe lépés, engedély után újraindítás, figyelmeztetés kikapcsolt értesítésnél; maximális engedélykérés („Mindig engedélyezés” is) és közvetlen beállításoldalak.
