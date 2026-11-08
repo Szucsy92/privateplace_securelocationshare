@@ -1,32 +1,13 @@
 import { distanceMeters, type LatLngPoint } from "./mapMath";
 
 /* ------------------------------------------------------------------ */
-/* Megállás-időzítő (a MapApp és a PersonBubble ezt a szerződést várja) */
+/* Megállás-felirat (a MapApp és a PersonBubble ezt a szerződést várja) */
 /* ------------------------------------------------------------------ */
 
 export type StopState = { anchor: LatLngPoint; since: number };
 
 /** Ennél gyorsabb haladás biztosan mozgás (m/s). */
 export const MOVING_SPEED = 0.55;
-/** Ennél rosszabb pontosságú fixből nem döntünk a megállásról (m). */
-const UNRELIABLE_ACC = 50;
-
-/** Megállási sugár: a GPS-zaj mértéke (pontosság), 10 és 40 m között. */
-function stopRadius(acc: number | null): number {
-  return Math.min(40, Math.max(10, acc ?? 10));
-}
-
-/**
- * Megállás követése. A `since` csak akkor indul újra, ha valódi mozgás van: ismert sebesség a küszöb fölött,
- * vagy a pont a horgonytól a GPS-zajnál messzebb került. Kis sodródás nem indítja újra az órát.
- */
-export function updateStop(prev: StopState | null, point: LatLngPoint, speed: number | null, acc: number | null, at: number): StopState {
-  const fresh: StopState = { anchor: { lat: point.lat, lng: point.lng }, since: at };
-  if (!prev) return fresh;
-  if (speed !== null && speed > MOVING_SPEED) return fresh;
-  if (acc !== null && acc > UNRELIABLE_ACC) return prev;
-  return distanceMeters(prev.anchor, point) <= stopRadius(acc) ? prev : fresh;
-}
 
 /** Rövid felirat a megállás idejéről; üres, ha nincs megállás. */
 export function stopLabel(since: number | null | undefined, now: number, moving = false): string {
@@ -411,10 +392,13 @@ export function createDriftFilter() {
           // Gyors ág: pontos, stabil klaszter esetén rövidebb korrekciós ablak, hogy a jelölő ne maradjon
           // 10–15 méterrel a jó nyers GPS mögött. A mozgásjelzés kizárja a jelöltgyűjtést; a klaszter
           // egyezését és laposságát továbbra is ellenőrizzük, ezért egyetlen GPS-tüske nem elég.
+          // A korrekció csak akkor érvényes, ha a MOST érkezett fix is a jelölt-klaszter tagja: ha a telefon már visszatért a horgonyhoz,
+          // a korábbi (rövid, de elég hosszú ideig gyűjtött) távoli klaszter elavult, és nem szabad rá átugrani.
+          const inCluster = cand.length > 0 && cand[cand.length - 1]!.at === at;
           if (cand.length) {
             const good = cand.filter((q) => q.acc <= FAST_ACC_MAX);
             const fastMin = Math.max(5, Math.min(FAST_MIN_FIXES, Math.floor((0.8 * FAST_MIN_MS) / 1000 / dtS)));
-            if (good.length >= fastMin && at - good[0]!.at >= FAST_MIN_MS && at - good[good.length - 1]!.at <= 5000) {
+            if (inCluster && good.length >= fastMin && at - good[0]!.at >= FAST_MIN_MS && at - good[good.length - 1]!.at <= 5000) {
               const gc = wmean(good.map((q) => ({ p: q.p, w: 1 })));
               const grms = rmsAround(good, gc), gmv = Math.hypot(gc.x - anchor.x, gc.y - anchor.y);
               const gacc = good.map((q) => q.acc).sort((a, b) => a - b)[Math.floor(good.length / 2)]!;
@@ -425,7 +409,7 @@ export function createDriftFilter() {
             }
           }
           const candMin = Math.max(8, Math.min(CAND_MIN_FIXES, Math.floor((0.8 * CAND_MIN_MS) / 1000 / dtS)));
-          if (cand.length >= candMin && at - cand[0]!.at >= CAND_MIN_MS) {
+          if (inCluster && cand.length >= candMin && at - cand[0]!.at >= CAND_MIN_MS) {
             const cc = candCenter();
             const crms = rmsAround(cand, cc), mv = Math.hypot(cc.x - anchor.x, cc.y - anchor.y);
             const accs = cand.map((q) => q.acc).sort((a, b) => a - b);
