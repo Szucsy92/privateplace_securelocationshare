@@ -135,8 +135,6 @@ function veilStyle(win: MapWindow): CSSProperties {
 }
 
 function shareBase(): string | null {
-  const configured = import.meta.env["VITE_PUBLIC_APP_URL"] as string | undefined;
-  if (configured) return configured;
   const { protocol, hostname, origin } = window.location;
   if (!protocol.startsWith("http") || hostname === "localhost" || hostname === "127.0.0.1") return null;
   return origin;
