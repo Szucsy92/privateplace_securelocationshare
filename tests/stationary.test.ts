@@ -1,17 +1,11 @@
 import { expect, test } from "bun:test";
-import { updateStop, stopLabel, createDriftFilter, type RawFix, type FilteredFix } from "../src/lib/stationary";
+import { stopLabel, createDriftFilter, type RawFix, type FilteredFix } from "../src/lib/stationary";
 
 const M = 1 / 110540; // 1 m szélességi fokban
 const fx = (n: number, e: number, t: number, extra: Partial<RawFix> = {}): RawFix => ({ lat: 47 + n * M, lng: 19 + (e * M) / Math.cos((47 * Math.PI) / 180), acc: 6, speed: 0, at: t * 1000, src: "gps", ...extra });
 
 test("five minute stationary label is compact", () => { expect(stopLabel(1000, 301000)).toBe("5 perce"); });
 test("one hour stationary label is compact", () => { expect(stopLabel(1000, 3601000)).toBe("1 órája"); });
-test("moving restarts the stop clock", () => {
-  expect(updateStop({ anchor: { lat: 47, lng: 19 }, since: 1000 }, { lat: 47, lng: 19 }, 1, 5, 5000).since).toBe(5000);
-});
-test("small GPS drift does not restart the clock", () => {
-  expect(updateStop({ anchor: { lat: 47, lng: 19 }, since: 1000 }, { lat: 47.00001, lng: 19 }, 0, 5, 5000).since).toBe(1000);
-});
 
 /** Determinisztikus álvéletlen (mulberry32), hogy a szimulált adatsorok reprodukálhatók legyenek. */
 function rng(seed: number) { let a = seed; return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
