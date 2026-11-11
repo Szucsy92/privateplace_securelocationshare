@@ -1,0 +1,63 @@
+# XcodeGen: `brew install xcodegen && cd ios && xcodegen generate && open PrivatePlace.xcodeproj`
+name: PrivatePlace
+options:
+  bundleIdPrefix: hu.privateplace
+  deploymentTarget: { iOS: "16.0" }
+packages:
+  MapLibre:  { url: https://github.com/maplibre/maplibre-gl-native-distribution, from: 6.0.0 }
+  WebRTC:    { url: https://github.com/stasel/WebRTC, from: 125.0.0 }
+  P256K:     { url: https://github.com/21-DOT-DEV/swift-secp256k1, from: 0.17.0 }
+targets:
+  PrivatePlace:
+    type: application
+    platform: iOS
+    sources: [PrivatePlace]
+    dependencies:
+      - package: MapLibre
+        product: MapLibre
+      - package: WebRTC
+        product: WebRTC
+      - package: P256K
+        product: P256K
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: hu.privateplace.app
+        MARKETING_VERSION: 1.0.0          # a CI felülírja a dátumos verzióval
+        CURRENT_PROJECT_VERSION: 1        # a CI felülírja a futás sorszámával
+        TURN_URLS: ""
+        TURN_USERNAME: ""
+        TURN_CREDENTIAL: ""
+        SWIFT_VERSION: 5.9
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: PrivatePlace/Info.plist
+    info:
+      path: PrivatePlace/Info.plist
+      properties:
+        CFBundleDisplayName: Private Place
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        UILaunchScreen: { UIColorName: "" }
+        UIBackgroundModes: [location]
+        NSLocationWhenInUseUsageDescription: "A helyzeted megjelenítéséhez a térképen, és – ha te bekapcsolod – a szobáiddal való megosztásához."
+        NSLocationAlwaysAndWhenInUseUsageDescription: "Hogy a megosztás zárolt képernyőnél és háttérben is működjön, amíg te be van kapcsolva."
+        NSLocationTemporaryUsageDescriptionDictionary: { Precise: "A pontos helyzet a térképhez és a megosztáshoz kell." }
+        NSCameraUsageDescription: "Szoba QR-kódjának beolvasásához."
+        NSPhotoLibraryUsageDescription: "Profilkép kiválasztásához."
+        NSMotionUsageDescription: "A járás észleléséhez (pontosabb megállás/indulás felismerés)."
+        CFBundleURLTypes:
+          - CFBundleURLName: hu.privateplace.invite
+            CFBundleURLSchemes: [privateplace]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        TURN_URLS: "$(TURN_URLS)"
+        TURN_USERNAME: "$(TURN_USERNAME)"
+        TURN_CREDENTIAL: "$(TURN_CREDENTIAL)"
+  PrivatePlaceTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [PrivatePlaceTests]
+    dependencies:
+      - target: PrivatePlace
+    settings:
+      base: { GENERATE_INFOPLIST_FILE: YES }
