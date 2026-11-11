@@ -1,6 +1,6 @@
-name: Private Place – APK és IPA építése
+name: Private Place – natív APK és IPA építése
 
-# Indítás: GitHub → Actions → "Private Place – APK és IPA építése" → Run workflow
+# Indítás: GitHub → Actions → "Private Place – natív APK és IPA építése" → Run workflow
 on:
   workflow_dispatch:
 
@@ -14,13 +14,35 @@ jobs:
     outputs:
       stamp: ${{ steps.s.outputs.stamp }}
       version: ${{ steps.s.outputs.version }}
+      marketing: ${{ steps.s.outputs.marketing }}
+      code: ${{ steps.s.outputs.code }}
       title: ${{ steps.s.outputs.title }}
     steps:
       - id: s
         run: |
+          # Dátumjelző (budapesti idő): fájlnevekben, verzióban, kiadáscímkében.
+          # A versionCode = futás sorszáma + eltolás. Az eltolás (Settings → Variables → VERSION_CODE_OFFSET) kell, ha az új natív app
+          # egy korábbi (Capacitor) app fölé települ: Android nem enged alacsonyabb versionCode-ra frissíteni.
+          CODE=$(( ${{ github.run_number }} + ${{ vars.VERSION_CODE_OFFSET || 0 }} ))
           echo "stamp=$(TZ=Europe/Budapest date +%Y-%m-%d_%H%M)" >> "$GITHUB_OUTPUT"
           echo "version=$(TZ=Europe/Budapest date +%Y.%m.%d-%H%M)" >> "$GITHUB_OUTPUT"
-          echo "title=Private Place $(TZ=Europe/Budapest date '+%Y.%m.%d. %H:%M') (#${{ github.run_number }})" >> "$GITHUB_OUTPUT"
+          echo "marketing=$(TZ=Europe/Budapest date +%Y.%-m.%-d)" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "title=Private Place $(TZ=Europe/Budapest date '+%Y.%m.%d. %H:%M') (#$CODE)" >> "$GITHUB_OUTPUT"
+
+  # Egységtesztek (a kiadást nem blokkolják, de látszik az eredmény)
+  tests:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.9" }
+      - working-directory: android
+        run: gradle --no-daemon :app:testDebugUnitTest
 
   android:
     needs: stamp
@@ -28,42 +50,17 @@ jobs:
     env:
       BUILD_STAMP: ${{ needs.stamp.outputs.stamp }}
       APP_VERSION_NAME: ${{ needs.stamp.outputs.version }}
-      APP_VERSION_CODE: ${{ github.run_number }}
+      APP_VERSION_CODE: ${{ needs.stamp.outputs.code }}
+      TURN_URLS: ${{ secrets.TURN_URLS }}
+      TURN_USERNAME: ${{ secrets.TURN_USERNAME }}
+      TURN_CREDENTIAL: ${{ secrets.TURN_CREDENTIAL }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
       - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 21
-
-      - name: Android SDK előkészítése
-        run: |
-          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
-          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
-          SDKM=$(ls "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n1)
-          if [ -n "$SDKM" ]; then yes | "$SDKM" --licenses > /dev/null || true; fi
-
-      - run: npm install --no-audit --no-fund
-
-      - name: Webes felület (statikus) építése
-        env:
-          VITE_RELEASE_REPOSITORY: ${{ github.repository }}
-          VITE_APP_VERSION_CODE: ${{ github.run_number }}
-          VITE_TURN_URLS: ${{ secrets.TURN_URLS }}
-          VITE_TURN_USERNAME: ${{ secrets.TURN_USERNAME }}
-          VITE_TURN_CREDENTIAL: ${{ secrets.TURN_CREDENTIAL }}
-        run: VITE_APP_VERSION="$APP_VERSION_NAME" npm run build:app
-
-      - name: Android projekt előkészítése (engedélyek, ikon, indítókép, verzió)
-        run: |
-          if [ ! -d android ]; then npx cap add android; fi
-          node scripts/patch-android.mjs
-          npx cap sync android
-          node scripts/patch-background.mjs
+        with: { distribution: temurin, java-version: 17 }
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.9" }
 
       - name: APK fordítása és aláírása
         working-directory: android
@@ -71,29 +68,20 @@ jobs:
           KS_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KS_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          chmod +x gradlew
           mkdir -p ../out
-          # A kulcsfájl elsődlegesen a titokból áll vissza; átmenetként a régi signing/ fájl a tartalék.
-          KS_FILE="$GITHUB_WORKSPACE/signing/private-place.keystore"
-          if [ -n "$KS_BASE64" ]; then
-            KS_FILE="$RUNNER_TEMP/private-place.keystore"
-            printf '%s' "$KS_BASE64" | base64 -d > "$KS_FILE"
-          fi
           # Ideiglenes (teszt) aláírású APK-t soha nem adunk ki: másik kulccsal aláírt APK nem települ a meglévő app fölé.
-          if [ -z "$KS_PASSWORD" ] || [ ! -f "$KS_FILE" ]; then
-            echo "::error::Hiányzik az ANDROID_KEYSTORE_PASSWORD / ANDROID_KEYSTORE_BASE64 titok vagy a kulcsfájl – APK nem készül."
+          if [ -z "$KS_PASSWORD" ] || [ -z "$KS_BASE64" ]; then
+            echo "::error::Hiányzik az ANDROID_KEYSTORE_PASSWORD / ANDROID_KEYSTORE_BASE64 titok – APK nem készül."
             exit 1
           fi
-          export KS_PASSWORD
+          KS_FILE="$RUNNER_TEMP/private-place.keystore"
+          printf '%s' "$KS_BASE64" | base64 -d > "$KS_FILE"
+          export KS_FILE KS_PASSWORD
           echo "KS_FILE=$KS_FILE" >> "$GITHUB_ENV"
-          ./gradlew assembleRelease --no-daemon \
-            -Pandroid.injected.signing.store.file="$KS_FILE" \
-            -Pandroid.injected.signing.store.password="$KS_PASSWORD" \
-            -Pandroid.injected.signing.key.alias=privateplace \
-            -Pandroid.injected.signing.key.password="$KS_PASSWORD"
+          gradle --no-daemon :app:assembleRelease
           cp app/build/outputs/apk/release/app-release.apk "../out/private-place-${BUILD_STAMP}.apk"
 
-      # Az APK-t az állandó kulccsal kell aláírni, különben az appon belüli frissítés nem települ fel.
+      # Az APK-t az állandó kulccsal kell aláírni, különben az appon belüli (OTA) frissítés nem települ fel.
       - name: Aláírás ellenőrzése (az állandó kulccsal egyezik-e)
         env:
           KS_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -113,88 +101,61 @@ jobs:
         run: rm -f "$RUNNER_TEMP/private-place.keystore"
 
       - uses: actions/upload-artifact@v4
-        with:
-          name: android-apk
-          path: out/*
-          if-no-files-found: error
+        with: { name: android-apk, path: out/*, if-no-files-found: error }
 
   ios:
     needs: stamp
-    runs-on: macos-latest
+    runs-on: macos-14
     env:
-      APP_VERSION_NAME: ${{ needs.stamp.outputs.version }}
-      APP_VERSION_CODE: ${{ github.run_number }}
       BUILD_STAMP: ${{ needs.stamp.outputs.stamp }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
+      - name: Xcode projekt generálása
+        working-directory: ios
+        run: brew install xcodegen && xcodegen generate
 
-      - run: npm install --no-audit --no-fund
-
-      - name: Webes felület (statikus) építése
-        env:
-          VITE_RELEASE_REPOSITORY: ${{ github.repository }}
-          VITE_APP_VERSION_CODE: ${{ github.run_number }}
-          VITE_TURN_URLS: ${{ secrets.TURN_URLS }}
-          VITE_TURN_USERNAME: ${{ secrets.TURN_USERNAME }}
-          VITE_TURN_CREDENTIAL: ${{ secrets.TURN_CREDENTIAL }}
-        run: VITE_APP_VERSION="$APP_VERSION_NAME" npm run build:app
-
-      - name: iOS projekt előkészítése
+      # Az IPA aláírás nélküli (oldalról telepíthető: Sideloadly / AltStore a saját Apple ID-vel), ahogy eddig is.
+      - name: IPA fordítása
+        working-directory: ios
         run: |
-          if [ ! -d ios ]; then npx cap add ios --packagemanager CocoaPods; fi
-          node scripts/patch-ios.mjs
-          npx cap sync ios
-
-      - name: IPA fordítása (aláírás nélkül, oldalról telepítéshez)
-        working-directory: ios/App
-        run: |
-          xcodebuild -workspace App.xcworkspace -scheme App -configuration Release \
-            -sdk iphoneos -destination 'generic/platform=iOS' \
-            -derivedDataPath build \
+          xcodebuild -project PrivatePlace.xcodeproj -scheme PrivatePlace -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            MARKETING_VERSION="${{ needs.stamp.outputs.marketing }}" CURRENT_PROJECT_VERSION="${{ needs.stamp.outputs.code }}" \
+            TURN_URLS="${{ secrets.TURN_URLS }}" TURN_USERNAME="${{ secrets.TURN_USERNAME }}" TURN_CREDENTIAL="${{ secrets.TURN_CREDENTIAL }}" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build | tail -n 40
           APP=$(ls -d build/Build/Products/Release-iphoneos/*.app | head -n1)
           test -d "$APP"
-          mkdir -p Payload ../../out
+          mkdir -p Payload ../out
           cp -R "$APP" Payload/
-          zip -qry "../../out/private-place-${BUILD_STAMP}.ipa" Payload
+          zip -qry "../out/private-place-${BUILD_STAMP}.ipa" Payload
 
       - uses: actions/upload-artifact@v4
-        with:
-          name: ios-ipa
-          path: out/*.ipa
-          if-no-files-found: error
+        with: { name: ios-ipa, path: out/*.ipa, if-no-files-found: error }
 
   release:
     needs: [stamp, android, ios]
-    # Csak sikeres Android build után: egy APK nélküli, újabb kiadás elrejtené a legutóbbi telepíthető APK-t a frissítés elől.
+    # Csak sikeres Android build után: egy APK nélküli, újabb kiadás elrejtené a legutóbbi telepíthető APK-t az OTA-frissítés elől.
     if: ${{ always() && needs.android.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
-        with:
-          path: out
-          merge-multiple: true
-      - name: Legújabb telepítő és verzióadatok
+        with: { path: out, merge-multiple: true }
+      - name: Verzióadatok
         run: |
-          APK=$(ls out/*.apk 2>/dev/null | head -n1)
-          if [ -n "$APK" ]; then
-            printf '{"versionCode":%s,"version":"%s"}\n' '${{ github.run_number }}' '${{ needs.stamp.outputs.version }}' > out/private-place-release.json
-          fi
+          printf '{"versionCode":%s,"version":"%s"}\n' '${{ needs.stamp.outputs.code }}' '${{ needs.stamp.outputs.version }}' > out/private-place-release.json
       - name: Kiadás (Releases)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ needs.stamp.outputs.stamp }}-${{ github.run_number }}
+          # A címke a versionCode-dal végződik (build-2026-11-11_1530-42): az OTA-frissítő ebből ismeri fel az újabb verziót.
+          tag_name: build-${{ needs.stamp.outputs.stamp }}-${{ needs.stamp.outputs.code }}
           name: ${{ needs.stamp.outputs.title }}
           body: |
-            Verzió: ${{ needs.stamp.outputs.version }} (#${{ github.run_number }})
+            Verzió: ${{ needs.stamp.outputs.version }} (#${{ needs.stamp.outputs.code }})
             Android: ${{ needs.android.result == 'success' && 'kész (.apk)' || 'nem sikerült' }} · iPhone: ${{ needs.ios.result == 'success' && 'kész (.ipa)' || 'nem sikerült' }}
 
-            Android: töltsd le az .apk fájlt a telefonra és telepítsd (ismeretlen forrás engedélyezése kell).
+            Android: az appon belül („Frissítés”) vagy az .apk letöltésével telepíthető (ismeretlen forrás engedélyezése kell).
             iPhone: az .ipa aláírás nélküli; Sideloadly vagy AltStore segítségével, a saját Apple ID-ddel telepíthető.
           files: out/*
