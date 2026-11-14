@@ -15,7 +15,9 @@ ICONS = [
     "shield-check", "circle-help", "scan-line", "camera", "image-plus", "copy", "share-2", "lock-keyhole", "bell", "battery-charging",
     "crosshair", "bug", "palette", "image-plus", "log-out",
 ]
-ALIASES = {"circle-help": ["help-circle"]}
+# A lucide időnként átnevez ikont (a régi név alias marad, de nincs külön fájl): ilyenkor az új nevet is megpróbáljuk.
+ALIASES = {"circle-help": ["circle-question-mark", "help-circle", "message-circle-question"], "settings-2": ["sliders-horizontal"],
+           "door-open": ["door-open", "log-in"], "lock-keyhole": ["lock-keyhole", "lock"], "scan-line": ["scan-line", "scan"]}
 FONTS = {
     "DMSans.ttf": ["https://github.com/google/fonts/raw/main/ofl/dmsans/DMSans%5Bopsz%2Cwght%5D.ttf",
                    "https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/dmsans/DMSans%5Bopsz%2Cwght%5D.ttf"],
@@ -96,13 +98,19 @@ def main():
         write(os.path.join(ROOT, "android/app/src/main/assets/fonts", name), data)
         write(os.path.join(ROOT, "ios/PrivatePlace/Fonts", name), data)
         print("betűtípus:", name, len(data))
-    for icon in ICONS:
+    missing = []
+    for icon in dict.fromkeys(ICONS):
         urls = []
         for n in [icon] + ALIASES.get(icon, []):
             urls += [f"https://raw.githubusercontent.com/lucide-icons/lucide/{LUCIDE_VERSION}/icons/{n}.svg",
                      f"https://raw.githubusercontent.com/lucide-icons/lucide/v{LUCIDE_VERSION}/icons/{n}.svg",
                      f"https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/{n}.svg"]
-        svg = get(urls).decode("utf-8")
+        try:
+            svg = get(urls).decode("utf-8")
+        except RuntimeError as e:
+            # Egy hiányzó ikon ne akassza meg a buildet: figyelmeztetés, az ikon helyén üres hely marad
+            print(f"::warning::Lucide ikon nem tölthető le: {icon} ({e})")
+            missing.append(icon); continue
         write(os.path.join(ROOT, "android/app/src/main/res/drawable", "ic_" + icon.replace("-", "_") + ".xml"), svg_to_vector(svg))
         ios_svg = svg.replace("currentColor", "#000000")
         base = os.path.join(ROOT, "ios/PrivatePlace/Assets.xcassets", f"lucide-{icon}.imageset")
@@ -112,6 +120,8 @@ def main():
             "info": {"author": "xcode", "version": 1},
             "properties": {"preserves-vector-representation": True, "template-rendering-intent": "template"}}, indent=2))
         print("ikon:", icon)
+    if missing:
+        print("::warning::Hiányzó ikonok:", ", ".join(missing))
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--selftest":
