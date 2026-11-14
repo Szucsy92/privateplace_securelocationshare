@@ -62,7 +62,7 @@ fun RoomsSheet(actions: PermissionActions, invite: Invitation?, onInviteDone: ()
     val open = rememberOpenSection(if (invite != null) "join" else null)
     var confirm by remember { mutableStateOf<String?>(null) }; var asked by remember { mutableStateOf(setOf<String>()) }
     fun toggle(id: String) { open.value = if (open.value == id) null else id; confirm = null }
-    fun join(text: String) { val inv = parseRoomInput(text); if (inv == null) error = "Érvénytelen kód" else { g.joinRoom(inv); code = ""; error = null; scanning = false; open.value = inv.token; onInviteDone() } }
+    fun join(text: String) { val inv = parseRoomInput(text); if (inv == null) error = "Érvénytelen kód" else { g.joinRoom(inv.token, inv.name, inv.color, inv.ownerKey); code = ""; error = null; scanning = false; open.value = inv.token; onInviteDone() } }
 
     SheetFrame("Szobák", onClose) {
         Accordion("Új szoba", open.value == "new", { toggle("new") }) {
@@ -70,7 +70,7 @@ fun RoomsSheet(actions: PermissionActions, invite: Invitation?, onInviteDone: ()
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 ROOM_COLORS.forEach { c -> Box(Modifier.size(if (c == newColor) 32.dp else 26.dp).clip(CircleShape).background(parseColor(SELECTION_COLORS.getValue(c))).clickable { newColor = c }) }
                 Spacer(Modifier.weight(1f))
-                Button({ val r = g.createRoom(newName, newColor); newName = ""; open.value = r.token }, enabled = newName.isNotBlank()) { Text("Létrehozás") }
+                Button({ val r = g.createRoom(); g.customizeRoom(r.token, newName.trim().ifBlank { r.name }, newColor); newName = ""; open.value = r.token }) { Text("Létrehozás") }
             }
         }
         Accordion("Csatlakozás", open.value == "join", { toggle("join") }, subtitle = "Kód, link vagy QR") {
@@ -86,7 +86,7 @@ fun RoomsSheet(actions: PermissionActions, invite: Invitation?, onInviteDone: ()
             val members = peer.roster[r.token] ?: emptyList(); val online = peer.roomMembers[r.token] ?: emptyList()
             Accordion(r.name, open.value == r.token, { toggle(r.token) }, subtitle = "${online.size} online · ${members.size} tag${if (r.owner) " · gazda" else ""}",
                 leading = { Box(Modifier.size(14.dp).clip(CircleShape).background(parseColor(SELECTION_COLORS[r.color] ?: SELF_COLOR))) }) {
-                QrImage(roomQrValue(r.token, r.ownerKey), Modifier.size(200.dp).align(Alignment.CenterHorizontally))
+                RoundedQr(roomQrValue(r.token, r.ownerKey), pal.foreground, Modifier.size(200.dp).align(Alignment.CenterHorizontally))
                 Text(roomShareCode(r.token, r.ownerKey), fontSize = 11.sp, color = Muted)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton({ (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("kód", roomShareCode(r.token, r.ownerKey))) }) { Text("Másolás") }
@@ -124,7 +124,7 @@ enum class SettingsTab(val label: String) { GENERAL("Általános"), PLACES("Hely
 fun SettingsSheet(initial: SettingsTab, permTick: Int, actions: PermissionActions, onClose: () -> Unit) {
     var tab by remember { mutableStateOf(initial) }
     SheetFrame(null, onClose) {
-        Row(Modifier.fillMaxWidth().glass(22).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth().glass(22.dp).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             SettingsTab.values().forEach { t ->
                 Box(Modifier.weight(1f).clip(RoundedCornerShape(18.dp)).background(if (t == tab) Mint.copy(alpha = .3f) else Color.Transparent).clickable { tab = t }.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
                     Text(t.label, fontSize = 13.sp, fontWeight = if (t == tab) FontWeight.SemiBold else FontWeight.Normal)

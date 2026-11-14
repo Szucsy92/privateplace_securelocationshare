@@ -44,6 +44,11 @@ class Fonts(val body: FontFamily, val display: FontFamily)
 val LocalFonts = staticCompositionLocalOf { Fonts(FontFamily.Default, FontFamily.Default) }
 val pal: Palette @Composable get() = LocalPalette.current
 
+// Compatibility names used by the shared Compose panels.
+val Mint: Color @Composable get() = pal.primary
+val Muted: Color @Composable get() = pal.mutedForeground
+
+
 const val ANIM_MS = 240   // minden harmónika/ablak/fül ugyanazzal az ütemmel mozog (a webes useSmoothHeight: 240 ms)
 val AnimEasing = FastOutSlowInEasing
 fun <T> harmonika() = tween<T>(ANIM_MS, easing = AnimEasing)

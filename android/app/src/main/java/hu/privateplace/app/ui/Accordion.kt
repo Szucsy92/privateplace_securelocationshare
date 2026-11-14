@@ -26,7 +26,7 @@ fun Accordion(
     subtitle: String? = null, leading: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Column(modifier.fillMaxWidth().animateContentSize(tween(ANIM_MS, easing = AnimEasing)).glass(20)) {
+    Column(modifier.fillMaxWidth().animateContentSize(tween(ANIM_MS, easing = AnimEasing)).glass(20.dp)) {
         Row(Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             leading?.let { it(); Spacer(Modifier.width(10.dp)) }
             Column(Modifier.weight(1f)) {
