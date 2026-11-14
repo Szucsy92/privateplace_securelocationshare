@@ -314,6 +314,9 @@ export function createDriftFilter() {
       // ingadozó GPS-zaj nem elég: kell legalább 1,5 m horgonytól való távolság és
       // mérhető fix-közi haladás, vagy hosszabb, összegzett elmozdulás.
       const movedRecently = recent.length >= 2 && (
+        // Sebességadat nélkül két egymást követő járásjelzés és legalább ~1 m
+        // horgonytól mért, fix-közi elmozdulás már elég a lassú séta felismeréséhez.
+        (fix.stepping === true && !dopplerOk && d >= 0.75 && stepDistance >= 0.65) ||
         (d >= Math.max(1.5, 0.25 * (fix.acc ?? 6)) && stepDistance >= 0.65) ||
         (recent.length >= 4 && Math.hypot(z.x - back.p.x, z.y - back.p.y) >= Math.max(STEP_MOVE_MIN_M, STEP_MOVE_ACC_K * (fix.acc ?? 6)))
       );
@@ -331,7 +334,7 @@ export function createDriftFilter() {
       fastHist.push(dopGo || stepEv);
       if (fastHist.length > 3) fastHist.shift();
       // Két független, jó minőségű érzékelő (Doppler + lépés) egyetlen fixből indíthat.
-      const bothSensors = dopGo && fix.stepping === true && (fix.acc ?? 999) <= GO_FIX_ACC;
+      const bothSensors = dopGo && fix.stepping === true && (fix.acc ?? 999) <= GO_FIX_ACC && sp! >= 1.3;
       let leave = (fastHist.filter(Boolean).length >= GO_FIXES && movedRecently)
         || (dopplerOk && sp! >= FAST_SPEED) || bothSensors;
       let relocate: Vec | null = null;
