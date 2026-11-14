@@ -30,12 +30,16 @@ jobs:
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
           echo "title=Private Place $(TZ=Europe/Budapest date '+%Y.%m.%d. %H:%M') (#$CODE)" >> "$GITHUB_OUTPUT"
 
-  # Egységtesztek (a kiadást nem blokkolják, de látszik az eredmény)
+  # A webes és natív egységtesztek hibája blokkolja a kiadást.
   tests:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Webes tesztek
+        run: |
+          bun install --no-save
+          bun test tests
       - name: Betűtípusok és ikonok letöltése (az eredeti felület vizuális elemei)
         run: python3 scripts/fetch-assets.py
       - uses: actions/setup-java@v4
@@ -46,7 +50,7 @@ jobs:
         run: gradle --no-daemon :app:testDebugUnitTest
 
   android:
-    needs: stamp
+    needs: [stamp, tests]
     runs-on: ubuntu-latest
     env:
       BUILD_STAMP: ${{ needs.stamp.outputs.stamp }}
@@ -106,7 +110,7 @@ jobs:
         with: { name: android-apk, path: out/*, if-no-files-found: error }
 
   ios:
-    needs: stamp
+    needs: [stamp, tests]
     runs-on: macos-14
     env:
       BUILD_STAMP: ${{ needs.stamp.outputs.stamp }}
@@ -122,6 +126,7 @@ jobs:
       - name: IPA fordítása
         working-directory: ios
         run: |
+          set -o pipefail
           xcodebuild -project PrivatePlace.xcodeproj -scheme PrivatePlace -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             MARKETING_VERSION="${{ needs.stamp.outputs.marketing }}" CURRENT_PROJECT_VERSION="${{ needs.stamp.outputs.code }}" \
@@ -138,7 +143,7 @@ jobs:
         with: { name: ios-ipa, path: out/*.ipa, if-no-files-found: error }
 
   release:
-    needs: [stamp, android, ios]
+    needs: [stamp, tests, android, ios]
     # Csak sikeres Android build után: egy APK nélküli, újabb kiadás elrejtené a legutóbbi telepíthető APK-t az OTA-frissítés elől.
     if: ${{ always() && needs.android.result == 'success' }}
     runs-on: ubuntu-latest
