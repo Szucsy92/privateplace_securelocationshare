@@ -309,29 +309,22 @@ export function createDriftFilter() {
 
       const back = recent[Math.max(0, recent.length - 6)]!;
       const movedRecently = recent.length >= 4 && Math.hypot(z.x - back.p.x, z.y - back.p.y) >= Math.max(STEP_MOVE_MIN_M, STEP_MOVE_ACC_K * (fix.acc ?? 6));
-      // Álló módban a GPS-szolgáltató által becsült Doppler önmagában nem elég:
-      // egyes Androidokon a helyben álló telefon is tartósan 1–1,5 m/s-ot (4–5 km/h) jelent.
-      // Lassú gyaloglásnál ezért legalább pozíciós elmozdulás vagy lépésjel kell; a gyors járműsebesség
-      // (≥ FAST_SPEED) továbbra is egy fixből feloldhatja az állást.
-      // Két egymást követő, iránnyal is alátámasztott Doppler-fix már a lassú
-      // gyaloglást is felismeri; a pusztán ingadozó, helyben álló Doppler nem elég.
-      const previous = recent.length ? recent[recent.length - 1]! : null;
-      const bearingRad = fix.bearing == null ? null : (fix.bearing * Math.PI) / 180;
-      const elapsed = previous ? Math.max(0.2, (at - previous.at) / 1000) : 0;
-      const bearingProgress = previous && bearingRad !== null
-        ? (z.x - previous.p.x) * Math.sin(bearingRad) + (z.y - previous.p.y) * Math.cos(bearingRad)
-        : 0;
-      const dopplerProgress = !!previous && bearingProgress >= Math.max(0.35, sp! * elapsed * 0.25);
-      const dopGo = dopplerOk && sp! >= GO_SPEED && !(dopDistrust && sp! < FAST_SPEED)
-        && (sp! >= FAST_SPEED || movedRecently || dopplerProgress || fix.stepping === true);
+      // A Doppler-jelölteket külön gyűjtjük: két egymást követő, legalább
+      // GO_SPEED sebességű mérés már elégséges sebesség-bizonyíték lehet,
+      // de a pozíciótól függetlenül nem engedjük elindítani a jelölőt.
+      // Ehhez a horgonyról legalább STEP_MOVE_MIN_M elmozdulás is szükséges.
+      // Így az 1–1,5 m/s-os állóhelyzeti Doppler-zaj nem okoz hamis mozgást.
+      const dopGo = dopplerOk && sp! >= GO_SPEED && !(dopDistrust && sp! < FAST_SPEED);
       // A járás-jelzés Doppler hiányában (vagy ha az nem mond ellent) segít; Doppler-„áll” mellett nem számít.
       // Köztes Doppler-tartományban a lépésjelzés csak akkor bizonyíték, ha a nyers pozíció is elmozdult:
       // a zajos lépésérzékelő önmagában nem oldja fel az állást.
       const stepEv = fix.stepping === true && !dopStill && (!dopplerOk || movedRecently);
       fastHist.push(dopGo || stepEv);
       if (fastHist.length > 3) fastHist.shift();
+      const movingEvidence = Math.hypot(z.x - anchor.x, z.y - anchor.y) >= 1.5;
+      const repeatedDoppler = fastHist.filter(Boolean).length >= GO_FIXES && movingEvidence;
       const bothSensors = dopGo && fix.stepping === true && (fix.acc ?? 999) <= GO_FIX_ACC;   // Doppler és járás-jelzés egyszerre: két független bizonyíték
-      let leave = fastHist.filter(Boolean).length >= GO_FIXES || (dopplerOk && sp! >= FAST_SPEED) || bothSensors;
+      let leave = repeatedDoppler || (dopplerOk && sp! >= FAST_SPEED) || bothSensors;
       let relocate: Vec | null = null;
       let why = leave ? (dopplerOk && sp! >= FAST_SPEED ? `gyors Doppler (${f1(sp! * 3.6)} km/h)` : bothSensors ? "Doppler és járás-jelzés együtt" : `Doppler/járás-jelzés az utolsó 3 fixből ${fastHist.filter(Boolean).length}-on`) : "";
 
@@ -348,10 +341,7 @@ export function createDriftFilter() {
           // egy több száz méteres áthelyezés elfogadásához: multipath is adhat stabil,
           // de hamis távoli klasztert. Álló Doppler mellett csak hosszú, folyamatos
           // klaszter igazolhat új helyet.
-          const confirmedAfterGap = far.length >= 2 && far[0]!.afterGap;
-          const confirmedByConsecutiveFixes = far.length >= 3;
-          const confirmedByPersistence = far.length >= stillCount && at - far[0]!.at >= FAR_STILL_MS;
-          if (allStill && (confirmedAfterGap || confirmedByConsecutiveFixes || confirmedByPersistence)) {
+          if (allStill && far.length >= stillCount && at - far[0]!.at >= FAR_STILL_MS) {
             relocate = wmean(far.map((f) => ({ p: f.p, w: 1 })));
             leave = true;
             why = `a pozíció tartósan ${f1(Math.hypot(relocate.x - anchor.x, relocate.y - anchor.y))} m-re van a horgonytól (${far.length} egyező fix)`;
