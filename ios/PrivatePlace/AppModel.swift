@@ -14,7 +14,13 @@ final class AppModel: ObservableObject {
     @Published var personColors: [String: String]
     @Published var places: [Place]
     @Published var invite: Invitation?
-    @Published var closedMessage: String?
+    @Published var toasts: [ToastMsg] = []
+    @Published var shareRequest: String?
+    func toast(_ kind: String, _ text: String, description: String? = nil, action: (String, () -> Void)? = nil, ms: Double = 4) {
+        let t = ToastMsg(kind: kind, text: text, description: description, action: action, ms: ms)
+        toasts.append(t); DispatchQueue.main.asyncAfter(deadline: .now() + ms) { [weak self] in self?.toasts.removeAll { $0.id == t.id } }
+    }
+    var permissionsAsked: Bool { get { UserDefaults.standard.bool(forKey: "permAsked") } set { UserDefaults.standard.set(newValue, forKey: "permAsked") } }
     let peers: PeerManager
     let engine: SharingEngine
     private var bag = Set<AnyCancellable>()
@@ -26,7 +32,7 @@ final class AppModel: ObservableObject {
         peers = PeerManager(store: store, transport: WebRtcTransport(relays: Self.relays, turn: turn))
         engine = SharingEngine(store: store, peers: peers)
         peers.onRoomClosed = { [weak self] t, why in self?.roomGone(t, why) }
-        peers.onShareRequest = { [weak self] dev in self?.notifyAsk(dev) }
+        peers.onShareRequest = { [weak self] dev in self?.shareRequest = dev; self?.notifyAsk(dev) }
         peers.sync(rooms: rooms, deviceId: deviceId, profile: profile)
         engine.setPlaces(places)
         // A beágyazott objektumok változása a nézetekhez is eljusson
@@ -41,15 +47,24 @@ final class AppModel: ObservableObject {
     func setPersonColor(_ id: String, _ c: String?) { personColors = PrivatePlace.setPersonColor(personColors, id: id, color: c); store.savePersonColors(personColors) }
     func savePlaces(_ p: [Place]) { places = p; store.savePlaces(p); engine.setPlaces(p) }
 
-    @discardableResult func createRoom(name: String, color: String) -> SavedRoom {
-        let a = createRoomAuthority()
-        let n = String(name.trimmingCharacters(in: .whitespaces).prefix(40))
-        let r = SavedRoom(token: generateRoomToken(), name: n.isEmpty ? "Szoba" : n, owner: true, createdAt: nowMs(), color: color, ownerKey: a.ownerKey, ownerPrivateKey: a.ownerPrivateKey)
+    /// A webes createRoom: „Szobám” / „Szobám N” néven jön létre, utána a megosztás ablak nyílik.
+    @discardableResult func createRoom() -> SavedRoom {
+        let a = createRoomAuthority(); let owned = rooms.filter { $0.owner }.count
+        let r = SavedRoom(token: generateRoomToken(), name: owned > 0 ? "Szobám \(owned + 1)" : "Szobám", owner: true, createdAt: nowMs(), color: DEFAULT_ROOM_COLOR, ownerKey: a.ownerKey, ownerPrivateKey: a.ownerPrivateKey)
         setRooms(rooms + [r]); return r
     }
-    func joinRoom(_ inv: Invitation) {
-        if rooms.contains(where: { $0.token == inv.token }) { return }
-        setRooms(rooms + [SavedRoom(token: inv.token, name: inv.name ?? "Szoba", owner: false, createdAt: nowMs(), color: inv.color ?? DEFAULT_ROOM_COLOR, ownerKey: inv.ownerKey)])
+    /// A webes joinRoom pontos szabályaival és szövegeivel.
+    func joinRoom(token: String, name: String?, color: String?, ownerKey: String?) {
+        let existing = rooms.first { $0.token == token }
+        if existing?.owner == true { toast("info", "Ez a te szobád: ugyanarról az eszközről nem veheted fel magad tagként."); return }
+        if store.loadControls().contains(where: { $0.kind == "kick" && $0.token == token && $0.target == deviceId }) { toast("error", "Ebből a szobából a létrehozó eltávolított, ezért nem csatlakozhatsz újra."); return }
+        if let ex = existing {
+            if ex.ownerKey == nil, let k = ownerKey { setRooms(rooms.map { $0.token == token && $0.ownerKey == nil ? { var x = $0; x.ownerKey = k; return x }() : $0 }); toast("success", "A gazda kulcsa hozzáadva: a szoba törlése és az eltávolítások mostantól hozzád is megérkeznek.") }
+            else { toast("info", "Ebben a szobában már benne vagy.") }
+            return
+        }
+        setRooms(rooms + [SavedRoom(token: token, name: (name?.isEmpty == false ? name! : "Meghívott szoba"), owner: false, createdAt: nowMs(), color: isRoomColor(color) ? color! : DEFAULT_ROOM_COLOR, ownerKey: ownerKey)])
+        toast("success", "Csatlakoztál. Amint a többiek is online vannak, látjátok egymást.")
     }
     func customizeRoom(_ token: String, name: String, color: String) {
         let n = String(name.trimmingCharacters(in: .whitespaces).prefix(40)); guard !n.isEmpty, isRoomColor(color) else { return }
@@ -59,15 +74,17 @@ final class AppModel: ObservableObject {
         guard let r = rooms.first(where: { $0.token == token }) else { return }
         if r.owner, let k = r.ownerKey, let c = signRoomControl(token: token, auth: RoomAuthority(ownerKey: k, ownerPrivateKey: r.ownerPrivateKey), kind: "close", target: nil) { peers.sendControl(c) }
         peers.forgetRoom(token); store.deleteOwnerKey(token); setRooms(rooms.filter { $0.token != token })
+        toast("success", r.owner ? (r.ownerPrivateKey != nil ? "A szoba törölve." : "A régi szobát eltávolítottam erről a készülékről.") : "Kiléptél a szobából.")
     }
     func kick(_ token: String, _ dev: String) {
-        guard let r = rooms.first(where: { $0.token == token }), r.owner, let k = r.ownerKey,
+        guard dev != deviceId, let r = rooms.first(where: { $0.token == token }), r.owner, let k = r.ownerKey,
               let c = signRoomControl(token: token, auth: RoomAuthority(ownerKey: k, ownerPrivateKey: r.ownerPrivateKey), kind: "kick", target: dev) else { return }
         peers.sendControl(c)
     }
     private func roomGone(_ token: String, _ why: String) {
+        let room = rooms.first { $0.token == token }
         store.deleteOwnerKey(token); setRooms(rooms.filter { $0.token != token })
-        closedMessage = why == "kicked" ? "A gazda eltávolított a szobából." : "A gazda törölte a szobát."
+        if let r = room, !r.owner { toast("info", why == "kicked" ? "A létrehozó eltávolított a(z) „\(r.name)” szobából." : "A(z) „\(r.name)” szobát a létrehozója törölte.") }
     }
     func handleURL(_ url: URL) { if let inv = parseRoomInput(url.absoluteString) { invite = inv } }
     private func notifyAsk(_ dev: String) {

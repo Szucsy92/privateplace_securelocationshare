@@ -33,6 +33,10 @@ class AppGraph(val app: Application) {
     val deviceId: String = store.deviceId()
     val exitRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val closedRooms = MutableSharedFlow<Pair<String, String>>(extraBufferCapacity = 8)
+    /** Üveg-értesítések (a webes sonner toast): (fajta: success|error|info|warning, szöveg) */
+    val toasts = MutableSharedFlow<hu.privateplace.app.ui.ToastMsg>(extraBufferCapacity = 16)
+    fun toast(kind: String, text: String) { toasts.tryEmit(hu.privateplace.app.ui.ToastMsg(kind, text)) }
+    val shareRequests = MutableSharedFlow<String>(extraBufferCapacity = 4)
 
     val rooms = MutableStateFlow(store.loadRooms())
     val profile = MutableStateFlow(store.loadProfile())
@@ -78,7 +82,7 @@ class AppGraph(val app: Application) {
 
     private val turn = BuildConfig.TURN_URLS.takeIf { it.isNotBlank() }?.let { TurnConfig(it.split(","), BuildConfig.TURN_USERNAME.ifBlank { null }, BuildConfig.TURN_CREDENTIAL.ifBlank { null }) }
     private val transport by lazy { WebRtcTransport(app, BuildConfig.NOSTR_RELAYS.split(","), turn) }
-    val peers: PeerManager = PeerManager(store, transport, { t, r -> onRoomGone(t, r) }, { dev -> notifyShareAsk(dev) })
+    val peers: PeerManager = PeerManager(store, transport, { t, r -> onRoomGone(t, r) }, { dev -> shareRequests.tryEmit(dev); notifyShareAsk(dev) })
     val engine = SharingEngine(app, store, LocationSource(app)) { peers }
 
     init {
@@ -102,14 +106,29 @@ class AppGraph(val app: Application) {
     fun setPersonColor(id: String, color: String?) { personColors.value = setPersonColor(personColors.value, id, color); store.savePersonColors(personColors.value) }
     fun savePlaces(p: List<Place>) { places.value = p; store.savePlaces(p); engine.setPlaces(p) }
 
-    fun createRoom(name: String, color: String): SavedRoom {
+    /** A webes createRoom: „Szobám” / „Szobám N” néven jön létre, utána a megosztás ablak nyílik. */
+    fun createRoom(): SavedRoom {
         val a = createRoomAuthority()
-        val room = SavedRoom(generateRoomToken(), name.trim().take(40).ifEmpty { "Szoba" }, true, System.currentTimeMillis(), color, a.ownerKey, a.ownerPrivateKey)
+        val owned = rooms.value.count { it.owner }
+        val room = SavedRoom(generateRoomToken(), if (owned > 0) "Szobám ${owned + 1}" else "Szobám", true, System.currentTimeMillis(), DEFAULT_ROOM_COLOR, a.ownerKey, a.ownerPrivateKey)
         setRooms(addRoom(rooms.value, room)); return room
     }
-    fun joinRoom(inv: Invitation) {
-        if (rooms.value.any { it.token == inv.token }) return
-        setRooms(addRoom(rooms.value, SavedRoom(inv.token, inv.name ?: "Szoba", false, System.currentTimeMillis(), inv.color ?: DEFAULT_ROOM_COLOR, inv.ownerKey)))
+    /** A webes joinRoom pontos szabályaival és szövegeivel. */
+    fun joinRoom(token: String, name: String?, color: String?, ownerKey: String?) {
+        val existing = rooms.value.firstOrNull { it.token == token }
+        when {
+            existing?.owner == true -> toast("info", "Ez a te szobád: ugyanarról az eszközről nem veheted fel magad tagként.")
+            store.loadControls().any { it.kind == "kick" && it.token == token && it.target == deviceId } ->
+                toast("error", "Ebből a szobából a létrehozó eltávolított, ezért nem csatlakozhatsz újra.")
+            existing != null -> if (existing.ownerKey == null && ownerKey != null) {
+                setRooms(rooms.value.map { if (it.token == token && it.ownerKey == null) it.copy(ownerKey = ownerKey) else it })
+                toast("success", "A gazda kulcsa hozzáadva: a szoba törlése és az eltávolítások mostantól hozzád is megérkeznek.")
+            } else toast("info", "Ebben a szobában már benne vagy.")
+            else -> {
+                setRooms(addRoom(rooms.value, SavedRoom(token, name?.takeIf { it.isNotBlank() } ?: "Meghívott szoba", false, System.currentTimeMillis(), color?.takeIf { isRoomColor(it) } ?: DEFAULT_ROOM_COLOR, ownerKey)))
+                toast("success", "Csatlakoztál. Amint a többiek is online vannak, látjátok egymást.")
+            }
+        }
     }
     fun customizeRoom(token: String, name: String, color: String) = setRooms(customizeRoom(rooms.value, token, name, color))
     /** Gazdánál aláírt „close” megy a tagoknak, majd helyben törlődik; tagnál csak a helyi kilépés. */
@@ -118,13 +137,18 @@ class AppGraph(val app: Application) {
         if (r.owner && r.ownerPrivateKey != null && r.ownerKey != null) peers.sendControl(signRoomControl(token, RoomAuthority(r.ownerKey, r.ownerPrivateKey), "close", null))
         peers.forgetRoom(token)
         setRooms(removeRoom(rooms.value, token))
+        toast("success", if (r.owner) (if (r.ownerPrivateKey != null) "A szoba törölve." else "A régi szobát eltávolítottam erről a készülékről.") else "Kiléptél a szobából.")
     }
     fun kick(token: String, dev: String) {
         val r = rooms.value.firstOrNull { it.token == token } ?: return
-        if (!r.owner || r.ownerPrivateKey == null || r.ownerKey == null) return
+        if (dev == deviceId || !r.owner || r.ownerPrivateKey == null || r.ownerKey == null) return
         peers.sendControl(signRoomControl(token, RoomAuthority(r.ownerKey, r.ownerPrivateKey), "kick", dev))
     }
-    private fun onRoomGone(token: String, reason: String) { setRooms(removeRoom(rooms.value, token)); closedRooms.tryEmit(token to reason) }
+    private fun onRoomGone(token: String, reason: String) {
+        val room = rooms.value.firstOrNull { it.token == token }
+        setRooms(removeRoom(rooms.value, token)); closedRooms.tryEmit(token to reason)
+        if (room != null && !room.owner) toast("info", if (reason == "kicked") "A létrehozó eltávolított a(z) „${room.name}” szobából." else "A(z) „${room.name}” szobát a létrehozója törölte.")
+    }
 
     private fun notifyShareAsk(dev: String) {
         val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

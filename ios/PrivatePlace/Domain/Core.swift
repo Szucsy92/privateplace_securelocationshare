@@ -114,3 +114,14 @@ final class WalkingDetector {
         if positives >= 2 { set(true) } else if now - lastPositive > 3000 { set(false) }
     }
 }
+
+/// Rövid felirat a megállás idejéről; üres, ha nincs megállás (a webes `stopLabel` portja).
+func stopLabel(since: Int64?, now: Int64, moving: Bool = false) -> String {
+    if moving { return "mozgásban" }
+    guard let s = since else { return "" }
+    let minutes = Int(max(0, now - s) / 60000)
+    if minutes < 1 { return "most állt meg" }
+    if minutes < 60 { return "\(minutes) perce" }
+    let hours = minutes / 60
+    return hours < 24 ? "\(hours) órája" : "\(hours / 24) napja"
+}

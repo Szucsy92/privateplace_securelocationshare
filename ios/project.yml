@@ -11,7 +11,11 @@ targets:
   PrivatePlace:
     type: application
     platform: iOS
-    sources: [PrivatePlace]
+    sources:
+      - PrivatePlace
+      - path: PrivatePlace/Fonts
+        buildPhase: resources
+        optional: true
     dependencies:
       - package: MapLibre
         product: MapLibre
@@ -40,6 +44,7 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: { UIColorName: "" }
         UIBackgroundModes: [location]
+        UIAppFonts: [DMSans.ttf, SpaceGrotesk.ttf]
         NSLocationWhenInUseUsageDescription: "A helyzeted megjelenítéséhez a térképen, és – ha te bekapcsolod – a szobáiddal való megosztásához."
         NSLocationAlwaysAndWhenInUseUsageDescription: "Hogy a megosztás zárolt képernyőnél és háttérben is működjön, amíg te be van kapcsolva."
         NSLocationTemporaryUsageDescriptionDictionary: { Precise: "A pontos helyzet a térképhez és a megosztáshoz kell." }

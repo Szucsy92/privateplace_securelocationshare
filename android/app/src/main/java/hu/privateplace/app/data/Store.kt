@@ -98,6 +98,11 @@ class Store(context: Context) {
             JSONObject().put("id", s.id).put("label", s.label).put("lat", s.lat).put("lng", s.lng).put("learnedAt", s.learnedAt ?: JSONObject.NULL)
                 .put("samples", s.samples).put("bias", s.bias?.let { JSONObject().put("e", it.e).put("n", it.n) } ?: JSONObject.NULL) })) }).toString())
 
+    /** A bevezető engedély-kérdezés lezajlott-e (permissionsAsked a webes verzióban). */
+    var permissionsAsked: Boolean
+        get() = sp.getBoolean("permAsked", false)
+        set(v) { sp.edit().putBoolean("permAsked", v).apply() }
+
     var hintsSeen: Set<String>
         get() = sp.getStringSet("hints", emptySet()) ?: emptySet()
         set(v) { sp.edit().putStringSet("hints", v).apply() }

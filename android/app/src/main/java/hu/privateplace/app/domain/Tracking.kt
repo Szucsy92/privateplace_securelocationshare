@@ -28,3 +28,17 @@ fun appendTrackPoint(points: List<TrackPoint>, point: TrackPoint, now: Long): Li
 }
 
 fun clearTrackHistory(points: List<TrackPoint>): List<TrackPoint> = points.takeLast(1)
+
+/** Rövid felirat a megállás idejéről; üres, ha nincs megállás (a webes `stopLabel` portja). */
+fun stopLabel(since: Long?, now: Long, moving: Boolean = false): String {
+    if (moving) return "mozgásban"
+    if (since == null) return ""
+    val minutes = (maxOf(0L, now - since) / 60000).toInt()
+    if (minutes < 1) return "most állt meg"
+    if (minutes < 60) return "$minutes perce"
+    val hours = minutes / 60
+    if (hours < 24) return "$hours órája"
+    return "${hours / 24} napja"
+}
+
+fun headingFromTrack(points: List<TrackPoint>): Double? = headingFromTrack(points.map { LatLng(it.lat, it.lng) })

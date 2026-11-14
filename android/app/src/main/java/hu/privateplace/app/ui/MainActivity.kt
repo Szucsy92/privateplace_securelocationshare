@@ -53,7 +53,7 @@ class MainActivity : ComponentActivity() {
         ProcessLifecycleOwner.get().lifecycle.addObserver(appVisible)
         lifecycleScope.launch { graph.exitRequests.collect { finishAndRemoveTask() } }
         refreshPerms()
-        setContent { PrivatePlaceTheme { AppRoot(actions, invite.value, { invite.value = null }, permTick.intValue) { graph.engine.setSharing(false); finishAndRemoveTask() } } }
+        setContent { AppRoot(actions, invite.value, { invite.value = null }, permTick.intValue) { graph.engine.setSharing(false); finishAndRemoveTask() } }
     }
 
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); handleIntent(intent) }
