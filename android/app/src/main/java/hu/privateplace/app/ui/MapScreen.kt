@@ -164,7 +164,7 @@ fun MapScreen(actions: PermissionActions, invite: Invitation?, onInviteDone: () 
 
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(top = 8.dp, start = 8.dp, end = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             // ── Fejléc ──
-            Row(Modifier.fillMaxWidth().glass(20).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().glass(20.dp).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Txt("Private Place", Modifier.weight(1f), size = 16f, weight = 700, display = true, maxLines = 1, lineHeight = 24f)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     SharingControl(sharingStatus) { setSharing(!self.sharing) }
@@ -243,7 +243,7 @@ fun MapScreen(actions: PermissionActions, invite: Invitation?, onInviteDone: () 
                         PersonCapsule(p.name, p.avatar, p.name, p.color, follow?.id == p.deviceId,
                             if (!p.online) "warn" else if (!p.sharing) "off" else if (p.at != null && clock - p.at < 15000) "on" else "wait", personStatus(p, clock)) { toggleFollow(p.deviceId) }
                     }
-                    if (remote.isEmpty()) item { PersonCapsule("Meghívó", null, "+", pal.mutedForeground, false, "none", "Szoba", invite = true) { dialog = DialogKind.ROOMS } }
+                    if (remote.isEmpty()) item { PersonCapsule("Meghívó", null, "+", "", false, "none", "Szoba", invite = true) { dialog = DialogKind.ROOMS } }
                 }
             }
         }
