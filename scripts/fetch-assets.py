@@ -10,10 +10,7 @@ import json, os, re, sys, urllib.request, xml.etree.ElementTree as ET
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LUCIDE_VERSION = "0.575.0"   # a webes app lucide-react verziója
 ICONS = [
-    "play", "pause", "users", "settings-2", "navigation-2", "sun", "moon", "footprints", "bike", "car", "plus", "battery", "map-pin",
-    "check", "log-out", "chevron-right", "chevron-left", "chevron-down", "chevron-up", "trash-2", "qr-code", "x", "door-open",
-    "shield-check", "circle-help", "scan-line", "camera", "image-plus", "copy", "share-2", "lock-keyhole", "bell", "battery-charging",
-    "crosshair", "bug", "palette", "image-plus", "log-out",
+    "play", "pause", "users", "settings-2", "navigation-2", "sun", "moon", "footprints", "bike", "car", "plus", "battery", "map-pin", "check", "log-out", "chevron-right", "chevron-left", "chevron-down", "chevron-up", "trash-2", "qr-code", "x", "door-open", "shield-check", "circle-help", "scan-line", "camera", "image-plus", "copy", "share-2", "lock-keyhole", "bell", "battery-charging", "crosshair", "bug", "palette",
 ]
 # A lucide időnként átnevez ikont (a régi név alias marad, de nincs külön fájl): ilyenkor az új nevet is megpróbáljuk.
 ALIASES = {"circle-help": ["circle-question-mark", "help-circle", "message-circle-question"], "settings-2": ["sliders-horizontal"],
