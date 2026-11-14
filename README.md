@@ -47,7 +47,7 @@ Mindenkinek át kell állnia az új appra. A szobakódok/QR-formátum (`TOKEN` v
 
 ## Ami nincs portolva
 
-- **Napló/debug nézet**.
+- **Napló/debug nézet** és a hibakereső réteg a térképen.
 - **Régi adatok átvétele** (profil, szobák, gazdai privát kulcsok): a WebView `localStorage`-a natívan nem olvasható. Ha a meglévő szobák gazdai jogát meg akarod tartani, a régi appból egy utolsó kiadásban exportálni kell őket (a régi JWK → PKCS#8/raw konverzió egyszerű). Enélkül a régi szobák tulajdonjoga elvész.
 - A térképen a jelölők **monogramot** mutatnak (a profilkép a sávban és a listákban látszik); betűtípus a rendszer-alapértelmezett (DM Sans/Space Grotesk nincs becsomagolva).
 - Meghívó-link: `privateplace://join/#szoba=…` nyitja az appot; https-linkhez saját domain + Android App Link / iOS Universal Link kell.
@@ -75,11 +75,19 @@ Indítás: Actions → „Private Place – natív APK és IPA építése” →
 
 Az app a `GITHUB_REPOSITORY` kiadásai közül a legújabbat nézi (`/releases/latest`), a címke végéről olvassa a versionCode-ot, és ha újabb, felajánlja a frissítést: letöltés folyamatjelzővel → rendszer-telepítő (FileProvider). Ellenőrzés: induláskor, előtérbe lépéskor (legfeljebb 10 percenként) és kézzel (Beállítások → Általános → Frissítés). Csak `https://github.com/.../releases/download/.../*.apk` URL fogadható el; ha a letöltés elbukik, a böngésző veszi át. iOS-en nincs önfrissítés (a platform nem engedi) – ott új `.ipa`-t kell telepíteni.
 
-## Felület
+## Felület: az eredeti („Signal”) design átvétele
 
-- **Harmónika**: minden ablak (Szobák, Beállítások) szakaszai dinamikusan illeszkedő, 240 ms-os harmónikaként nyílnak/záródnak; az ablak magassága követi. A Beállítások fülei (Általános / Helyek / Engedélyek) átúsznak, a lap magassága lágyan igazodik. (Android: `animateContentSize` + `AnimatedVisibility`/`AnimatedContent`; iOS: `withAnimation` + a lap `presentationDetents` magassága a tartalomhoz mérve.)
-- **Profilkép**: kompakt, 40 dp-s kerek kép kamera-jelvénnyel a névmező mellett, egy sorban.
-- **Súgóbuborékok**: 6 egymondatos buborék (Kihagyás / Tovább n/6), a célelem közelében; a Beállításokban újraindítható.
+A natív UI az eredeti React-kód alapján készült (`MapApp.tsx`, `LiveMap.tsx`, `PlacesPanel.tsx`, `styles.css`), nem szabad értelmezésben:
+
+- **Színek**: a `styles.css` oklch-tokenjei sRGB-re átszámítva (`Palette.kt` / `Palette.swift`), sötét és világos téma (a térkép-téma az egész felületet váltja). Újragenerálás: a tokenek a `scripts`-ben nincsenek, a fájlok a forrás értékeiből készültek.
+- **Betűk**: DM Sans (törzs) + Space Grotesk (cím). **Ikonok**: ugyanaz a Lucide-készlet és verzió, mint a lucide-react-ben. Mindkettőt a `scripts/fetch-assets.py` tölti le (a CI minden build előtt lefuttatja; helyben: `python3 scripts/fetch-assets.py`). Letöltés nélkül a felület rendszerbetűvel és ikonok nélkül indul.
+- **Elrendezés**: üveges fejléc („Private Place”, megosztás-kapcsoló, szobák jelvénnyel, beállítások) → lekerekített (28) térképablak, amelyen kívül a térkép **elmosva** látszik (veil) → iránytű és téma gomb jobbra fent, közlekedés-választó és címkérdés lent → személykapszulák (176×72) a sávban, szélein elhalványulva.
+- **Térkép**: ugyanaz a stílus (OpenFreeMap dark) a webes `applyMapContrast` átszínezésével (víz, épületek, parkok, utak, feliratok +25%); avatár-jelölők, haladási irány nyíl, pulzáló saját jelölő, glow-os nyomvonal; a webes követés-logika (kézi mozgatás után 4 mp-re visszaáll, északra simítás, irány szerinti forgatás); személy-buborék (akku, távolság, cím, mióta áll).
+- **Ablakok**: középre igazított üveg-ablakok (Üdvözlő, Engedélyek, Csatlakozás, Megosztás-QR lekerekített kóddal, Szobák, Beállítások → Útvonalak / Saját helyek), az eredeti szövegekkel; a szoba-sorok és szakaszok **harmónikaként** (240 ms) nyílnak, a nézetváltás és az ablak magassága lágyan igazodik.
+- **Súgóbuborékok**: az eredeti üveges stílus, rövidített, egymondatos szöveggel; a közlekedés-buboréknál a mini-demó is megvan.
+- **Értesítések**: üveg-toast (akciógombbal, pl. „Megosztás”, „Kérés”).
+
+**Eltérések** (őszintén): Androidon a valódi háttér-elmosás Android 12-től működik (régebbin csak árnyalás); a „hibakereső réteg” és a naplóküldés nincs portolva; a térképes jelölők betűtípusa a rendszer betűje; iOS-en a blur a rendszer `UIBlurEffect`-je (nem azonos sugár).
 
 ## Build
 
