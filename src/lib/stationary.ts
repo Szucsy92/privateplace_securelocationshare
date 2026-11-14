@@ -313,12 +313,36 @@ export function createDriftFilter() {
       // Rövid (1–2 fixből álló) valódi gyalogos elmozdulást is észlelünk, de a helyben
       // ingadozó GPS-zaj nem elég: kell legalább 1,5 m horgonytól való távolság és
       // mérhető fix-közi haladás, vagy hosszabb, összegzett elmozdulás.
+      // Lépésjelzés + köztes Doppler esetén nem elég, ha az első fix egyszerűen
+      // messzebb esik az előző (zajos) horgonyfixektől. Legalább 4 egymást követő
+      // pozícióból való, egyirányú előrehaladást kérünk; így a horgonyból a fix
+      // pontra történő egyszeri átmenet nem téveszthető össze sétával.
+      const walkWindow = recent.slice(-4);
+      let progressiveWalk = false;
+      if (walkWindow.length === 4) {
+        const first = walkWindow[0]!.p, last = walkWindow[3]!.p;
+        const vx = last.x - first.x, vy = last.y - first.y;
+        const length = Math.hypot(vx, vy);
+        if (length >= Math.max(1.2, 0.2 * (fix.acc ?? 6))) {
+          const ux = vx / length, uy = vy / length;
+          const projections = walkWindow.map((r) => (r.p.x - first.x) * ux + (r.p.y - first.y) * uy);
+          const forwardSteps = projections.slice(1).filter((v, i) => v - projections[i]! >= 0.2).length;
+          const lateral = Math.sqrt(walkWindow.reduce((sum, r) => {
+            const cross = -(r.p.x - first.x) * uy + (r.p.y - first.y) * ux;
+            return sum + cross * cross;
+          }, 0) / walkWindow.length);
+          progressiveWalk = forwardSteps >= 3 && projections.every((v, i) => i === 0 || v >= projections[i - 1]! - 0.2) && lateral <= 0.6 * length;
+        }
+      }
       const movedRecently = recent.length >= 2 && (
-        // Sebességadat nélkül két egymást követő járásjelzés és legalább ~1 m
-        // horgonytól mért, fix-közi elmozdulás már elég a lassú séta felismeréséhez.
+        // Sebességadat nélküli kétfixes lépésjelzés: nincs Doppler, ezért az
+        // anchorhoz viszonyított elmozdulás is elfogadható.
         (fix.stepping === true && !dopplerOk && d >= 0.75 && stepDistance >= 0.65) ||
-        (d >= Math.max(1.5, 0.25 * (fix.acc ?? 6)) && stepDistance >= 0.65) ||
-        (recent.length >= 4 && Math.hypot(z.x - back.p.x, z.y - back.p.y) >= Math.max(STEP_MOVE_MIN_M, STEP_MOVE_ACC_K * (fix.acc ?? 6)))
+        // A nem lépésjelzéses Doppler/pozíciós ág marad, de a lépéses köztes
+        // tartományban a többfixes, iránytartó bizonyíték dönt.
+        (fix.stepping !== true && d >= Math.max(1.5, 0.25 * (fix.acc ?? 6)) && stepDistance >= 0.65) ||
+        (fix.stepping === true && dopplerOk ? progressiveWalk :
+          (recent.length >= 4 && Math.hypot(z.x - back.p.x, z.y - back.p.y) >= Math.max(STEP_MOVE_MIN_M, STEP_MOVE_ACC_K * (fix.acc ?? 6))))
       );
       // A Doppler önmagában csak megerősítésre váró jelölt. Két egymást követő
       // mérés kell, és a másodiknál a pozícióváltozásnak is igazolnia kell a mozgást.
