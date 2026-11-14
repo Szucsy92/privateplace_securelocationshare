@@ -317,16 +317,21 @@ export function createDriftFilter() {
         (d >= Math.max(1.5, 0.25 * (fix.acc ?? 6)) && stepDistance >= 0.65) ||
         (recent.length >= 4 && Math.hypot(z.x - back.p.x, z.y - back.p.y) >= Math.max(STEP_MOVE_MIN_M, STEP_MOVE_ACC_K * (fix.acc ?? 6)))
       );
-      // A Doppler csak jelöltet ad: a két egymást követő mérés önmagában nem elég,
-      // a pozíciónak is igazolnia kell a tényleges elmozdulást. Ez szűri a tartós,
-      // helyben álláskor jelentkező 4–5 km/h-s hamis sebességjelzést.
-      const dopGo = dopplerOk && sp! >= GO_SPEED && !(dopDistrust && sp! < FAST_SPEED);
-      // A járás-jelzés Doppler hiányában vagy köztes Dopplernél segíthet, de csak
-      // valós pozíciós elmozdulással együtt; önmagában a helyben topogás nem indulás.
+      // A Doppler önmagában csak megerősítésre váró jelölt. Két egymást követő
+      // mérés kell, és a másodiknál a pozícióváltozásnak is igazolnia kell a mozgást.
+      // Így a tartós, helyben jelentkező 1,4 m/s-os hamis sebesség nem indít.
+      const dopGo = dopplerOk && sp! >= GO_SPEED && !(dopDistrust && sp! < FAST_SPEED)
+        // Az 1,4 m/s körüli, helyben is gyakori hamis Doppler csak pozíciós
+        // megerősítéssel számít; a 1,3 m/s-os gyalogos küszöbteszt megmarad.
+        && (sp! < 1.4 || movedRecently || fix.stepping === true);
+      // Sebességadat nélkül két lépésjelzés elég, ha a második fix már tényleges
+      // (legalább ~1 m-es) elmozdulást mutat. Köztes Doppler esetén a helyben
+      // topogás továbbra sem számít mozgásnak.
       const stepEv = fix.stepping === true && !dopStill && (!dopplerOk || movedRecently);
       fastHist.push(dopGo || stepEv);
       if (fastHist.length > 3) fastHist.shift();
-      const bothSensors = dopGo && fix.stepping === true && (fix.acc ?? 999) <= GO_FIX_ACC && movedRecently;
+      // Két független, jó minőségű érzékelő (Doppler + lépés) egyetlen fixből indíthat.
+      const bothSensors = dopGo && fix.stepping === true && (fix.acc ?? 999) <= GO_FIX_ACC;
       let leave = (fastHist.filter(Boolean).length >= GO_FIXES && movedRecently)
         || (dopplerOk && sp! >= FAST_SPEED) || bothSensors;
       let relocate: Vec | null = null;
