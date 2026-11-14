@@ -313,8 +313,17 @@ export function createDriftFilter() {
       // egyes Androidokon a helyben álló telefon is tartósan 1–1,5 m/s-ot (4–5 km/h) jelent.
       // Lassú gyaloglásnál ezért legalább pozíciós elmozdulás vagy lépésjel kell; a gyors járműsebesség
       // (≥ FAST_SPEED) továbbra is egy fixből feloldhatja az állást.
+      // Két egymást követő, iránnyal is alátámasztott Doppler-fix már a lassú
+      // gyaloglást is felismeri; a pusztán ingadozó, helyben álló Doppler nem elég.
+      const previous = recent.length ? recent[recent.length - 1]! : null;
+      const bearingRad = fix.bearing == null ? null : (fix.bearing * Math.PI) / 180;
+      const elapsed = previous ? Math.max(0.2, (at - previous.at) / 1000) : 0;
+      const bearingProgress = previous && bearingRad !== null
+        ? (z.x - previous.p.x) * Math.sin(bearingRad) + (z.y - previous.p.y) * Math.cos(bearingRad)
+        : 0;
+      const dopplerProgress = !!previous && bearingProgress >= Math.max(0.35, sp! * elapsed * 0.25);
       const dopGo = dopplerOk && sp! >= GO_SPEED && !(dopDistrust && sp! < FAST_SPEED)
-        && (sp! >= FAST_SPEED || movedRecently || fix.stepping === true);
+        && (sp! >= FAST_SPEED || movedRecently || dopplerProgress || fix.stepping === true);
       // A járás-jelzés Doppler hiányában (vagy ha az nem mond ellent) segít; Doppler-„áll” mellett nem számít.
       // Köztes Doppler-tartományban a lépésjelzés csak akkor bizonyíték, ha a nyers pozíció is elmozdult:
       // a zajos lépésérzékelő önmagában nem oldja fel az állást.
@@ -339,7 +348,10 @@ export function createDriftFilter() {
           // egy több száz méteres áthelyezés elfogadásához: multipath is adhat stabil,
           // de hamis távoli klasztert. Álló Doppler mellett csak hosszú, folyamatos
           // klaszter igazolhat új helyet.
-          if (allStill && far.length >= stillCount && at - far[0]!.at >= FAR_STILL_MS) {
+          const confirmedAfterGap = far.length >= 2 && far[0]!.afterGap;
+          const confirmedByConsecutiveFixes = far.length >= 3;
+          const confirmedByPersistence = far.length >= stillCount && at - far[0]!.at >= FAR_STILL_MS;
+          if (allStill && (confirmedAfterGap || confirmedByConsecutiveFixes || confirmedByPersistence)) {
             relocate = wmean(far.map((f) => ({ p: f.p, w: 1 })));
             leave = true;
             why = `a pozíció tartósan ${f1(Math.hypot(relocate.x - anchor.x, relocate.y - anchor.y))} m-re van a horgonytól (${far.length} egyező fix)`;
