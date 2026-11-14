@@ -41,7 +41,7 @@ import kotlinx.coroutines.launch
 
 enum class Sheet { ROOMS, SETTINGS }
 
-fun decodeDataUrl(url: String?): Bitmap? = runCatching {
+private fun decodeDataUrl(url: String?): Bitmap? = runCatching {
     val b = Base64.decode(url!!.substringAfter("base64,"), Base64.DEFAULT); BitmapFactory.decodeByteArray(b, 0, b.size)
 }.getOrNull()
 
@@ -65,7 +65,7 @@ fun Avatar(name: String, color: String, avatar: String?, size: Int = 40) {
 }
 
 @Composable
-fun AppRoot(actions: PermissionActions, invite: Invitation?, onInviteDone: () -> Unit, permTick: Int, onExit: () -> Unit) {
+private fun AppRoot(actions: PermissionActions, invite: Invitation?, onInviteDone: () -> Unit, permTick: Int, onExit: () -> Unit) {
     val g = (LocalContext.current.applicationContext as PrivatePlaceApp).graph
     val profile by g.profile.collectAsState()
     if (profile == null) Onboarding { g.saveProfile(it) } else MapScreen(actions, invite, onInviteDone, permTick, onExit)
@@ -97,7 +97,7 @@ private fun statusLine(p: RemotePerson, now: Long): String {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MapScreen(actions: PermissionActions, invite: Invitation?, onInviteDone: () -> Unit, permTick: Int, onExit: () -> Unit) {
+private fun MapScreen(actions: PermissionActions, invite: Invitation?, onInviteDone: () -> Unit, permTick: Int, onExit: () -> Unit) {
     val ctx = LocalContext.current; val g = (ctx.applicationContext as PrivatePlaceApp).graph
     val scope = rememberCoroutineScope()
     val self by g.engine.state.collectAsState(); val peer by g.peers.state.collectAsState()

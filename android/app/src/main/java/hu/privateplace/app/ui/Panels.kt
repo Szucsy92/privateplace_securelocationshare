@@ -33,16 +33,6 @@ import hu.privateplace.app.PrivatePlaceApp
 import hu.privateplace.app.data.LocalProfile
 import hu.privateplace.app.domain.*
 
-/** Kép → 128×128 középre vágott JPEG data URL (≤ 80 000 jel, ahogy a protokoll megköveteli). */
-fun avatarFromUri(ctx: Context, uri: Uri): String? = runCatching {
-    val src = ctx.contentResolver.openInputStream(uri)!!.use { BitmapFactory.decodeStream(it) }
-    val side = minOf(src.width, src.height)
-    val sq = Bitmap.createBitmap(src, (src.width - side) / 2, (src.height - side) / 2, side, side)
-    val out = Bitmap.createScaledBitmap(sq, 128, 128, true)
-    val bos = java.io.ByteArrayOutputStream(); out.compress(Bitmap.CompressFormat.JPEG, 82, bos)
-    "data:image/jpeg;base64," + Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
-}.getOrNull()?.takeIf { it.length <= 80_000 }
-
 private val roomHex = mapOf("mint" to "#14B8A6", "violet" to "#818CF8", "rose" to "#FB7185", "amber" to "#FBBF24", "sky" to "#38BDF8")
 private fun roomColor(c: String?) = parseColor(roomHex[c] ?: roomHex.getValue("mint"))
 private val roomNames = mapOf("mint" to "Menta Zöld", "violet" to "Elektromos Levendula", "rose" to "Selyem Barack", "amber" to "Napfény Citromsárga", "sky" to "Jégkék")

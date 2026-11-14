@@ -15,11 +15,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-enum class HintPlace { SHARE, TRANSPORT, ADDRESS, MARKER, RAIL, ASK }
-data class Hint(val place: HintPlace, val text: String)
+private enum class HintPlace { SHARE, TRANSPORT, ADDRESS, MARKER, RAIL, ASK }
+private data class Hint(val place: HintPlace, val text: String)
 
 /** Kompakt, egymondatos súgóbuborékok (a régi, hosszabb szövegek rövidítve). */
-val HINTS = listOf(
+private val HINTS = listOf(
     Hint(HintPlace.SHARE, "Egy koppintás: megosztás be/ki. Leállítva kíméli az akkut."),
     Hint(HintPlace.TRANSPORT, "Közlekedési mód: magától vált, rábökve te is választhatsz."),
     Hint(HintPlace.ADDRESS, "Cím: csak a megnyitott jelölő helye megy a címkeresőhöz. A Beállításokban kapcsolható."),

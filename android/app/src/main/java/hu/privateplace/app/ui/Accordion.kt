@@ -19,9 +19,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-const val ANIM_MS = 240      // minden harmonika/fül ugyanazzal az ütemmel mozog (mint a webes useSmoothHeight: 240 ms)
-val AnimEasing = FastOutSlowInEasing
-
 /** Dinamikusan illeszkedő harmónika: a fejléc koppintásra a tartalom a saját magasságához igazodva nyílik/záródik, a szülő ablak vele együtt nő/zsugorodik. */
 @Composable
 fun Accordion(
