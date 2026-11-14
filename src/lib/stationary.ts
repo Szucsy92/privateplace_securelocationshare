@@ -68,7 +68,7 @@ const ACC_FLOOR = 6, ACC_TRUST = 1.3;
 const STILL_SPEED = 0.5;       // m/s: ennél lassabb Doppler = „áll” bizonyíték
 const GO_SPEED = 0.55;         // m/s: lassú gyaloglás; pozíciós/lépéses megerősítéssel
 const FAST_SPEED = 2.5;        // m/s: ennyinél egyetlen fix is elég (jármű indul)
-const STEP_MOVE_MIN_M = 2, STEP_MOVE_ACC_K = 0.4;   // m: köztes Doppler mellett a lépésjelzéshez ennyi nyers elmozdulás kell az utóbbi ~5 fixben
+const STEP_MOVE_MIN_M = 2, STEP_MOVE_ACC_K = 0.3;   // m: a Doppler-mozgás megerősítéséhez kisebb, de valós pozíciós elmozdulás is elég; az álló GPS-zaj továbbra sem éri el
 const GO_FIXES = 2;            // az utolsó 3 fixből ennyi gyors kell a feloldáshoz (egyedi sebességtüske nem indít)
 const ENTER_MS = 5000, ENTER_FIXES = 4;
 const NO_SPEED_ENTER_MS = 20000; // sebességadat nélkül hosszabb ablak kell az „áll” döntéshez
@@ -309,22 +309,20 @@ export function createDriftFilter() {
 
       const back = recent[Math.max(0, recent.length - 6)]!;
       const movedRecently = recent.length >= 4 && Math.hypot(z.x - back.p.x, z.y - back.p.y) >= Math.max(STEP_MOVE_MIN_M, STEP_MOVE_ACC_K * (fix.acc ?? 6));
-      // A Doppler-jelölteket külön gyűjtjük: két egymást követő, legalább
-      // GO_SPEED sebességű mérés már elégséges sebesség-bizonyíték lehet,
-      // de a pozíciótól függetlenül nem engedjük elindítani a jelölőt.
-      // Ehhez a horgonyról legalább STEP_MOVE_MIN_M elmozdulás is szükséges.
-      // Így az 1–1,5 m/s-os állóhelyzeti Doppler-zaj nem okoz hamis mozgást.
-      const dopGo = dopplerOk && sp! >= GO_SPEED && !(dopDistrust && sp! < FAST_SPEED);
+      // Álló módban a GPS-szolgáltató által becsült Doppler önmagában nem elég:
+      // egyes Androidokon a helyben álló telefon is tartósan 1–1,5 m/s-ot (4–5 km/h) jelent.
+      // Lassú gyaloglásnál ezért legalább pozíciós elmozdulás vagy lépésjel kell; a gyors járműsebesség
+      // (≥ FAST_SPEED) továbbra is egy fixből feloldhatja az állást.
+      const dopGo = dopplerOk && sp! >= GO_SPEED && !(dopDistrust && sp! < FAST_SPEED)
+        && (sp! >= FAST_SPEED || movedRecently || fix.stepping === true);
       // A járás-jelzés Doppler hiányában (vagy ha az nem mond ellent) segít; Doppler-„áll” mellett nem számít.
       // Köztes Doppler-tartományban a lépésjelzés csak akkor bizonyíték, ha a nyers pozíció is elmozdult:
       // a zajos lépésérzékelő önmagában nem oldja fel az állást.
       const stepEv = fix.stepping === true && !dopStill && (!dopplerOk || movedRecently);
       fastHist.push(dopGo || stepEv);
       if (fastHist.length > 3) fastHist.shift();
-      const movingEvidence = Math.hypot(z.x - anchor.x, z.y - anchor.y) >= 1.5;
-      const repeatedDoppler = fastHist.filter(Boolean).length >= GO_FIXES && movingEvidence;
       const bothSensors = dopGo && fix.stepping === true && (fix.acc ?? 999) <= GO_FIX_ACC;   // Doppler és járás-jelzés egyszerre: két független bizonyíték
-      let leave = repeatedDoppler || (dopplerOk && sp! >= FAST_SPEED) || bothSensors;
+      let leave = fastHist.filter(Boolean).length >= GO_FIXES || (dopplerOk && sp! >= FAST_SPEED) || bothSensors;
       let relocate: Vec | null = null;
       let why = leave ? (dopplerOk && sp! >= FAST_SPEED ? `gyors Doppler (${f1(sp! * 3.6)} km/h)` : bothSensors ? "Doppler és járás-jelzés együtt" : `Doppler/járás-jelzés az utolsó 3 fixből ${fastHist.filter(Boolean).length}-on`) : "";
 
