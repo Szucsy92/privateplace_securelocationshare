@@ -91,11 +91,33 @@ class AppGraph(val app: Application) {
         scope.launch {
             engine.state.map { it.sharing }.distinctUntilChanged().collect { on ->
                 val i = Intent(app, SharingService::class.java)
-                if (on) ContextCompat.startForegroundService(app, i) else app.stopService(i)
+                // Háttérből (pl. a rendszer újraindította a folyamatot) az előtér-szolgáltatás indítása kivételt dobhat: ilyenkor a sticky szolgáltatás úgyis újraindul
+                runCatching { if (on) ContextCompat.startForegroundService(app, i) else app.stopService(i) }
             }
         }
-        // Újraindított folyamat: ha a megosztás be volt kapcsolva, folytatjuk (az előtér-szolgáltatás újraindítása után)
-        if (prefs.value.sharing) { engine.setPermissionGranted(true); engine.setSharing(true) }
+        // Újraindított folyamat: ha a megosztás be volt kapcsolva és a helyengedély megvan, folytatjuk; különben kikapcsoljuk (ne maradjon „be” állapot működés nélkül)
+        if (prefs.value.sharing) {
+            if (hu.privateplace.app.ui.Perms.anyLocation(app)) { engine.setPermissionGranted(true); engine.setSharing(true) }
+            else updatePrefs { it.copy(sharing = false) }
+        }
+        watchNetwork()
+    }
+
+    /** A webes `online` esemény megfelelője: hálózat-visszatérés / hálózatváltás után azonnal újracsatlakozunk és újraközlünk. */
+    private var lastNetWake = 0L
+    private fun watchNetwork() {
+        val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        runCatching {
+            cm.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: android.net.Network) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastNetWake < 4000) return
+                    lastNetWake = now
+                    main.post { peers.wake() }
+                }
+            })
+        }
     }
 
     private fun resync() = peers.sync(rooms.value, deviceId, profile.value)
