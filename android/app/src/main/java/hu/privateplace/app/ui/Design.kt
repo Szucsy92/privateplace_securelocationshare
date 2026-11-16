@@ -1,6 +1,8 @@
 package hu.privateplace.app.ui
 
 import android.content.Context
+import android.content.res.Configuration
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -44,9 +46,16 @@ class Fonts(val body: FontFamily, val display: FontFamily)
 val LocalFonts = staticCompositionLocalOf { Fonts(FontFamily.Default, FontFamily.Default) }
 val pal: Palette @Composable get() = LocalPalette.current
 
-// Compatibility names used by the shared Compose panels.
-val Mint: Color @Composable get() = pal.primary
-val Muted: Color @Composable get() = pal.mutedForeground
+fun parseColor(hex: String): Color = Color(android.graphics.Color.parseColor(hex))
+
+/** A webes `.indicator[data-state="on"]` mindkét témában ugyanazt a zöldet használja: oklch(0.82 0.19 165). */
+val SignalGreen = Color(0xFF00E9A5)
+
+/** Fekvő mód (a webes `@media (orientation: landscape) and (max-height: 600px)`) és keskeny képernyő (`max-width: 430px`). */
+@Composable
+fun isLandscapeLayout(): Boolean { val c = LocalConfiguration.current; return c.orientation == Configuration.ORIENTATION_LANDSCAPE && c.screenHeightDp <= 600 }
+@Composable
+fun isNarrow(): Boolean = LocalConfiguration.current.screenWidthDp <= 430
 
 
 const val ANIM_MS = 240   // minden harmónika/ablak/fül ugyanazzal az ütemmel mozog (a webes useSmoothHeight: 240 ms)
@@ -87,13 +96,32 @@ val Radius2xl = 22.4.dp
 /** Matt üveg (.glass): áttetsző felület, vékony él, lágy árnyék. */
 @Composable
 fun Modifier.glass(radius: Dp = 20.dp, bg: Color = pal.glassBg, shape: Shape = RoundedCornerShape(radius)): Modifier =
-    this.shadow(10.dp, shape, ambientColor = pal.shade.copy(alpha = .45f), spotColor = pal.shade.copy(alpha = .45f)).clip(shape).background(bg, shape).border(1.dp, pal.glassEdge, shape)
+    this.shadow(10.dp, shape, ambientColor = pal.shade.copy(alpha = .45f), spotColor = pal.shade.copy(alpha = .45f)).clip(shape).background(bg, shape).topHighlight(.08f)
+        .border(1.dp, pal.glassEdge, shape)
+
+/** A webes `inset 0 1px 0 white/8%`: vékony fényes él a felület tetején. */
+@Composable
+fun Modifier.topHighlight(alpha: Float): Modifier {
+    val c = pal.tint.copy(alpha = alpha)
+    return this.drawWithContent {
+        drawContent()
+        drawLine(Brush.horizontalGradient(0f to Color.Transparent, 0.12f to c, 0.88f to c, 1f to Color.Transparent), androidx.compose.ui.geometry.Offset(0f, 0.5f.dp.toPx()), androidx.compose.ui.geometry.Offset(size.width, 0.5f.dp.toPx()), 1.dp.toPx())
+    }
+}
+
+/** Szaggatott keret (a webes `border-style: dashed`: Meghívó kapszula, plusz-avatár). */
+fun Modifier.dashedBorder(color: Color, width: Dp = 1.dp, radius: Dp? = null): Modifier = this.drawWithContent {
+    drawContent()
+    val w = width.toPx(); val r = (radius?.toPx() ?: (size.height / 2))
+    drawRoundRect(color, androidx.compose.ui.geometry.Offset(w / 2, w / 2), androidx.compose.ui.geometry.Size(size.width - w, size.height - w),
+        androidx.compose.ui.geometry.CornerRadius(r), style = androidx.compose.ui.graphics.drawscope.Stroke(w, pathEffect = PathEffect.dashPathEffect(floatArrayOf(3 * w, 3 * w))))
+}
 
 /** .glass-inset: halvány, besüllyesztett kártya. */
 @Composable
 fun Modifier.glassInset(radius: Dp = Radius2xl): Modifier {
     val s = RoundedCornerShape(radius)
-    return this.clip(s).background(pal.glassInset, s).border(1.dp, pal.tint.copy(alpha = .07f), s)
+    return this.clip(s).background(pal.glassInset, s).topHighlight(.05f).border(1.dp, pal.tint.copy(alpha = .07f), s)
 }
 
 @Composable
@@ -111,8 +139,8 @@ fun StatusDot(state: String, modifier: Modifier = Modifier) {
 /** Jelző: aktív = zöld derengés. */
 @Composable
 fun Modifier.indicator(on: Boolean, shape: Shape = CircleShape, base: Color = Color.Transparent): Modifier =
-    if (on) this.shadow(8.dp, shape, ambientColor = pal.signal.copy(alpha = .5f), spotColor = pal.signal.copy(alpha = .5f))
-        .background(pal.signal.copy(alpha = .16f), shape).border(1.dp, pal.signal.copy(alpha = .55f), shape)
+    if (on) this.shadow(8.dp, shape, ambientColor = SignalGreen.copy(alpha = .4f), spotColor = SignalGreen.copy(alpha = .4f))
+        .background(SignalGreen.copy(alpha = .16f), shape).border(1.dp, SignalGreen.copy(alpha = .55f), shape)
     else this.alpha(.72f).background(base, shape)
 
 // ───────── Gombok (shadcn) ─────────
@@ -179,12 +207,24 @@ fun PPSlider(value: Float, onChange: (Float) -> Unit, range: ClosedFloatingPoint
     Slider(value, onChange, valueRange = range, colors = SliderDefaults.colors(thumbColor = pal.primary, activeTrackColor = pal.primary, inactiveTrackColor = pal.muted))
 
 // ───────── Rugalmas görgetés (puha szélekkel) ─────────
+/** Fekvő módban a nem „kompakt” ablakok egészben görgetnek (overflow-y: auto) – ilyenkor a belső rugalmas görgetés sima oszlop. */
+val LocalFlat = compositionLocalOf { false }
+
 @Composable
 fun ElasticScroll(modifier: Modifier = Modifier, maxHeight: Dp = Dp.Unspecified, content: @Composable ColumnScope.() -> Unit) {
+    if (LocalFlat.current) { Column(modifier, content = content); return }
     val scroll = rememberScrollState()
     Column(modifier.then(if (maxHeight != Dp.Unspecified) Modifier.heightIn(max = maxHeight) else Modifier)
         .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
         .drawWithMask().verticalScroll(scroll), content = content)
+}
+
+/** Fekvő módban a függőleges hely szűkös: a megadott (álló) magasság helyett a képernyőhöz igazodó értéket adja. */
+@Composable
+fun dlgMax(portrait: Dp, reserve: Dp = 110.dp): Dp {
+    if (!isLandscapeLayout()) return portrait
+    val h = LocalConfiguration.current.screenHeightDp
+    return (h - 16 - reserve.value).coerceAtLeast(96f).dp
 }
 
 private fun Modifier.drawWithMask(): Modifier = this.drawWithContent {
@@ -197,18 +237,27 @@ private fun Modifier.drawWithMask(): Modifier = this.drawWithContent {
 
 // ───────── Ablak (Dialog): matt üveg, középen, a tartalom magasságához lágyan igazodik ─────────
 @Composable
-fun GlassDialog(onDismiss: () -> Unit, dismissable: Boolean = true, maxWidth: Dp = 390.dp, content: @Composable ColumnScope.() -> Unit) {
+fun GlassDialog(onDismiss: () -> Unit, dismissable: Boolean = true, maxWidth: Dp = 390.dp, fullHeight: Boolean = false, compact: Boolean = true, content: @Composable ColumnScope.() -> Unit) {
     Dialog(onDismissRequest = { if (dismissable) onDismiss() }, properties = DialogProperties(dismissOnClickOutside = false, dismissOnBackPress = dismissable, usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         (LocalView.current.parent as? DialogWindowProvider)?.window?.setDimAmount(0f)
         var shown by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) { shown = true }
-        val shape = RoundedCornerShape(28.dp)
+        val land = isLandscapeLayout()
+        val cfg = LocalConfiguration.current
+        val shape = RoundedCornerShape(if (land) 24.dp else 28.dp)
+        // Fekvő mód: a webes `[role=dialog].land-wide` – min(44rem, 100vw - 2rem), magasság: 100dvh - 1rem
+        val w = if (land) minOf(704f, cfg.screenWidthDp - 32f).dp else maxWidth
+        val maxH = if (land) (cfg.screenHeightDp - 16f).dp else (cfg.screenHeightDp * 0.94f).dp
         Box(Modifier.fillMaxSize().background(pal.dialogBackdrop).pointerInput(dismissable) { detectTapGestures { if (dismissable) onDismiss() } }.safeDrawingPadding().imePadding(),
             contentAlignment = Alignment.Center) {
             AnimatedVisibility(shown, enter = fadeIn(tween(200)) + scaleIn(tween(200), 0.95f), exit = fadeOut(tween(150))) {
-                Box(Modifier.padding(horizontal = 12.dp).widthIn(max = maxWidth).fillMaxWidth().pointerInput(Unit) { detectTapGestures { } }) {
-                    Column(Modifier.fillMaxWidth().animateContentSize(harmonika()).clip(shape).background(pal.glassStrong, shape).border(1.dp, pal.glassEdge, shape)
-                        .heightIn(max = (LocalContext.current.resources.displayMetrics.run { heightPixels / density } * 0.94f).dp)) { content() }
+                Box(Modifier.padding(horizontal = if (land) 0.dp else 12.dp).then(if (land) Modifier.width(w) else Modifier.widthIn(max = w).fillMaxWidth()).pointerInput(Unit) { detectTapGestures { } }) {
+                    val flat = land && !compact
+                    Column(Modifier.fillMaxWidth().animateContentSize(harmonika()).shadow(28.dp, shape, ambientColor = pal.shade.copy(.9f), spotColor = pal.shade.copy(.9f)).clip(shape).background(pal.glassStrong, shape).topHighlight(.10f).border(1.dp, pal.glassEdge, shape)
+                        .then(if (fullHeight && land) Modifier.height(maxH) else Modifier.heightIn(max = maxH))
+                        .then(if (flat) Modifier.verticalScroll(rememberScrollState()) else Modifier)) {
+                        CompositionLocalProvider(LocalFlat provides flat) { content() }
+                    }
                     if (dismissable) Box(Modifier.align(Alignment.TopEnd).padding(top = 14.dp, end = 14.dp).size(28.dp).clip(CircleShape).clickable(onClick = onDismiss), contentAlignment = Alignment.Center) {
                         LIcon("x", size = 16.dp, tint = pal.foreground.copy(alpha = .7f)) }
                 }

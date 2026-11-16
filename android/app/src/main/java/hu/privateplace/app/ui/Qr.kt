@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
@@ -51,6 +52,14 @@ fun QrScanner(onCode: (String) -> Unit, modifier: Modifier = Modifier) {
             }, ContextCompat.getMainExecutor(c))
             pv
         })
+        // Sötétítés a keret körül (box-shadow: 0 0 0 999px shade 45%) + világító keret
+        val scrim = pal.shade.copy(alpha = .45f)
+        androidx.compose.foundation.Canvas(Modifier.fillMaxSize().graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }) {
+            drawRect(scrim)
+            val inset = size.width * 0.18f
+            drawRoundRect(Color.Black, androidx.compose.ui.geometry.Offset(inset, inset), androidx.compose.ui.geometry.Size(size.width - 2 * inset, size.height - 2 * inset),
+                androidx.compose.ui.geometry.CornerRadius(20.dp.toPx()), blendMode = androidx.compose.ui.graphics.BlendMode.Clear)
+        }
         Box(Modifier.align(Alignment.Center).fillMaxSize(0.64f).border(2.dp, pal.primary, RoundedCornerShape(20.dp)))
     }
 }

@@ -2,6 +2,7 @@ package hu.privateplace.app.ui
 
 import android.content.Context
 import android.graphics.*
+import android.os.Build
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -143,26 +144,33 @@ private fun decodeAvatar(url: String?): Bitmap? = runCatching {
 
 private fun markerBitmap(ctx: Context, p: MapPerson, pal: Palette, fonts: Fonts): Bitmap {
     val d = ctx.resources.displayMetrics.density
-    val size = (48 * d).roundToInt()
+    // 48 dp-s jelölő + 12 dp-s margó a lágy árnyéknak (0 6px 18px shade 60%) és a 1 px-es külső gyűrűnek
+    val size = (72 * d).roundToInt()
     val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888); bmp.density = ctx.resources.displayMetrics.densityDpi
     val cv = Canvas(bmp); val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    val r = size / 2f
-    paint.style = Paint.Style.FILL; paint.color = pal.glassStrong.copy(alpha = 1f).toArgb(); cv.drawCircle(r, r, r - 1f, paint)
-    val inner = r - 3 * d - 3 * d
+    val c = size / 2f; val r = 24 * d
+    paint.style = Paint.Style.FILL; paint.color = pal.glassStrong.copy(alpha = 1f).toArgb()
+    paint.setShadowLayer(9 * d, 0f, 6 * d, pal.shade.copy(alpha = .6f).toArgb())
+    cv.drawCircle(c, c, r, paint); paint.clearShadowLayer()
+    paint.style = Paint.Style.STROKE; paint.strokeWidth = 1 * d; paint.color = pal.tint.copy(alpha = .12f).toArgb()
+    cv.drawCircle(c, c, r + .5f * d, paint)
+    val inner = r - 6 * d      // 3 px keret + 3 px belső kitöltés
     val av = decodeAvatar(p.avatar)
+    paint.style = Paint.Style.FILL
     if (av != null) {
-        val path = Path().apply { addCircle(r, r, inner, Path.Direction.CW) }
+        val path = Path().apply { addCircle(c, c, inner, Path.Direction.CW) }
         cv.save(); cv.clipPath(path)
         val s = minOf(av.width, av.height)
-        cv.drawBitmap(av, Rect((av.width - s) / 2, (av.height - s) / 2, (av.width + s) / 2, (av.height + s) / 2), RectF(r - inner, r - inner, r + inner, r + inner), paint)
+        cv.drawBitmap(av, Rect((av.width - s) / 2, (av.height - s) / 2, (av.width + s) / 2, (av.height + s) / 2), RectF(c - inner, c - inner, c + inner, c + inner), paint)
         cv.restore()
     } else {
-        paint.color = pal.foreground.toArgb(); paint.textSize = 18 * d; paint.textAlign = Paint.Align.CENTER; paint.isFakeBoldText = true
-        val tf = runCatching { Typeface.createFromAsset(ctx.assets, "fonts/DMSans.ttf") }.getOrNull(); if (tf != null) paint.typeface = tf
-        cv.drawText((p.name.ifBlank { "?" }).take(1).uppercase(), r, r - (paint.descent() + paint.ascent()) / 2, paint)
+        paint.color = pal.foreground.toArgb(); paint.textSize = 18.4f * d; paint.textAlign = Paint.Align.CENTER
+        val tf = runCatching { Typeface.createFromAsset(ctx.assets, "fonts/DMSans.ttf") }.getOrNull()
+        paint.typeface = if (tf != null && Build.VERSION.SDK_INT >= 28) Typeface.create(tf, 600, false) else (tf ?: Typeface.DEFAULT_BOLD)
+        cv.drawText((p.name.ifBlank { "?" }).take(1).uppercase(), c, c - (paint.descent() + paint.ascent()) / 2, paint)
     }
     paint.style = Paint.Style.STROKE; paint.strokeWidth = 3 * d; paint.color = Color.parseColor(p.color)
-    cv.drawCircle(r, r, r - 1.5f * d, paint)
+    cv.drawCircle(c, c, r - 1.5f * d, paint)
     return bmp
 }
 

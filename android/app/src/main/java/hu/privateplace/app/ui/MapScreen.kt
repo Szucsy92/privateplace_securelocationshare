@@ -3,8 +3,13 @@ package hu.privateplace.app.ui
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,6 +30,7 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
@@ -162,25 +168,10 @@ fun MapScreen(actions: PermissionActions, invite: Invitation?, onInviteDone: () 
             })
         }
 
-        Column(Modifier.fillMaxSize().statusBarsPadding().padding(top = 8.dp, start = 8.dp, end = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            // ── Fejléc ──
-            Row(Modifier.fillMaxWidth().glass(20.dp).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Txt("Private Place", Modifier.weight(1f), size = 16f, weight = 700, display = true, maxLines = 1, lineHeight = 24f)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    SharingControl(sharingStatus) { setSharing(!self.sharing) }
-                    Box(Modifier.size(36.dp).indicator(onlineCount > 0).clip(CircleShape).clickable { dialog = DialogKind.ROOMS }, contentAlignment = Alignment.Center) {
-                        LIcon("users", size = 20.dp, tint = if (onlineCount > 0) pal.primary else pal.foreground)
-                        if (onlineCount > 0) Box(Modifier.align(Alignment.TopEnd).offset(2.dp, (-2).dp).defaultMinSize(minWidth = 17.dp).height(17.dp).background(pal.primary, CircleShape).padding(horizontal = 4.dp), contentAlignment = Alignment.Center) {
-                            Txt("$onlineCount", size = 10f, weight = 600, color = pal.primaryForeground) }
-                    }
-                    Box(Modifier.size(36.dp).indicator(dialog == DialogKind.SETTINGS).clip(CircleShape).clickable { settingsView = "main"; dialog = DialogKind.SETTINGS }, contentAlignment = Alignment.Center) {
-                        LIcon("settings-2", size = 20.dp, tint = if (dialog == DialogKind.SETTINGS) pal.primary else pal.foreground) }
-                }
-            }
-
-            // ── Térképablak ──
-            val panelShape = RoundedCornerShape(28.dp)
-            Box(Modifier.weight(1f).fillMaxWidth().shadow(10.dp, panelShape, ambientColor = pal.shade.copy(.4f), spotColor = pal.shade.copy(.4f)).clip(panelShape).border(1.dp, pal.glassEdge, panelShape)
+        val land = isLandscapeLayout(); val narrow = isNarrow()
+        val panelShape = RoundedCornerShape(28.dp)
+        val mapPanel: @Composable (Modifier) -> Unit = { mod ->
+            Box(mod.shadow(10.dp, panelShape, ambientColor = pal.shade.copy(.4f), spotColor = pal.shade.copy(.4f)).clip(panelShape).border(1.dp, pal.glassEdge, panelShape)
                 .onGloballyPositioned { c ->
                     val pos = c.positionInRoot(); val root = c.findRootCoordinates().size
                     window = intArrayOf(pos.x.toInt(), pos.y.toInt(), maxOf(0, root.width - pos.x.toInt() - c.size.width), maxOf(0, root.height - pos.y.toInt() - c.size.height))
@@ -188,7 +179,7 @@ fun MapScreen(actions: PermissionActions, invite: Invitation?, onInviteDone: () 
                 LiveMap(mapPeople, follow, prefs.showTrails, prefs.trailIds, prefs.orientation, prefs.mapTheme == "dark", cam, { compassRot = it }, addressAllowed,
                     { g.updatePrefs { it.copy(addressConsent = "yes") } }, Modifier.fillMaxSize(), centerRef)
                 // belső árnyék-gyűrű
-                Box(Modifier.fillMaxSize().border(1.dp, pal.tint.copy(alpha = .06f), panelShape))
+                Box(Modifier.fillMaxSize().innerGlow(pal.shade.copy(alpha = .30f)).border(1.dp, pal.tint.copy(alpha = .06f), panelShape))
 
                 // Iránytű
                 Box(Modifier.align(Alignment.TopEnd).padding(top = 12.dp, end = 12.dp).size(44.dp).glass(shape = CircleShape).indicator(prefs.orientation == "heading").clip(CircleShape)
@@ -230,21 +221,55 @@ fun MapScreen(actions: PermissionActions, invite: Invitation?, onInviteDone: () 
                     pickTarget = null; dialog = DialogKind.SETTINGS; settingsView = "places"
                 } }
             }
+        }
+        // Az emberek listája: ugyanaz a tartalom a vízszintes (álló) és a függőleges (fekvő) sávban
+        val railContent: LazyListScope.() -> Unit = {
+            if (profile != null) item { PersonCapsule("Én", profile!!.avatar, profile!!.name, selfColor, follow?.id == SELF,
+                if (selfFresh) "on" else if (self.error != null) "warn" else "wait", if (self.at != null) kmh(self.speed) else "") { toggleFollow(SELF) } }
+            items(remote, key = { it.deviceId }) { p ->
+                PersonCapsule(p.name, p.avatar, p.name, p.color, follow?.id == p.deviceId,
+                    if (!p.online) "warn" else if (!p.sharing) "off" else if (p.at != null && clock - p.at < 15000) "on" else "wait", personStatus(p, clock)) { toggleFollow(p.deviceId) }
+            }
+            if (remote.isEmpty()) item { PersonCapsule("Meghívó", null, "+", "", false, "none", "Szoba", invite = true) { dialog = DialogKind.ROOMS } }
+        }
+        val onRooms = { dialog = DialogKind.ROOMS }
+        val onSettings = { settingsView = "main"; dialog = DialogKind.SETTINGS }
+        val ld = androidx.compose.ui.unit.LayoutDirection.Ltr
+        val insTop = with(density) { WindowInsets.safeDrawing.getTop(this).toDp() }
+        val insBottom = with(density) { WindowInsets.safeDrawing.getBottom(this).toDp() }
+        val insLeft = with(density) { WindowInsets.safeDrawing.getLeft(this, ld).toDp() }
+        val insRight = with(density) { WindowInsets.safeDrawing.getRight(this, ld).toDp() }
 
-            // ── Személysáv ──
+        if (!land) Column(Modifier.fillMaxSize().padding(top = maxOf(8.dp, insTop), start = 8.dp, end = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // ── Fejléc ──
+            Row(Modifier.fillMaxWidth().glass(20.dp).padding(horizontal = if (narrow) 8.dp else 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (narrow) 4.dp else 8.dp)) {
+                Txt("Private Place", Modifier.weight(1f), size = if (narrow) 13f else 16f, weight = 700, display = true, maxLines = 1, lineHeight = if (narrow) 20f else 24f)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (narrow) 2.dp else 6.dp)) {
+                    SharingControl(sharingStatus, narrow = narrow) { setSharing(!self.sharing) }
+                    HeaderButton("users", onlineCount > 0, onlineCount, narrow, onRooms)
+                    HeaderButton("settings-2", dialog == DialogKind.SETTINGS, 0, narrow, onSettings)
+                }
+            }
+            mapPanel(Modifier.weight(1f).fillMaxWidth())
+            // ── Személysáv (vízszintes) ──
             Box(Modifier.fillMaxWidth().layout { m, c -> val p = m.measure(c.copy(maxWidth = c.maxWidth + 16.dp.roundToPx())); layout(c.maxWidth, p.height) { p.place(-8.dp.roundToPx(), 0) } }) {
                 val fade = Brush.horizontalGradient(0f to Color.Transparent, 0.05f to Color.Black, 0.95f to Color.Black, 1f to Color.Transparent)
                 LazyRow(Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }.drawWithContent { drawContent(); drawRect(fade, blendMode = BlendMode.DstIn) },
-                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 14.dp, bottom = maxOf(15.dp, with(density) { WindowInsets.navigationBars.getBottom(this).toDp() } + 8.dp)),
-                    horizontalArrangement = Arrangement.spacedBy(9.6.dp)) {
-                    if (profile != null) item { PersonCapsule("Én", profile!!.avatar, profile!!.name, selfColor, follow?.id == SELF,
-                        if (selfFresh) "on" else if (self.error != null) "warn" else "wait", if (self.at != null) kmh(self.speed) else "") { toggleFollow(SELF) } }
-                    items(remote, key = { it.deviceId }) { p ->
-                        PersonCapsule(p.name, p.avatar, p.name, p.color, follow?.id == p.deviceId,
-                            if (!p.online) "warn" else if (!p.sharing) "off" else if (p.at != null && clock - p.at < 15000) "on" else "wait", personStatus(p, clock)) { toggleFollow(p.deviceId) }
+                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 13.6.dp, bottom = maxOf(15.2.dp, insBottom + 8.dp)),
+                    horizontalArrangement = Arrangement.spacedBy(9.6.dp), content = railContent)
+            }
+        } else Row(Modifier.fillMaxSize().padding(start = maxOf(8.dp, insLeft), top = maxOf(8.dp, insTop), end = maxOf(8.dp, insRight), bottom = maxOf(8.dp, insBottom)), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // ── Fekvő mód: bal oldalt a térkép, jobb oldalt egy kapszula széles kezelősáv ──
+            mapPanel(Modifier.weight(1f).fillMaxHeight())
+            Column(Modifier.width(176.dp).fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SharingControl(sharingStatus, landscape = true) { setSharing(!self.sharing) }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        HeaderButton("users", onlineCount > 0, onlineCount, false, onRooms, landscape = true, modifier = Modifier.weight(1f))
+                        HeaderButton("settings-2", dialog == DialogKind.SETTINGS, 0, false, onSettings, landscape = true, modifier = Modifier.weight(1f))
                     }
-                    if (remote.isEmpty()) item { PersonCapsule("Meghívó", null, "+", "", false, "none", "Szoba", invite = true) { dialog = DialogKind.ROOMS } }
                 }
+                LandscapeRail(railContent)
             }
         }
 
@@ -268,21 +293,22 @@ private fun BackHandlerCompat(dialog: DialogKind?, exitConfirm: Boolean, closeDi
 
 // ───────── Megosztás-kapcsoló (SharingControl) ─────────
 @Composable
-fun SharingControl(status: String, onToggle: () -> Unit) {
+fun SharingControl(status: String, narrow: Boolean = false, landscape: Boolean = false, onToggle: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     LaunchedEffect(status) { expanded = true; delay(3000); expanded = false }
-    val w by animateDpAsState(if (expanded) 164.dp else 40.dp, tween(220), label = "sc")
+    val open = expanded || landscape
+    val w by animateDpAsState(if (landscape) 176.dp else if (open) (if (narrow) 130.dp else 164.dp) else 40.dp, tween(220), label = "sc")
     val label = mapOf("off" to "Megosztás ki", "live" to "Megosztás be", "search" to "Helyzet keresése…", "lost" to "Nincs jel")[status] ?: ""
     val signal = when (status) { "live" -> Color(0xFF14B8A6); "search" -> Color(0xFFFBBF24); "lost" -> Color(0xFFFB7185); else -> pal.mutedForeground }
     val t = rememberInfiniteTransition(label = "sig")
     val k by t.animateFloat(0f, 1f, infiniteRepeatable(tween(1800, easing = LinearOutSlowInEasing)), label = "k")
     val on = status != "off"
     val bg = if (on) lerp(pal.glassBg, Color(0xFF14B8A6), .18f) else pal.glassBg
-    Row(Modifier.width(w).height(40.dp).drawBehind { if (on) drawCircle(signal.copy(alpha = .45f * (1 - k)), radius = size.height / 2 + 7.dp.toPx() * k, center = center) }
-        .clip(CircleShape).background(bg, CircleShape).border(1.dp, pal.glassEdge, CircleShape).clickable(onClick = onToggle).padding(horizontal = 10.dp),
-        verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.width(w).height(if (landscape) 44.dp else 40.dp).drawBehind { if (on) drawCircle(signal.copy(alpha = .45f * (1 - k.coerceAtMost(.85f) / .85f)), radius = size.height / 2 + 7.dp.toPx() * (k / .85f).coerceAtMost(1f), center = center) }
+        .clip(CircleShape).background(bg, CircleShape).border(1.dp, pal.glassEdge, CircleShape).clickable(onClick = onToggle).padding(horizontal = if (landscape) 14.dp else 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = if (landscape) Arrangement.Center else Arrangement.Start) {
         LIcon(if (status == "off") "play" else "pause", size = 18.dp, tint = if (on) Color(0xFF14B8A6) else signal)
-        if (w > 60.dp) { Spacer(Modifier.width(6.dp)); Txt(label, size = 11f, color = if (on) Color(0xFF14B8A6) else signal, maxLines = 1) }
+        if (open && w > 60.dp) { Spacer(Modifier.width(if (landscape) 8.dp else 6.dp)); Txt(label, size = if (landscape) 12f else 11f, color = if (on) Color(0xFF14B8A6) else signal, maxLines = 1, modifier = Modifier.then(if (landscape) Modifier else Modifier.width(if (narrow) 100.dp else 124.dp))) }
     }
 }
 
@@ -310,10 +336,11 @@ fun PersonCapsule(name: String, avatar: String?, fallback: String, color: String
     val c = if (color.startsWith("#")) parseColor(color) else pal.mutedForeground
     val shape = CircleShape
     Row(Modifier.width(176.dp).height(72.dp).scale(if (pressed) .97f else 1f)
-        .then(if (active) Modifier.shadow(8.dp, shape, ambientColor = pal.signal.copy(.4f), spotColor = pal.signal.copy(.4f)) else Modifier.shadow(8.dp, shape, ambientColor = pal.shade.copy(.45f), spotColor = pal.shade.copy(.45f)))
-        .clip(shape).background(pal.glassBg, shape).background(if (active) pal.signal.copy(alpha = .12f) else Color.Transparent, shape)
-        .border(if (invite) 1.dp else 1.dp, if (active) pal.signal.copy(alpha = .55f) else pal.glassEdge, shape)
-        .clickable(onClick = onClick).padding(start = 8.dp, end = 14.dp, top = 5.dp, bottom = 5.dp),
+        .shadow(11.dp, shape, ambientColor = pal.shade.copy(.45f), spotColor = pal.shade.copy(.45f))
+        .clip(shape).background(pal.glassBg, shape).background(if (active) SignalGreen.copy(alpha = .12f) else Color.Transparent, shape).topHighlight(.08f)
+        .then(if (invite) Modifier.dashedBorder(pal.glassEdge) else Modifier.border(1.dp, if (active) SignalGreen.copy(alpha = .55f) else pal.glassEdge, shape))
+        .pointerInput(Unit) { detectTapGestures(onPress = { pressed = true; tryAwaitRelease(); pressed = false }, onTap = { onClick() }) }
+        .padding(start = 8.dp, end = 14.dp, top = 5.dp, bottom = 5.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.6.dp)) {
         CapsuleAvatar(fallback, avatar, c, 54.dp, plus = invite, glow = active)
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
@@ -327,12 +354,15 @@ fun PersonCapsule(name: String, avatar: String?, fallback: String, color: String
 @Composable
 fun CapsuleAvatar(name: String, avatar: String?, color: Color, size: androidx.compose.ui.unit.Dp, plus: Boolean = false, glow: Boolean = false) {
     val bmp = remember(avatar) { decodeDataUrl(avatar) }
-    Box(Modifier.size(size).then(if (glow) Modifier.shadow(10.dp, CircleShape, ambientColor = pal.glow, spotColor = pal.glow) else Modifier).clip(CircleShape).background(pal.surfaceStrong, CircleShape)
-        .border(3.dp, color, CircleShape), contentAlignment = Alignment.Center) {
-        when {
-            plus -> LIcon("plus", size = 24.dp, tint = pal.mutedForeground)
-            bmp != null -> androidx.compose.foundation.Image(bmp.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
-            else -> Txt((name.ifBlank { "?" }).take(1).uppercase(), size = 18.4f, weight = 600)
+    // aktív (követett) állapot: 2 px-es zöld gyűrű + derengés (a webes .capsule[data-state="on"] .capsule-avatar)
+    Box(Modifier.size(size).then(if (glow) Modifier.shadow(14.dp, CircleShape, ambientColor = pal.glow, spotColor = pal.glow).border(2.dp, SignalGreen.copy(alpha = .35f), CircleShape) else Modifier)) {
+        Box(Modifier.fillMaxSize().padding(if (glow) 2.dp else 0.dp).clip(CircleShape).background(pal.surfaceStrong, CircleShape)
+            .then(if (plus) Modifier.dashedBorder(pal.mutedForeground, 3.dp) else Modifier.border(3.dp, color, CircleShape)), contentAlignment = Alignment.Center) {
+            when {
+                plus -> LIcon("plus", size = 24.dp, tint = pal.mutedForeground)
+                bmp != null -> androidx.compose.foundation.Image(bmp.asImageBitmap(), null, Modifier.fillMaxSize().padding(3.dp).clip(CircleShape), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                else -> Txt((name.ifBlank { "?" }).take(1).uppercase(), size = 18.4f, weight = 600)
+            }
         }
     }
 }
@@ -416,24 +446,49 @@ fun BoxScope.HintBubbles(step: Int, onNext: () -> Unit, onSkip: () -> Unit, onDe
         if (hint.place != "transport") return@LaunchedEffect
         try { while (true) { delay(750); onDemo(true); delay(1000); onDemo(false) } } finally { onDemo(false) }
     }
-    val shape = RoundedCornerShape(16.dp)
-    val (align, pad) = when (hint.place) {
-        "share" -> Alignment.TopStart to PaddingValues(start = 16.dp, top = 64.dp)
-        "transport" -> Alignment.BottomStart to PaddingValues(start = 16.dp, bottom = 168.dp)
-        "rail" -> Alignment.BottomStart to PaddingValues(start = 16.dp, bottom = 120.dp)
-        "address" -> Alignment.BottomCenter to PaddingValues(bottom = 128.dp)
-        else -> Alignment.Center to PaddingValues(bottom = 80.dp)
+    val land = isLandscapeLayout()
+    val cfg = LocalConfiguration.current
+    val d = LocalDensity.current
+    val ld = androidx.compose.ui.unit.LayoutDirection.Ltr
+    val insT = with(d) { WindowInsets.safeDrawing.getTop(this).toDp() }; val insB = with(d) { WindowInsets.safeDrawing.getBottom(this).toDp() }
+    val insL = with(d) { WindowInsets.safeDrawing.getLeft(this, ld).toDp() }; val insR = with(d) { WindowInsets.safeDrawing.getRight(this, ld).toDp() }
+    val mT = maxOf(8.dp, insT); val mB = maxOf(8.dp, insB); val mL = maxOf(8.dp, insL); val mR = maxOf(8.dp, insR)
+    // Elhelyezés és nyíl a webes .hint-* szabályok szerint (álló és fekvő elrendezésben)
+    val place = hint.place
+    val align: Alignment; val pad: PaddingValues
+    var arrowAlign = Alignment.TopStart; var arrowX = 0.dp; var arrowY = 0.dp; var arrowDeg = 45f
+    when {
+        !land && place == "share" -> { align = Alignment.TopStart; pad = PaddingValues(start = 16.dp, top = mT + 64.dp); arrowAlign = Alignment.TopStart; arrowX = 22.4.dp; arrowY = (-6.4).dp; arrowDeg = 45f }
+        !land && place == "transport" -> { align = Alignment.BottomStart; pad = PaddingValues(start = 16.dp, bottom = 168.dp); arrowAlign = Alignment.BottomStart; arrowX = 25.6.dp; arrowY = 6.4.dp; arrowDeg = 225f }
+        !land && place == "rail" -> { align = Alignment.BottomStart; pad = PaddingValues(start = 16.dp, bottom = 120.dp); arrowAlign = Alignment.BottomStart; arrowX = 32.dp; arrowY = 6.4.dp; arrowDeg = 225f }
+        !land && place == "address" -> { align = Alignment.BottomCenter; pad = PaddingValues(bottom = 128.dp); arrowAlign = Alignment.BottomCenter; arrowY = 6.4.dp; arrowDeg = 225f }
+        !land -> { align = Alignment.TopCenter; pad = PaddingValues(top = (cfg.screenHeightDp * 0.4f).dp); arrowAlign = Alignment.BottomCenter; arrowY = 6.4.dp; arrowDeg = 225f }
+        place == "share" -> { align = Alignment.TopEnd; pad = PaddingValues(top = mT + 4.dp, end = mR + 176.dp + 14.4.dp); arrowAlign = Alignment.TopEnd; arrowX = 6.4.dp; arrowY = 16.dp; arrowDeg = 135f }
+        place == "transport" -> { align = Alignment.BottomStart; pad = PaddingValues(start = mL + 12.dp, bottom = mB + 73.6.dp); arrowAlign = Alignment.BottomStart; arrowX = 25.6.dp; arrowY = 6.4.dp; arrowDeg = 225f }
+        place == "rail" -> { align = Alignment.BottomEnd; pad = PaddingValues(end = mR + 176.dp + 14.4.dp, bottom = mB + 16.dp); arrowAlign = Alignment.BottomEnd; arrowX = 6.4.dp; arrowY = (-38.4).dp; arrowDeg = 135f }
+        place == "address" -> { align = Alignment.BottomCenter; pad = PaddingValues(end = 192.dp, bottom = mB + 73.6.dp); arrowAlign = Alignment.BottomCenter; arrowY = 6.4.dp; arrowDeg = 225f }
+        else -> { align = Alignment.TopCenter; pad = PaddingValues(top = (cfg.screenHeightDp * 0.4f).dp, end = 192.dp); arrowAlign = Alignment.BottomCenter; arrowY = 6.4.dp; arrowDeg = 225f }
     }
-    Box(Modifier.align(align).statusBarsPadding().padding(pad).widthIn(max = 240.dp)) {
-        AnimatedContent(step, transitionSpec = { (fadeIn(tween(260)) + scaleIn(tween(260), 0.98f)) togetherWith fadeOut(tween(120)) using SizeTransform(clip = false) { _, _ -> harmonika() } }, label = "hint") { s ->
-            val h = HINTS[s]
-            Column(Modifier.shadow(10.dp, shape).clip(shape).background(pal.glassStrong, shape).border(1.dp, pal.glassEdge, shape).padding(horizontal = 12.8.dp, vertical = 10.4.dp)) {
-                Txt(h.text, size = 12f, lineHeight = 16.5f)
-                Row(Modifier.padding(top = 8.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Txt("Kihagyás", size = 11f, color = pal.mutedForeground, underline = true, modifier = Modifier.clickable(onClick = onSkip))
-                    Box(Modifier.clip(CircleShape).background(pal.primary, CircleShape).clickable(onClick = onNext).padding(horizontal = 11.dp, vertical = 4.dp)) {
-                        Txt(if (s + 1 < HINTS.size) "Tovább ${s + 1}/${HINTS.size}" else "Értem", size = 11.5f, weight = 600, color = pal.primaryForeground) }
+    val shape = RoundedCornerShape(16.dp)
+    val maxW = minOf(240f, cfg.screenWidthDp - 32f).dp
+    Box(Modifier.align(align).padding(pad).widthIn(max = maxW)) {
+        AnimatedContent(step, transitionSpec = { (fadeIn(tween(260)) + scaleIn(tween(260), 0.98f)) togetherWith fadeOut(tween(120)) using SizeTransform(clip = false) { _, _ -> harmonika() } }, label = "hint") { st ->
+            val h = HINTS[st]
+            Box {
+                Column(Modifier.shadow(10.dp, shape).clip(shape).background(pal.glassStrong, shape).topHighlight(.08f).border(1.dp, pal.glassEdge, shape).padding(horizontal = 12.8.dp, vertical = 10.4.dp)) {
+                    Txt(h.text, size = 12f, lineHeight = 16.5f)
+                    Row(Modifier.padding(top = 8.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Txt("Kihagyás", size = 11f, color = pal.mutedForeground, underline = true, modifier = Modifier.clickable(onClick = onSkip))
+                        Box(Modifier.clip(CircleShape).background(pal.primary, CircleShape).clickable(onClick = onNext).padding(horizontal = 11.2.dp, vertical = 4.dp)) {
+                            Txt(if (st + 1 < HINTS.size) "Tovább ${st + 1}/${HINTS.size}" else "Értem", size = 11.5f, weight = 600, color = pal.primaryForeground) }
+                    }
                 }
+                // Nyíl: 0,7 rem-es elforgatott négyzet, csak két éle kerettel (a webes ::before)
+                val edge = pal.glassEdge; val fillC = pal.glassStrong
+                Box(Modifier.align(arrowAlign).offset(arrowX, arrowY).size(11.2.dp).rotate(arrowDeg).drawBehind {
+                    drawRect(fillC)
+                    drawLine(edge, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()); drawLine(edge, Offset(0f, 0f), Offset(0f, size.height), 1.dp.toPx())
+                })
             }
         }
     }

@@ -21,11 +21,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -79,7 +81,8 @@ fun DialogHost(
 
     if (dialog != null) GlassDialog(onDismiss = {
         if (dialog == DialogKind.WELCOME) onExitConfirm(true) else { onDialog(null); onPendingJoin(null); onInviteDone() }
-    }, dismissable = dialog != DialogKind.WELCOME) {
+    }, dismissable = dialog != DialogKind.WELCOME, fullHeight = dialog == DialogKind.SETTINGS || dialog == DialogKind.ROOMS,
+        compact = dialog == DialogKind.SETTINGS || dialog == DialogKind.ROOMS || dialog == DialogKind.SHARE) {
         ViewSwitch(listOf(dialog, if (dialog == DialogKind.SETTINGS) settingsView else "", exitConfirm).joinToString("|")) { key ->
             Column {
                 when {
@@ -162,25 +165,36 @@ private fun PermissionsPanel(actions: PermissionActions, tick: Int, onAskAddress
         if (next == null) busyAll = false else request(next.key)
     }
     PanelHeader("Engedélyek", "Hogy a Private Place rendesen működjön, ezekhez kér hozzáférést. Semmi nem kerül központi helyre.")
-    ElasticScroll(Modifier.padding(horizontal = 20.dp), maxHeight = 420.dp) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 4.dp)) {
-            for (info in PERMS) {
-                val st = states.getValue(info.key); val granted = st == "granted"; val denied = st == "denied"
-                Row(Modifier.fillMaxWidth().glassInset().padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Box(Modifier.size(40.dp).indicator(granted), contentAlignment = Alignment.Center) { LIcon(info.icon, size = 20.dp, tint = if (granted) pal.primary else pal.foreground) }
-                    Column(Modifier.weight(1f)) {
-                        Txt(info.label, size = 14f, weight = 600, lineHeight = 20f)
-                        Txt(if (st == "limited") "Most csak hozzávetőleges. Koppints a Pontosításra, és kapcsold be a „Pontos hely”-et." else info.hint, size = 12f, color = pal.mutedForeground, lineHeight = 16f)
-                    }
-                    if (granted) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { StatusDot("on"); Txt("Kész", size = 11f, color = pal.mutedForeground) }
-                    else PPButton({ askOne(info.key) }, variant = if (denied) Variant.Outline else Variant.Default, small = true, enabled = !busyAll) {
-                        BtnText(if (st == "limited") "Pontosítás" else if (st == "manual" || denied) "Beállítás" else "Engedélyezés", it, true) }
+    ElasticScroll(Modifier.padding(horizontal = 20.dp), maxHeight = dlgMax(420.dp, 150.dp)) {
+        val land = isLandscapeLayout()
+        val permRow: @Composable (PermInfo, Modifier) -> Unit = { info, mod ->
+            val st = states.getValue(info.key); val granted = st == "granted"; val denied = st == "denied"
+            Row(mod.fillMaxWidth().glassInset().padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.size(40.dp).indicator(granted), contentAlignment = Alignment.Center) { LIcon(info.icon, size = 20.dp, tint = if (granted) pal.primary else pal.foreground) }
+                Column(Modifier.weight(1f)) {
+                    Txt(info.label, size = 14f, weight = 600, lineHeight = 20f)
+                    Txt(if (st == "limited") "Most csak hozzávetőleges. Koppints a Pontosításra, és kapcsold be a „Pontos hely”-et." else info.hint, size = 12f, color = pal.mutedForeground, lineHeight = 16f)
                 }
+                if (granted) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { StatusDot("on"); Txt("Kész", size = 11f, color = pal.mutedForeground) }
+                else PPButton({ askOne(info.key) }, variant = if (denied) Variant.Outline else Variant.Default, small = true, enabled = !busyAll) {
+                    BtnText(if (st == "limited") "Pontosítás" else if (st == "manual" || denied) "Beállítás" else "Engedélyezés", it, true) }
             }
+        }
+        val addressBox: @Composable () -> Unit = {
             Column(Modifier.fillMaxWidth().glassInset().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 CheckRow("Pontos cím lekérése (OpenStreetMap)", prefs.addressConsent == "yes", { v -> g.updatePrefs { it.copy(addressConsent = if (v) "yes" else "no") } })
                 PPButton(onAskAddressAgain, variant = Variant.Ghost, small = true, height = 32.dp) { BtnText("Címkérdés újra megjelenítése", it, true) }
             }
+        }
+        // Fekvő módban két oszlop (a webes .perm-list), az utolsó elem teljes szélességű
+        Column(verticalArrangement = Arrangement.spacedBy(if (land) 8.dp else 10.dp), modifier = Modifier.padding(bottom = 4.dp)) {
+            if (land) PERMS.chunked(2).forEach { pair ->
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    pair.forEach { info -> Box(Modifier.weight(1f).fillMaxHeight()) { permRow(info, Modifier.fillMaxHeight()) } }
+                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+                }
+            } else PERMS.forEach { permRow(it, Modifier) }
+            addressBox()
         }
     }
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -200,18 +214,29 @@ private fun JoinPanel(initial: Invitation?, actions: PermissionActions, onJoin: 
     val avail by g.availableUpdate.collectAsState()
     PanelHeader(if (initial != null) "Meghívást kaptál" else "Csatlakozás szobához",
         if (initial != null) "Csatlakozol a(z) „${initial.name ?: "meghívott"}” szobához? Ott kölcsönösen láthatjátok egymást, ha bekapcsoljátok a megosztást." else "Olvasd be a QR-kódot, vagy írd be a kapott kódot, illetve linket.")
-    ElasticScroll(Modifier.padding(horizontal = 20.dp), maxHeight = 480.dp) {
-        Column(Modifier.padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (scanning) QrScanner({ text -> scanning = false; if (parseRoomInput(text) != null) value = text else g.toast("error", "Ez a QR-kód nem Private Place meghívó.") })
+    val land = isLandscapeLayout()
+    ElasticScroll(Modifier.padding(horizontal = 20.dp), maxHeight = dlgMax(480.dp, 100.dp)) {
+        Column(Modifier.padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(if (land) 8.dp else 12.dp)) {
+            if (scanning) Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                QrScanner({ text -> scanning = false; if (parseRoomInput(text) != null) value = text else g.toast("error", "Ez a QR-kód nem Private Place meghívó.") }, Modifier.fillMaxWidth(if (land) 0.4f else 1f)) }
             PillInput(value, { value = it }, "ABCDE-FGHJK-…", max = 400)
-            PPButton({ if (scanning) scanning = false else actions.requestCamera { scanning = true } }, Modifier.fillMaxWidth(), variant = Variant.Outline) { c ->
-                LIcon(if (scanning) "scan-line" else "camera", size = 16.dp, tint = c); Spacer(Modifier.width(6.dp)); BtnText(if (scanning) "Beolvasás leállítása" else "QR-kód beolvasása", c) }
-            if (avail != null) PPButton({ g.updateDismissed.value = false; g.startUpdate() }, Modifier.fillMaxWidth()) { BtnText("Frissítés letöltése", it) }
-            if (parsed != null && parsed.ownerKey == null && !(parsed.token == initial?.token && initial.ownerKey != null))
-                Txt("Gazdakulcs nélkül a szoba törlése és az eltávolítások nem érkeznek meg hozzád. Olvasd be a QR-kódot, vagy másold be a teljes megosztott kódot.", size = 12f, color = pal.mutedForeground, align = TextAlign.Center, lineHeight = 16f, modifier = Modifier.fillMaxWidth())
-            PPButton({ val p = parsed; if (p != null) onJoin(p.token, name, p.color ?: initial?.color, p.ownerKey ?: if (p.token == initial?.token) initial.ownerKey else null) else g.toast("error", "Ez nem érvényes szobakód vagy link.") },
-                Modifier.fillMaxWidth(), enabled = parsed != null) { BtnText(if (avail != null) "Csatlakozás frissítés nélkül" else "Csatlakozás", it) }
-            PPButton(onReject, Modifier.fillMaxWidth(), variant = Variant.Ghost) { BtnText("Elutasítás", it) }
+            val scanBtn: @Composable (Modifier) -> Unit = { m -> PPButton({ if (scanning) scanning = false else actions.requestCamera { scanning = true } }, m.fillMaxWidth(), variant = Variant.Outline) { c ->
+                LIcon(if (scanning) "scan-line" else "camera", size = 16.dp, tint = c); Spacer(Modifier.width(6.dp)); BtnText(if (scanning) "Beolvasás leállítása" else "QR-kód beolvasása", c) } }
+            val updBtn: @Composable (Modifier) -> Unit = { m -> PPButton({ g.updateDismissed.value = false; g.startUpdate() }, m.fillMaxWidth()) { BtnText("Frissítés letöltése", it) } }
+            val warn = parsed != null && parsed.ownerKey == null && !(parsed.token == initial?.token && initial.ownerKey != null)
+            val warnText: @Composable () -> Unit = {
+                Txt("Gazdakulcs nélkül a szoba törlése és az eltávolítások nem érkeznek meg hozzád. Olvasd be a QR-kódot, vagy másold be a teljes megosztott kódot.", size = 12f, color = pal.mutedForeground, align = TextAlign.Center, lineHeight = 16f, modifier = Modifier.fillMaxWidth()) }
+            val joinBtn: @Composable (Modifier) -> Unit = { m -> PPButton({ val p = parsed; if (p != null) onJoin(p.token, name, p.color ?: initial?.color, p.ownerKey ?: if (p.token == initial?.token) initial.ownerKey else null) else g.toast("error", "Ez nem érvényes szobakód vagy link.") },
+                m.fillMaxWidth(), enabled = parsed != null) { BtnText(if (avail != null) "Csatlakozás frissítés nélkül" else "Csatlakozás", it) } }
+            val rejectBtn: @Composable (Modifier) -> Unit = { m -> PPButton(onReject, m.fillMaxWidth(), variant = Variant.Ghost) { BtnText("Elutasítás", it) } }
+            if (land) {
+                // Fekvő mód: két oszlopos rács (a webes .join-form)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { scanBtn(Modifier.weight(1f)); if (avail != null) updBtn(Modifier.weight(1f)) else Spacer(Modifier.weight(1f)) }
+                if (warn) warnText()
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { joinBtn(Modifier.weight(1f)); rejectBtn(Modifier.weight(1f)) }
+            } else {
+                scanBtn(Modifier); if (avail != null) updBtn(Modifier); if (warn) warnText(); joinBtn(Modifier); rejectBtn(Modifier)
+            }
         }
     }
 }
@@ -223,23 +248,41 @@ private fun SharePanel(room: SavedRoom?, onDone: () -> Unit) {
     if (room == null) return
     val code = formatRoomToken(room.token)
     val shareCode = roomShareCode(room.token, room.ownerKey)
+    val land = isLandscapeLayout()
     BackHeader(room.name, onDone)
-    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        val shape = RoundedCornerShape(24.dp)
-        Box(Modifier.fillMaxWidth().shadow(18.dp, shape, ambientColor = pal.glow, spotColor = pal.glow).clip(shape).background(Color.White, shape).padding(6.dp)) {
+    val shape = RoundedCornerShape(24.dp)
+    val ring = pal.tint.copy(alpha = .08f)
+    val qr: @Composable (Modifier) -> Unit = { m ->
+        Box(m.drawBehind { val r = 3.dp.toPx(); drawRoundRect(ring, androidx.compose.ui.geometry.Offset(-r, -r), androidx.compose.ui.geometry.Size(size.width + 2 * r, size.height + 2 * r), androidx.compose.ui.geometry.CornerRadius(24.dp.toPx() + r), style = androidx.compose.ui.graphics.drawscope.Stroke(2 * r)) }
+            .shadow(18.dp, shape, ambientColor = pal.glow, spotColor = pal.glow).clip(shape).background(Color.White, shape).padding(6.dp)) {
             RoundedQr(roomQrValue(room.token, room.ownerKey), roomColor(room.color), Modifier.fillMaxWidth())
         }
-        Column(Modifier.fillMaxWidth().glassInset().padding(horizontal = 12.dp, vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Txt("SZOBAKÓD", size = 9f, color = pal.mutedForeground, letterSpacing = 1.8f, lineHeight = 12f)
-            Txt(code, size = 14f, weight = 700, display = true, letterSpacing = 0.7f)
+    }
+    val side: @Composable (Modifier) -> Unit = { m ->
+        Column(m, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(if (land) 12.dp else 8.dp)) {
+            Column(Modifier.fillMaxWidth().glassInset().padding(horizontal = 12.dp, vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Txt("SZOBAKÓD", size = 9f, color = pal.mutedForeground, letterSpacing = 1.8f, lineHeight = 12f)
+                Txt(code, size = if (land) 16f else 14f, weight = 700, display = true, letterSpacing = 0.7f)
+            }
+            val bh = if (land) 40.dp else 36.dp
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PPButton({ (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("kód", shareCode)); g.toast("success", "Kód másolva") },
+                    Modifier.weight(1f), variant = Variant.Outline, small = true, height = bh) { c -> LIcon("copy", size = 16.dp, tint = c); Spacer(Modifier.width(6.dp)); BtnText("Kód másolása", c, true) }
+                PPButton({ ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_SUBJECT, "Private Place meghívó")
+                    .putExtra(Intent.EXTRA_TEXT, "Szobakód: $shareCode"), null)) }, Modifier.weight(1f), small = true, height = bh) { c -> LIcon("share-2", size = 16.dp, tint = c); Spacer(Modifier.width(6.dp)); BtnText("Küldés", c, true) }
+            }
+            Txt("Csak az látja a helyzetedet, akinek ezt elküldöd. Bármikor törölheted a szobát.", size = 10f, color = pal.mutedForeground, align = TextAlign.Center, lineHeight = 12.5f)
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PPButton({ (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("kód", shareCode)); g.toast("success", "Kód másolva") },
-                Modifier.weight(1f), variant = Variant.Outline, small = true, height = 36.dp) { c -> LIcon("copy", size = 16.dp, tint = c); Spacer(Modifier.width(6.dp)); BtnText("Kód másolása", c, true) }
-            PPButton({ ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_SUBJECT, "Private Place meghívó")
-                .putExtra(Intent.EXTRA_TEXT, "Szobakód: $shareCode"), null)) }, Modifier.weight(1f), small = true, height = 36.dp) { c -> LIcon("share-2", size = 16.dp, tint = c); Spacer(Modifier.width(6.dp)); BtnText("Küldés", c, true) }
+    }
+    if (land) {
+        // Fekvő mód: balra a QR-kód, jobbra a szobakód és a gombok (a webes .share-body sor-elrendezése)
+        val cfg = LocalConfiguration.current
+        val qrW = minOf(704f * 0.46f, cfg.screenHeightDp - 120f).dp
+        Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 4.dp, bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
+            qr(Modifier.width(qrW)); side(Modifier.weight(1f, fill = false).widthIn(max = 320.dp))
         }
-        Txt("Csak az látja a helyzetedet, akinek ezt elküldöd. Bármikor törölheted a szobát.", size = 10f, color = pal.mutedForeground, align = TextAlign.Center, lineHeight = 12.5f)
+    } else Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        qr(Modifier.fillMaxWidth()); side(Modifier.fillMaxWidth())
     }
 }
 
@@ -255,22 +298,40 @@ private fun lastSeenText(at: Long, now: Long): String {
 private fun RoomsPanel(onShare: (String) -> Unit, onNew: () -> Unit, onJoin: () -> Unit) {
     val ctx = LocalContext.current; val g = (ctx.applicationContext as PrivatePlaceApp).graph
     val rooms by g.rooms.collectAsState(); val net by g.peers.state.collectAsState(); val colors by g.personColors.collectAsState(); val profile by g.profile.collectAsState()
-    PanelHeader("Szobák", "Csak az lát téged, akinek elküldöd a szobád kódját vagy QR-kódját.", compact = true)
-    ElasticScroll(Modifier.padding(horizontal = 16.dp), maxHeight = 520.dp) {
-        Column(Modifier.padding(top = 16.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (rooms.isEmpty()) Txt("Még nincs szobád. Hozz létre egyet, és küldd el a QR-kódot annak, akivel kölcsönösen látni szeretnétek egymást.", size = 14f, color = pal.mutedForeground,
-                modifier = Modifier.fillMaxWidth().glassInset().padding(16.dp))
-            for (room in rooms) {
-                val online = net.roomMembers[room.token] ?: emptyList()
-                val members = (net.roster[room.token] ?: emptyList()).map { e -> Member(e.deviceId, net.people[e.deviceId]?.name ?: e.name, net.avatars[e.deviceId] ?: net.people[e.deviceId]?.avatar,
-                    colors[e.deviceId] ?: colorForDevice(e.deviceId), colors[e.deviceId] != null, e.deviceId in online, e.lastSeen) }.sortedWith(compareBy({ !it.online }, { it.name.lowercase() }))
-                RoomRow(room, net.roomPeers[room.token] ?: 0, members, profile?.let { Triple(it, colors[SELF_COLOR_KEY] ?: SELF_COLOR, colors[SELF_COLOR_KEY] != null) }, onShare = { onShare(room.token) })
+    val land = isLandscapeLayout()
+    val list: @Composable (Modifier) -> Unit = { m ->
+        ElasticScroll(m.padding(horizontal = 16.dp), maxHeight = dlgMax(520.dp, 130.dp)) {
+            Column(Modifier.padding(top = 16.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (rooms.isEmpty()) Txt("Még nincs szobád. Hozz létre egyet, és küldd el a QR-kódot annak, akivel kölcsönösen látni szeretnétek egymást.", size = 14f, color = pal.mutedForeground,
+                    modifier = Modifier.fillMaxWidth().glassInset().padding(16.dp))
+                for (room in rooms) {
+                    val online = net.roomMembers[room.token] ?: emptyList()
+                    val members = (net.roster[room.token] ?: emptyList()).map { e -> Member(e.deviceId, net.people[e.deviceId]?.name ?: e.name, net.avatars[e.deviceId] ?: net.people[e.deviceId]?.avatar,
+                        colors[e.deviceId] ?: colorForDevice(e.deviceId), colors[e.deviceId] != null, e.deviceId in online, e.lastSeen) }.sortedWith(compareBy({ !it.online }, { it.name.lowercase() }))
+                    RoomRow(room, net.roomPeers[room.token] ?: 0, members, profile?.let { Triple(it, colors[SELF_COLOR_KEY] ?: SELF_COLOR, colors[SELF_COLOR_KEY] != null) }, onShare = { onShare(room.token) })
+                }
             }
         }
     }
-    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        PPButton(onNew, Modifier.weight(1f), small = true) { c -> LIcon("plus", size = 16.dp, tint = c); Spacer(Modifier.width(6.dp)); BtnText("Új szoba", c, true) }
-        PPButton(onJoin, Modifier.weight(1f), variant = Variant.Outline, small = true) { c -> LIcon("door-open", size = 16.dp, tint = c); Spacer(Modifier.width(6.dp)); BtnText("Csatlakozás", c, true) }
+    if (land) {
+        // Fekvő mód: balra a lista, jobbra a két művelet egymás alatt (a webes data-panel="rooms" rács)
+        Row(Modifier.fillMaxWidth().fillMaxHeight()) {
+            Column(Modifier.weight(1f).fillMaxHeight()) {
+                PanelHeader("Szobák", "Csak az lát téged, akinek elküldöd a szobád kódját vagy QR-kódját.", compact = true)
+                list(Modifier.weight(1f))
+            }
+            Column(Modifier.width(184.dp).fillMaxHeight().padding(top = 56.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically)) {
+                PPButton(onNew, Modifier.fillMaxWidth(), small = true, height = 44.dp) { c -> LIcon("plus", size = 16.dp, tint = c); Spacer(Modifier.width(6.dp)); BtnText("Új szoba", c, true) }
+                PPButton(onJoin, Modifier.fillMaxWidth(), variant = Variant.Outline, small = true, height = 44.dp) { c -> LIcon("door-open", size = 16.dp, tint = c); Spacer(Modifier.width(6.dp)); BtnText("Csatlakozás", c, true) }
+            }
+        }
+    } else {
+        PanelHeader("Szobák", "Csak az lát téged, akinek elküldöd a szobád kódját vagy QR-kódját.", compact = true)
+        list(Modifier)
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PPButton(onNew, Modifier.weight(1f), small = true) { c -> LIcon("plus", size = 16.dp, tint = c); Spacer(Modifier.width(6.dp)); BtnText("Új szoba", c, true) }
+            PPButton(onJoin, Modifier.weight(1f), variant = Variant.Outline, small = true) { c -> LIcon("door-open", size = 16.dp, tint = c); Spacer(Modifier.width(6.dp)); BtnText("Csatlakozás", c, true) }
+        }
     }
 }
 
@@ -376,32 +437,42 @@ private fun SettingsMain(selfColor: String, onTrails: () -> Unit, onPlaces: () -
     val profile by g.profile.collectAsState(); val places by g.places.collectAsState()
     val check by g.updateCheck.collectAsState(); val avail by g.availableUpdate.collectAsState(); val updStatus by g.updateStatus.collectAsState(); val updPct by g.updatePercent.collectAsState()
     PanelHeader("Beállítások", compact = true)
-    ElasticScroll(Modifier.padding(horizontal = 16.dp), maxHeight = 640.dp) {
-        Column(Modifier.padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Column(Modifier.fillMaxWidth().glassInset().padding(12.dp)) {
-                ProfileForm(profile, "Profil mentése", selfColor, compact = true) { p -> g.saveProfile(p); g.toast("success", "Profil mentve") }
-            }
-            @Composable fun navButton(label: String, icon: String?, onClick: () -> Unit) = PPButton(onClick, Modifier.fillMaxWidth(), variant = Variant.Outline, small = true) { c ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Row(verticalAlignment = Alignment.CenterVertically) { if (icon != null) { LIcon(icon, size = 16.dp, tint = c); Spacer(Modifier.width(6.dp)) }; BtnText(label, c, true) }
-                    LIcon("chevron-right", size = 16.dp, tint = c) } }
-            navButton("Útvonalak rajzolása a térképen", null, onTrails)
-            navButton("Saját helyek${if (places.isNotEmpty()) " (${places.size})" else ""}", "map-pin", onPlaces)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PPButton(onPermissions, Modifier.weight(1f), variant = Variant.Outline, small = true) { c -> LIcon("shield-check", size = 16.dp, tint = c); Spacer(Modifier.width(6.dp)); BtnText("Engedélyek", c, true) }
-                PPButton(onResetHints, Modifier.weight(1f), variant = Variant.Outline, small = true) { c -> LIcon("circle-help", size = 16.dp, tint = c); Spacer(Modifier.width(6.dp)); BtnText("Súgó", c, true) }
-            }
-            Row(Modifier.fillMaxWidth().glassInset().padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1f)) {
-                    Txt("Frissítés", size = 14f, weight = 600)
-                    Txt(when { check == "checking" -> "Keresés…"; check == "latest" -> "A legújabb verzió van telepítve."; check == "error" -> "A frissítések most nem érhetők el."
-                        avail != null -> "Új verzió érhető el (${avail!!.version.ifBlank { "új" }})."; else -> "Új verzió keresése a GitHub kiadásai között." }, size = 12f, color = pal.mutedForeground, lineHeight = 16f)
-                }
-                if (avail != null && check != "checking") PPButton({ g.updateDismissed.value = true; g.startUpdate() }, small = true, enabled = updStatus != "downloading") { BtnText(if (updStatus == "downloading") "Letöltés…${updPct?.let { " $it%" } ?: ""}" else "Letöltés", it, true) }
-                else PPButton({ g.checkForUpdate(true) }, variant = Variant.Outline, small = true, enabled = check != "checking") { BtnText("Keresés", it, true) }
-            }
-            Txt("Private Place · ${g.updater.installedVersionName()}", size = 11f, color = pal.mutedForeground, align = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+    val land = isLandscapeLayout()
+    val nav: @Composable (String, String?, () -> Unit) -> Unit = { label, icon, onClick ->
+        PPButton(onClick, Modifier.fillMaxWidth(), variant = Variant.Outline, small = true) { c ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically) { if (icon != null) { LIcon(icon, size = 16.dp, tint = c); Spacer(Modifier.width(6.dp)) }; BtnText(label, c, true) }
+                LIcon("chevron-right", size = 16.dp, tint = c) } }
+    }
+    val col1: @Composable ColumnScope.() -> Unit = {
+        Column(Modifier.fillMaxWidth().glassInset().padding(12.dp)) {
+            ProfileForm(profile, "Profil mentése", selfColor, compact = true) { p -> g.saveProfile(p); g.toast("success", "Profil mentve") }
         }
+        nav("Útvonalak rajzolása a térképen", null, onTrails)
+        nav("Saját helyek${if (places.isNotEmpty()) " (${places.size})" else ""}", "map-pin", onPlaces)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PPButton(onPermissions, Modifier.weight(1f), variant = Variant.Outline, small = true) { c -> LIcon("shield-check", size = 16.dp, tint = c); Spacer(Modifier.width(6.dp)); BtnText("Engedélyek", c, true) }
+            PPButton(onResetHints, Modifier.weight(1f), variant = Variant.Outline, small = true) { c -> LIcon("circle-help", size = 16.dp, tint = c); Spacer(Modifier.width(6.dp)); BtnText("Súgó", c, true) }
+        }
+    }
+    val col2: @Composable ColumnScope.() -> Unit = {
+        Row(Modifier.fillMaxWidth().glassInset().padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.weight(1f)) {
+                Txt("Frissítés", size = 14f, weight = 600)
+                Txt(when { check == "checking" -> "Keresés…"; check == "latest" -> "A legújabb verzió van telepítve."; check == "error" -> "A frissítések most nem érhetők el."
+                    avail != null -> "Új verzió érhető el (${avail!!.version.ifBlank { "új" }})."; else -> "Új verzió keresése a GitHub kiadásai között." }, size = 12f, color = pal.mutedForeground, lineHeight = 16f)
+            }
+            if (avail != null && check != "checking") PPButton({ g.updateDismissed.value = true; g.startUpdate() }, small = true, enabled = updStatus != "downloading") { BtnText(if (updStatus == "downloading") "Letöltés…${updPct?.let { " $it%" } ?: ""}" else "Letöltés", it, true) }
+            else PPButton({ g.checkForUpdate(true) }, variant = Variant.Outline, small = true, enabled = check != "checking") { BtnText("Keresés", it, true) }
+        }
+        Txt("Private Place · ${g.updater.installedVersionName()}", size = 11f, color = pal.mutedForeground, align = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+    }
+    // Fekvő módban két oszlop (a webes .settings-cols), a lap teljes magasságú és belül görget
+    ElasticScroll(Modifier.padding(horizontal = 16.dp), maxHeight = dlgMax(640.dp, 60.dp)) {
+        if (land) Row(Modifier.padding(vertical = 16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp), content = col1)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp), content = col2)
+        } else Column(Modifier.padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { col1(); col2() }
     }
 }
 
