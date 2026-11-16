@@ -48,26 +48,48 @@ struct MapScreen: View {
         let status = !me.sharing ? "off" : me.error != nil ? "lost" : !selfFresh ? "search" : "live"
         let askAddress = dialog == nil && app.prefs.addressConsent == "ask" && !addressAskHidden && app.profile != nil
 
+        GeometryReader { geo in
+        let safe = geo.safeAreaInsets
+        // a külső .ignoresSafeArea() miatt a geo.size a teljes képernyő; a biztonsági sávokat a geo.safeAreaInsets adja
+        let lay = LayoutInfo(size: geo.size, safe: safe)
+        let mapPanel = ZStack { Color.clear; mapOverlays(me, mapPeople, askAddress, net) }
+            .overlay(InnerGlow(color: pal.shade.opacity(0.30)))
+            .overlay(RoundedRectangle(cornerRadius: 28).stroke(pal.glassEdge, lineWidth: 1)).clipShape(RoundedRectangle(cornerRadius: 28))
+            .background(GeometryReader { g in Color.clear.preference(key: WindowKey.self, value: g.frame(in: .global)) })
         ZStack {
             pal.background.ignoresSafeArea()
             LiveMapView(people: mapPeople, follow: follow, showTrails: app.prefs.showTrails, trailIds: app.prefs.trailIds, orientation: app.prefs.orientation, dark: app.prefs.mapTheme == "dark", window: window, bridge: bridge).ignoresSafeArea()
-            VStack(spacing: 8) {
-                header(status, onlineCount)
-                ZStack {
-                    Color.clear
-                    mapOverlays(me, mapPeople, askAddress, net)
-                }
-                .overlay(RoundedRectangle(cornerRadius: 28).stroke(pal.glassEdge, lineWidth: 1)).clipShape(RoundedRectangle(cornerRadius: 28))
-                .background(GeometryReader { g in Color.clear.preference(key: WindowKey.self, value: g.frame(in: .global)) })
-                railView(remote, me, selfColor, selfFresh)
-            }.padding(.top, 8).padding(.horizontal, 8)
+            if !lay.landscape {
+                VStack(spacing: 8) {
+                    header(status, onlineCount, lay)
+                    mapPanel
+                    railView(remote, me, selfColor, selfFresh, lay)
+                }.padding(.top, max(8, safe.top)).padding(.horizontal, 8).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            } else {
+                // Fekvő mód: bal oldalt a térkép, jobb oldalt egy 11 rem széles kezelősáv (a webes --land-rail-w)
+                HStack(spacing: 8) {
+                    mapPanel
+                    VStack(spacing: 0) {
+                        VStack(spacing: 8) {
+                            SharingControl(status: status, landscape: true) { setSharing(!app.engine.state.sharing) }
+                            HStack(spacing: 8) {
+                                HeaderButton(icon: "users", on: onlineCount > 0, badge: onlineCount, landscape: true) { dialog = .rooms }
+                                HeaderButton(icon: "settings-2", on: dialog == .settings, badge: 0, landscape: true) { settingsView = "main"; dialog = .settings }
+                            }
+                        }
+                        Spacer(minLength: 0)
+                        LandscapeRail { railItems(remote, me, selfColor, selfFresh) }
+                    }.frame(width: 176)
+                }.padding(EdgeInsets(top: max(8, safe.top), leading: max(8, safe.leading), bottom: max(8, safe.bottom), trailing: max(8, safe.trailing)))
+            }
             if app.profile != nil && dialog == nil && app.prefs.hint < HINTS.count {
                 HintBubbles(step: app.prefs.hint, onNext: { app.updatePrefs { $0.hint += 1 } }, onSkip: { app.updatePrefs { $0.hint = HINTS.count } }, onDemo: { transportDemo = $0 })
             }
             ToastHost()
             if let d = dialog { DialogHost(dialog: d, settingsView: $settingsView, shareToken: $shareToken, pendingJoin: $pendingJoin, exitConfirm: $exitConfirm, onDialog: { dialog = $0 },
                                            onPick: { t in pickTarget = t; dialog = nil }, selfTrackClear: { selfTrack = clearTrackHistory(selfTrack) }) }
-        }
+        }.environment(\.layoutInfo, lay).frame(width: lay.size.width, height: lay.size.height).ignoresSafeArea()
+        }.ignoresSafeArea()
         .onPreferenceChange(WindowKey.self) { window = $0 }
         .onReceive(tick) { _ in clock = nowMs() }
         .onAppear { dialog = app.profile == nil ? .welcome : (app.invite != nil ? .join : nil); pendingJoin = app.invite }
@@ -84,20 +106,16 @@ struct MapScreen: View {
     }
 
     // ── Fejléc ──
-    private func header(_ status: String, _ online: Int) -> some View {
-        HStack(spacing: 8) {
-            Txt("Private Place", size: 16, weight: 700, display: true, lines: 1, lineHeight: 24).frame(maxWidth: .infinity, alignment: .leading)
-            HStack(spacing: 6) {
-                SharingControl(status: status) { setSharing(!app.engine.state.sharing) }
-                Button { dialog = .rooms } label: {
-                    ZStack(alignment: .topTrailing) {
-                        LIcon("users", size: 20, tint: online > 0 ? pal.primary : nil).frame(width: 36, height: 36)
-                        if online > 0 { Txt("\(online)", size: 10, weight: 600, color: pal.primaryForeground).padding(.horizontal, 4).frame(minWidth: 17, minHeight: 17).background(pal.primary, in: Capsule()).offset(x: 2, y: -2) }
-                    }.indicator(online > 0)
-                }.buttonStyle(.plain)
-                Button { settingsView = "main"; dialog = .settings } label: { LIcon("settings-2", size: 20, tint: dialog == .settings ? pal.primary : nil).frame(width: 36, height: 36).indicator(dialog == .settings) }.buttonStyle(.plain)
+    private func header(_ status: String, _ online: Int, _ lay: LayoutInfo) -> some View {
+        let narrow = lay.narrow
+        return HStack(spacing: narrow ? 4 : 8) {
+            Txt("Private Place", size: narrow ? 13 : 16, weight: 700, display: true, lines: 1, lineHeight: narrow ? 20 : 24).frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: narrow ? 2 : 6) {
+                SharingControl(status: status, narrow: narrow) { setSharing(!app.engine.state.sharing) }
+                HeaderButton(icon: "users", on: online > 0, badge: online, narrow: narrow) { dialog = .rooms }
+                HeaderButton(icon: "settings-2", on: dialog == .settings, badge: 0, narrow: narrow) { settingsView = "main"; dialog = .settings }
             }
-        }.padding(.horizontal, 12).padding(.vertical, 8).glass(20)
+        }.padding(.horizontal, narrow ? 8 : 12).padding(.vertical, 8).glass(20)
     }
     private func setSharing(_ on: Bool) {
         if on && !app.engine.granted { settingsView = "main"; withAnimation(harmonika) { dialog = .permissions }; return }
@@ -159,18 +177,20 @@ struct MapScreen: View {
     }
 
     // ── Személysáv ──
-    private func railView(_ remote: [RemotePerson], _ me: SelfState, _ selfColor: String, _ selfFresh: Bool) -> some View {
+    @ViewBuilder private func railItems(_ remote: [RemotePerson], _ me: SelfState, _ selfColor: String, _ selfFresh: Bool) -> some View {
+        if let pr = app.profile {
+            PersonCapsule(name: "Én", avatar: pr.avatar, fallback: pr.name, color: selfColor, active: follow?.id == SELF, dot: selfFresh ? "on" : (me.error != nil ? "warn" : "wait"), status: me.at != nil ? kmh(me.speed) : "") { toggleFollow(SELF) }
+        }
+        ForEach(remote) { p in
+            PersonCapsule(name: p.name, avatar: app.peers.avatars[p.deviceId] ?? p.avatar, fallback: p.name, color: p.color, active: follow?.id == p.deviceId,
+                          dot: !p.online ? "warn" : !p.sharing ? "off" : (p.at.map { clock - $0 < 15000 } ?? false) ? "on" : "wait", status: personStatus(p, clock)) { toggleFollow(p.deviceId) }
+        }
+        if remote.isEmpty { PersonCapsule(name: "Meghívó", avatar: nil, fallback: "+", color: "#94A3B8", active: false, dot: "none", status: "Szoba", invite: true) { dialog = .rooms } }
+    }
+    private func railView(_ remote: [RemotePerson], _ me: SelfState, _ selfColor: String, _ selfFresh: Bool, _ lay: LayoutInfo) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(spacing: 9.6) {
-                if let pr = app.profile {
-                    PersonCapsule(name: "Én", avatar: pr.avatar, fallback: pr.name, color: selfColor, active: follow?.id == SELF, dot: selfFresh ? "on" : (me.error != nil ? "warn" : "wait"), status: me.at != nil ? kmh(me.speed) : "") { toggleFollow(SELF) }
-                }
-                ForEach(remote) { p in
-                    PersonCapsule(name: p.name, avatar: app.peers.avatars[p.deviceId] ?? p.avatar, fallback: p.name, color: p.color, active: follow?.id == p.deviceId,
-                                  dot: !p.online ? "warn" : !p.sharing ? "off" : (p.at.map { clock - $0 < 15000 } ?? false) ? "on" : "wait", status: personStatus(p, clock)) { toggleFollow(p.deviceId) }
-                }
-                if remote.isEmpty { PersonCapsule(name: "Meghívó", avatar: nil, fallback: "+", color: "#94A3B8", active: false, dot: "none", status: "Szoba", invite: true) { dialog = .rooms } }
-            }.padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 15)
+            LazyHStack(spacing: 9.6) { railItems(remote, me, selfColor, selfFresh) }
+                .padding(.leading, 20).padding(.trailing, 20).padding(.top, 13.6).padding(.bottom, max(15.2, lay.safe.bottom + 8))
         }.padding(.horizontal, -8).mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.05), .init(color: .black, location: 0.95), .init(color: .clear, location: 1)], startPoint: .leading, endPoint: .trailing))
     }
     private func toggleFollow(_ id: String) {
@@ -191,22 +211,67 @@ struct MapScreen: View {
     }
 }
 
+// ───────── Fejléc-gomb (Szobák / Beállítások) ─────────
+struct HeaderButton: View {
+    @Environment(\.pal) private var pal
+    var icon: String; var on: Bool; var badge: Int; var narrow = false; var landscape = false; var action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .topTrailing) {
+                LIcon(icon, size: 20, tint: on ? pal.primary : nil).frame(width: landscape ? nil : (narrow ? 30 : 36), height: landscape ? 44 : 36).frame(maxWidth: landscape ? .infinity : nil)
+                if badge > 0 { Txt("\(badge)", size: 10, weight: 600, color: pal.primaryForeground, lineHeight: 12).padding(.horizontal, 4).frame(minWidth: 16.8, minHeight: 16.8).background(pal.primary, in: Capsule()).offset(x: 2, y: -2) }
+            }.contentShape(Capsule())
+        }.buttonStyle(.plain).modifier(HeaderButtonStyle(landscape: landscape, on: on))
+    }
+}
+private struct HeaderButtonStyle: ViewModifier {
+    var landscape: Bool; var on: Bool
+    func body(content: Content) -> some View { if landscape { content.glassCapsule().indicator(on) } else { content.indicator(on) } }
+}
+
+/// Fekvő módban a személysáv függőleges: 2 kapszula látszik, a harmadik kikandikál; a szélein elhalványul, ha van még mit görgetni.
+private struct RailMetrics: Equatable { var minY: CGFloat = 0; var h: CGFloat = 0 }
+private struct RailKey: PreferenceKey { static var defaultValue = RailMetrics(); static func reduce(value: inout RailMetrics, nextValue: () -> RailMetrics) { value = nextValue() } }
+struct LandscapeRail<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    @State private var m = RailMetrics(); @State private var frameH: CGFloat = 196
+    var body: some View {
+        let h = min(max(m.h, 40), 196)
+        let top: CGFloat = -m.minY > 1 ? 34 : 0, bottom: CGFloat = (-m.minY + h < m.h - 1) ? 34 : 0
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 10) { content() }.padding(.horizontal, 6).padding(.vertical, 8)
+                .background(GeometryReader { g in Color.clear.preference(key: RailKey.self, value: RailMetrics(minY: g.frame(in: .named("rail")).minY, h: g.size.height)) })
+        }.coordinateSpace(name: "rail").frame(height: h).padding(.horizontal, -6).onPreferenceChange(RailKey.self) { m = $0 }
+        .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: top / max(h, 1)), .init(color: .black, location: 1 - bottom / max(h, 1)), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom))
+        .animation(.easeOut(duration: 0.16), value: top).animation(.easeOut(duration: 0.16), value: bottom)
+    }
+}
+
+/// A térképablak belső árnyéka (inset 0 0 28px 4px).
+struct InnerGlow: View {
+    var color: Color
+    var body: some View { RoundedRectangle(cornerRadius: 28).stroke(color, lineWidth: 32).blur(radius: 14).clipShape(RoundedRectangle(cornerRadius: 28)).allowsHitTesting(false) }
+}
+
 // ───────── Megosztás-kapcsoló ─────────
 struct SharingControl: View {
     @Environment(\.pal) private var pal
-    var status: String; var onToggle: () -> Void
+    var status: String; var narrow = false; var landscape = false; var onToggle: () -> Void
     @State private var expanded = false, k: CGFloat = 0
     var body: some View {
         let on = status != "off"
+        let open = expanded || landscape
         let signal = status == "live" ? Color(hex: "#14B8A6") : status == "search" ? Color(hex: "#FBBF24") : status == "lost" ? Color(hex: "#FB7185") : pal.mutedForeground
         let label = ["off": "Megosztás ki", "live": "Megosztás be", "search": "Helyzet keresése…", "lost": "Nincs jel"][status] ?? ""
+        let mint = Color(hex: "#14B8A6")
+        let pulse = min(1, k / 0.85)
         Button(action: onToggle) {
-            HStack(spacing: 6) {
-                LIcon(status == "off" ? "play" : "pause", size: 18, tint: on ? Color(hex: "#14B8A6") : signal)
-                if expanded { Txt(label, size: 11, color: on ? Color(hex: "#14B8A6") : signal, lines: 1) }
-            }.padding(.horizontal, 10).frame(width: expanded ? 164 : 40, height: 40, alignment: .leading)
-        }.buttonStyle(.plain).background((on ? pal.glassBg.mix(Color(hex: "#14B8A6"), 0.18) : pal.glassBg), in: Capsule()).overlay(Capsule().stroke(pal.glassEdge, lineWidth: 1))
-        .background(Capsule().stroke(signal.opacity(0.45 * (1 - Double(k))), lineWidth: 7 * k).opacity(on ? 1 : 0))
+            HStack(spacing: landscape ? 8 : 6) {
+                LIcon(status == "off" ? "play" : "pause", size: 18, tint: on ? mint : signal)
+                if open { Txt(label, size: landscape ? 12 : 11, color: on ? mint : signal, lines: 1).frame(width: landscape ? nil : (narrow ? 100 : 124), alignment: .leading) }
+            }.padding(.horizontal, landscape ? 14 : 10).frame(width: landscape ? 176 : (open ? (narrow ? 130 : 164) : 40), height: landscape ? 44 : 40, alignment: landscape ? .center : .leading)
+        }.buttonStyle(.plain).background((on ? pal.glassBg.mix(mint, 0.18) : pal.glassBg), in: Capsule()).overlay(Capsule().stroke(pal.glassEdge, lineWidth: 1))
+        .background(Capsule().stroke(signal.opacity(0.45 * (1 - Double(pulse))), lineWidth: 14 * pulse).opacity(on ? 1 : 0))
         .onChange(of: status) { _ in flash() }.onAppear { flash(); withAnimation(.easeOut(duration: 1.8).repeatForever(autoreverses: false)) { k = 1 } }
     }
     private func flash() { withAnimation(.easeOut(duration: 0.22)) { expanded = true }; DispatchQueue.main.asyncAfter(deadline: .now() + 3) { withAnimation(.easeOut(duration: 0.22)) { expanded = false } } }
@@ -231,7 +296,7 @@ struct PersonCapsule: View {
     @Environment(\.pal) private var pal
     var name: String; var avatar: String?; var fallback: String; var color: String; var active: Bool; var dot: String; var status: String; var invite = false; var action: () -> Void
     var body: some View {
-        Button(action: action) {
+        let base = Button(action: action) {
             HStack(spacing: 9.6) {
                 CapsuleAvatar(name: fallback, avatar: avatar, color: Color(hex: color), size: 54, plus: invite, glow: active)
                 VStack(alignment: .leading, spacing: 0) {
@@ -240,8 +305,11 @@ struct PersonCapsule: View {
                     if dot != "none" { StatusDot(state: dot).padding(.top, 4) }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }.padding(EdgeInsets(top: 5, leading: 8, bottom: 5, trailing: 14)).frame(width: 176, height: 72)
-        }.buttonStyle(PressScale()).background(pal.glassBg, in: Capsule()).background(Capsule().fill(.ultraThinMaterial)).background(active ? pal.signal.opacity(0.12) : .clear, in: Capsule())
-        .overlay(Capsule().stroke(active ? pal.signal.opacity(0.55) : pal.glassEdge, lineWidth: 1)).shadow(color: active ? pal.signal.opacity(0.4) : pal.shade.opacity(0.45), radius: 10, y: 6)
+        }.buttonStyle(PressScale()).background(pal.glassBg, in: Capsule()).background(Capsule().fill(.ultraThinMaterial)).background(active ? signalGreen.opacity(0.12) : .clear, in: Capsule())
+            .clipShape(Capsule()).topHighlight(0.08)
+        return Group {
+            if invite { base.dashedBorder(pal.glassEdge) } else { base.overlay(Capsule().stroke(active ? signalGreen.opacity(0.55) : pal.glassEdge, lineWidth: 1)) }
+        }.shadow(color: pal.shade.opacity(0.45), radius: 11, y: 6)
     }
 }
 struct PressScale: ButtonStyle { func makeBody(configuration: Configuration) -> some View { configuration.label.scaleEffect(configuration.isPressed ? 0.97 : 1) } }
@@ -250,12 +318,18 @@ struct CapsuleAvatar: View {
     @Environment(\.pal) private var pal
     var name: String; var avatar: String?; var color: Color; var size: CGFloat; var plus = false; var glow = false
     var body: some View {
-        ZStack {
+        let inner = ZStack {
             Circle().fill(pal.surfaceStrong)
             if plus { LIcon("plus", size: 24, tint: pal.mutedForeground) }
-            else if let img = decodeDataURL(avatar) { Image(uiImage: img).resizable().scaledToFill().clipShape(Circle()) }
+            else if let img = decodeDataURL(avatar) { Image(uiImage: img).resizable().scaledToFill().padding(3).clipShape(Circle()) }
             else { Txt(String((name.isEmpty ? "?" : name).prefix(1)).uppercased(), size: 18.4, weight: 600) }
-        }.frame(width: size, height: size).clipShape(Circle()).overlay(Circle().stroke(color, lineWidth: 3)).shadow(color: glow ? pal.glow : .clear, radius: 10)
+        }.clipShape(Circle())
+        // aktív (követett) állapot: 2 px-es zöld gyűrű + derengés (a webes .capsule[data-state="on"] .capsule-avatar)
+        return Group {
+            if plus { inner.overlay(Circle().strokeBorder(pal.mutedForeground, style: StrokeStyle(lineWidth: 3, dash: [9, 9]))) }
+            else { inner.overlay(Circle().strokeBorder(color, lineWidth: 3)) }
+        }.padding(glow ? 2 : 0).frame(width: size, height: size)
+        .overlay(Circle().stroke(glow ? signalGreen.opacity(0.35) : .clear, lineWidth: 2)).shadow(color: glow ? pal.glow : .clear, radius: 14)
     }
 }
 
@@ -318,27 +392,46 @@ let HINTS: [Hint] = [
     Hint(text: "Koppints egy személyre a követéshez. Ha nem oszt meg, innen kérheted.", place: "rail"),
     Hint(text: "Megosztáskérésnél felül üzenet jön – a „Megosztás” gombbal azonnal bekapcsolod.", place: "share"),
 ]
+struct HintArrow: View {
+    var fill: Color; var edge: Color
+    var body: some View {
+        Rectangle().fill(fill).frame(width: 11.2, height: 11.2).overlay(Path { p in p.move(to: .zero); p.addLine(to: CGPoint(x: 11.2, y: 0)); p.move(to: .zero); p.addLine(to: CGPoint(x: 0, y: 11.2)) }.stroke(edge, lineWidth: 1))
+    }
+}
 struct HintBubbles: View {
     @Environment(\.pal) private var pal
+    @Environment(\.layoutInfo) private var lay
     var step: Int; var onNext: () -> Void; var onSkip: () -> Void; var onDemo: (Bool) -> Void
     var body: some View {
         let h = HINTS[min(step, HINTS.count - 1)]
-        let (align, pad): (Alignment, EdgeInsets) = {
-            switch h.place {
-            case "share": return (.topLeading, EdgeInsets(top: 70, leading: 16, bottom: 0, trailing: 0))
-            case "transport": return (.bottomLeading, EdgeInsets(top: 0, leading: 16, bottom: 168, trailing: 0))
-            case "rail": return (.bottomLeading, EdgeInsets(top: 0, leading: 16, bottom: 120, trailing: 0))
-            case "address": return (.bottom, EdgeInsets(top: 0, leading: 0, bottom: 128, trailing: 0))
-            default: return (.center, EdgeInsets(top: 0, leading: 0, bottom: 80, trailing: 0)) } }()
+        let land = lay.landscape; let s = lay.safe
+        let mT = max(8, s.top), mB = max(8, s.bottom), mL = max(8, s.leading), mR = max(8, s.trailing)
+        // Elhelyezés és nyíl a webes .hint-* szabályok szerint (álló és fekvő elrendezésben)
+        let cfg: (Alignment, EdgeInsets, Alignment, CGFloat, CGFloat, Double) = {
+            switch (land, h.place) {
+            case (false, "share"): return (.topLeading, EdgeInsets(top: mT + 64, leading: 16, bottom: 0, trailing: 0), .topLeading, 22.4, -6.4, 45)
+            case (false, "transport"): return (.bottomLeading, EdgeInsets(top: 0, leading: 16, bottom: 168, trailing: 0), .bottomLeading, 25.6, 6.4, 225)
+            case (false, "rail"): return (.bottomLeading, EdgeInsets(top: 0, leading: 16, bottom: 120, trailing: 0), .bottomLeading, 32, 6.4, 225)
+            case (false, "address"): return (.bottom, EdgeInsets(top: 0, leading: 0, bottom: 128, trailing: 0), .bottom, 0, 6.4, 225)
+            case (false, _): return (.top, EdgeInsets(top: lay.size.height * 0.4, leading: 0, bottom: 0, trailing: 0), .bottom, 0, 6.4, 225)
+            case (true, "share"): return (.topTrailing, EdgeInsets(top: mT + 4, leading: 0, bottom: 0, trailing: mR + 176 + 14.4), .topTrailing, 6.4, 16, 135)
+            case (true, "transport"): return (.bottomLeading, EdgeInsets(top: 0, leading: mL + 12, bottom: mB + 73.6, trailing: 0), .bottomLeading, 25.6, 6.4, 225)
+            case (true, "rail"): return (.bottomTrailing, EdgeInsets(top: 0, leading: 0, bottom: mB + 16, trailing: mR + 176 + 14.4), .bottomTrailing, 6.4, -38.4, 135)
+            case (true, "address"): return (.bottom, EdgeInsets(top: 0, leading: 0, bottom: mB + 73.6, trailing: 192), .bottom, 0, 6.4, 225)
+            default: return (.top, EdgeInsets(top: lay.size.height * 0.4, leading: 0, bottom: 0, trailing: 192), .bottom, 0, 6.4, 225)
+            }
+        }()
         VStack(alignment: .leading, spacing: 8) {
             Txt(h.text, size: 12, lineHeight: 16.5)
             HStack {
                 Button { withAnimation(harmonika) { onSkip() } } label: { Txt("Kihagyás", size: 11, color: pal.mutedForeground, underline: true) }.buttonStyle(.plain)
                 Spacer()
-                Button { withAnimation(harmonika) { onNext() } } label: { Txt(step + 1 < HINTS.count ? "Tovább \(step + 1)/\(HINTS.count)" : "Értem", size: 11.5, weight: 600, color: pal.primaryForeground).padding(.horizontal, 11).padding(.vertical, 4).background(pal.primary, in: Capsule()) }.buttonStyle(.plain)
+                Button { withAnimation(harmonika) { onNext() } } label: { Txt(step + 1 < HINTS.count ? "Tovább \(step + 1)/\(HINTS.count)" : "Értem", size: 11.5, weight: 600, color: pal.primaryForeground).padding(.horizontal, 11.2).padding(.vertical, 4).background(pal.primary, in: Capsule()) }.buttonStyle(.plain)
             }
-        }.padding(EdgeInsets(top: 10.4, leading: 12.8, bottom: 10.4, trailing: 12.8)).frame(maxWidth: 240).glass(16, strong: true).id(step).transition(.opacity.combined(with: .scale(scale: 0.98)))
-        .padding(pad).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: align).animation(harmonika, value: step)
+        }.padding(EdgeInsets(top: 10.4, leading: 12.8, bottom: 10.4, trailing: 12.8)).frame(maxWidth: min(240, lay.size.width - 32)).glass(16, strong: true)
+        .overlay(alignment: cfg.2) { HintArrow(fill: pal.glassStrong, edge: pal.glassEdge).rotationEffect(.degrees(cfg.5)).offset(x: cfg.3, y: cfg.4) }
+        .id(step).transition(.opacity.combined(with: .scale(scale: 0.98)))
+        .padding(cfg.1).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: cfg.0).animation(harmonika, value: step)
         .task(id: h.place) {
             guard h.place == "transport" else { return }
             while !Task.isCancelled { try? await Task.sleep(nanoseconds: 750_000_000); onDemo(true); try? await Task.sleep(nanoseconds: 1_000_000_000); onDemo(false) }

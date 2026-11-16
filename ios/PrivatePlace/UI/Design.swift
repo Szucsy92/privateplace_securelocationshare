@@ -6,6 +6,21 @@ import CoreText
 private struct PalKey: EnvironmentKey { static let defaultValue = darkPalette }
 extension EnvironmentValues { var pal: Palette { get { self[PalKey.self] } set { self[PalKey.self] = newValue } } }
 
+/// A webes `@media (orientation: landscape) and (max-height: 600px)` és `(max-width: 430px)` megfelelője; a gyökér GeometryReader tölti ki.
+struct LayoutInfo: Equatable {
+    var size = CGSize(width: 390, height: 844); var safe = EdgeInsets()
+    var landscape: Bool { size.width > size.height && size.height <= 600 }
+    var narrow: Bool { size.width <= 430 }
+}
+private struct LayoutKey: EnvironmentKey { static let defaultValue = LayoutInfo() }
+extension EnvironmentValues { var layoutInfo: LayoutInfo { get { self[LayoutKey.self] } set { self[LayoutKey.self] = newValue } } }
+/// Fekvő módban a nem „kompakt” ablakok egészben görgetnek – ilyenkor a belső rugalmas görgetés sima oszlop.
+private struct FlatKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues { var flatScroll: Bool { get { self[FlatKey.self] } set { self[FlatKey.self] = newValue } } }
+
+/// A webes `.indicator[data-state="on"]` mindkét témában ugyanazt a zöldet használja: oklch(0.82 0.19 165).
+let signalGreen = Color(hex: "#00E9A5")
+
 let animMs = 0.24     // minden harmónika/ablak/fül ugyanazzal az ütemmel mozog (a webes useSmoothHeight: 240 ms)
 let harmonika = Animation.easeInOut(duration: animMs)
 
@@ -68,26 +83,36 @@ struct Glass: ViewModifier {
     func body(content: Content) -> some View {
         let shape = AnyShape(circle ? AnyShape(Capsule()) : AnyShape(RoundedRectangle(cornerRadius: radius)))
         content.background(shape.fill(.ultraThinMaterial)).background(shape.fill(strong ? pal.glassStrong : pal.glassBg))
-            .clipShape(shape).overlay(shape.stroke(pal.glassEdge, lineWidth: 1)).shadow(color: pal.shade.opacity(0.45), radius: 14, x: 0, y: 8)
+            .clipShape(shape).topHighlight(0.08).overlay(shape.stroke(pal.glassEdge, lineWidth: 1)).shadow(color: pal.shade.opacity(0.45), radius: 14, x: 0, y: 8)
     }
 }
 extension View {
+    /// A webes `inset 0 1px 0 white/8%`: vékony fényes él a felület tetején.
+    func topHighlight(_ a: Double) -> some View { modifier(TopHighlight(a: a)) }
+    /// Szaggatott keret (a webes `border-style: dashed`).
+    func dashedBorder(_ c: Color, width: CGFloat = 1) -> some View { overlay(Capsule().strokeBorder(c, style: StrokeStyle(lineWidth: width, dash: [3 * width, 3 * width]))) }
     func glass(_ r: CGFloat = 20, strong: Bool = false) -> some View { modifier(Glass(radius: r, strong: strong)) }
     func glassCapsule() -> some View { modifier(Glass(radius: 0, circle: true)) }
     func glassInset(_ r: CGFloat = Radius2xl) -> some View { modifier(GlassInset(radius: r)) }
     func indicator(_ on: Bool) -> some View { modifier(Indicator(on: on)) }
 }
+struct TopHighlight: ViewModifier {
+    @Environment(\.pal) private var pal; var a: Double
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .top) { LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: pal.tint.opacity(a), location: 0.12), .init(color: pal.tint.opacity(a), location: 0.88), .init(color: .clear, location: 1)], startPoint: .leading, endPoint: .trailing).frame(height: 1).allowsHitTesting(false) }
+    }
+}
 struct GlassInset: ViewModifier {
     @Environment(\.pal) private var pal; var radius: CGFloat
     func body(content: Content) -> some View {
-        content.background(pal.glassInset, in: RoundedRectangle(cornerRadius: radius)).overlay(RoundedRectangle(cornerRadius: radius).stroke(pal.tint.opacity(0.07), lineWidth: 1))
+        content.background(pal.glassInset, in: RoundedRectangle(cornerRadius: radius)).clipShape(RoundedRectangle(cornerRadius: radius)).topHighlight(0.05).overlay(RoundedRectangle(cornerRadius: radius).stroke(pal.tint.opacity(0.07), lineWidth: 1))
     }
 }
 struct Indicator: ViewModifier {
     @Environment(\.pal) private var pal; var on: Bool
     func body(content: Content) -> some View {
-        content.background(on ? pal.signal.opacity(0.16) : .clear, in: Circle()).overlay(Circle().stroke(on ? pal.signal.opacity(0.55) : .clear, lineWidth: 1))
-            .shadow(color: on ? pal.signal.opacity(0.5) : .clear, radius: 8).opacity(on ? 1 : 0.72).animation(harmonika, value: on)
+        content.background(on ? signalGreen.opacity(0.16) : .clear, in: Circle()).overlay(Circle().stroke(on ? signalGreen.opacity(0.55) : .clear, lineWidth: 1))
+            .shadow(color: on ? signalGreen.opacity(0.4) : .clear, radius: 8).opacity(on ? 1 : 0.72).animation(harmonika, value: on)
     }
 }
 
@@ -170,9 +195,13 @@ struct CheckRow: View {
 // ───────── Rugalmas görgetés (puha szélekkel) ─────────
 private struct HKey: PreferenceKey { static var defaultValue: CGFloat = 0; static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() } }
 struct ElasticScroll<Content: View>: View {
+    @Environment(\.flatScroll) private var flat
     var maxHeight: CGFloat; @ViewBuilder var content: () -> Content
     @State private var h: CGFloat = 40
     var body: some View {
+        if flat { VStack(spacing: 0) { content() } } else { scroller }
+    }
+    private var scroller: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 0) { content() }.background(GeometryReader { Color.clear.preference(key: HKey.self, value: $0.size.height) })
         }.frame(height: min(h, maxHeight)).onPreferenceChange(HKey.self) { v in withAnimation(harmonika) { h = v } }
@@ -183,17 +212,29 @@ struct ElasticScroll<Content: View>: View {
 // ───────── Ablak: matt üveg, középen, a tartalom magasságához lágyan igazodik ─────────
 struct GlassDialog<Content: View>: View {
     @Environment(\.pal) private var pal
-    var dismissable = true; var maxWidth: CGFloat = 390; var onDismiss: () -> Void
+    @Environment(\.layoutInfo) private var lay
+    var dismissable = true; var maxWidth: CGFloat = 390; var fullHeight = false; var compact = true; var onDismiss: () -> Void
     @ViewBuilder var content: () -> Content
     var body: some View {
+        let land = lay.landscape
+        let r: CGFloat = land ? 24 : 28
+        // Fekvő mód: a webes `[role=dialog].land-wide` – min(44rem, 100vw - 2rem - oldalsó biztonsági sáv), magasság: 100dvh - 1rem
+        let w = land ? min(704, lay.size.width - 32 - lay.safe.leading - lay.safe.trailing) : maxWidth
+        let maxH = land ? lay.size.height - 16 : lay.size.height * 0.94
+        let flat = land && !compact
         ZStack {
             pal.dialogBackdrop.ignoresSafeArea().onTapGesture { if dismissable { onDismiss() } }
             ZStack(alignment: .topTrailing) {
-                VStack(spacing: 0) { content() }.frame(maxWidth: .infinity).background(pal.glassStrong, in: RoundedRectangle(cornerRadius: 28))
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28)).overlay(RoundedRectangle(cornerRadius: 28).stroke(pal.glassEdge, lineWidth: 1))
-                    .clipShape(RoundedRectangle(cornerRadius: 28))
+                Group {
+                    if flat { ScrollView(showsIndicators: false) { VStack(spacing: 0) { content() }.environment(\.flatScroll, true) } }
+                    else { VStack(spacing: 0) { content() }.environment(\.flatScroll, false) }
+                }
+                .frame(maxWidth: .infinity).frame(height: (fullHeight && land) ? maxH : nil).frame(maxHeight: maxH)
+                .background(pal.glassStrong, in: RoundedRectangle(cornerRadius: r)).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: r))
+                .clipShape(RoundedRectangle(cornerRadius: r)).topHighlight(0.10).overlay(RoundedRectangle(cornerRadius: r).stroke(pal.glassEdge, lineWidth: 1))
+                .shadow(color: pal.shade.opacity(0.9), radius: 30, y: 20)
                 if dismissable { Button(action: onDismiss) { LIcon("x", size: 16, tint: pal.foreground.opacity(0.7)).frame(width: 28, height: 28) }.padding(14) }
-            }.padding(.horizontal, 12).frame(maxWidth: maxWidth + 24)
+            }.padding(.horizontal, land ? 0 : 12).frame(width: land ? w : nil).frame(maxWidth: land ? nil : maxWidth + 24)
         }.transition(.opacity.combined(with: .scale(scale: 0.95)))
     }
 }

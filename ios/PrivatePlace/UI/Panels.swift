@@ -13,6 +13,8 @@ func avatarDataURL(from data: Data) -> String? {
     let s = "data:image/jpeg;base64," + jpg.base64EncodedString()
     return s.count <= 80_000 ? s : nil
 }
+/// Fekvő módban a függőleges hely szűkös: a megadott (álló) magasság helyett a képernyőhöz igazodó értéket adja.
+private func dlgMax(_ lay: LayoutInfo, _ portrait: CGFloat, _ reserve: CGFloat = 110) -> CGFloat { lay.landscape ? max(96, lay.size.height - 16 - reserve) : portrait }
 private func roomHex(_ c: String?) -> Color { Color(hex: SELECTION_COLORS.first { $0.key == c }?.hex ?? SELECTION_COLORS[0].hex) }
 
 // ───────── Profilűrlap ─────────
@@ -56,7 +58,7 @@ struct DialogHost: View {
 
     var body: some View {
         let selfColor = app.personColors[SELF_COLOR_KEY] ?? SELF_COLOR
-        GlassDialog(dismissable: dialog != .welcome, onDismiss: { withAnimation(harmonika) { onDialog(nil) }; pendingJoin = nil; app.invite = nil }) {
+        GlassDialog(dismissable: dialog != .welcome, fullHeight: dialog == .settings || dialog == .rooms, compact: dialog == .settings || dialog == .rooms || dialog == .share, onDismiss: { withAnimation(harmonika) { onDialog(nil) }; pendingJoin = nil; app.invite = nil }) {
             Group {
                 if exitConfirm && dialog == .welcome {
                     PanelHeader(title: "Kilépsz az alkalmazásból?", description: "A helymegosztás leáll. A térkép használatához meg kell adnod a nevedet.")
@@ -98,6 +100,7 @@ private let PERMS: [PermInfo] = [
 private struct PermissionsPanel: View {
     @EnvironmentObject var app: AppModel
     @Environment(\.pal) private var pal
+    @Environment(\.layoutInfo) private var lay
     var onAskAddressAgain: () -> Void; var onDone: () -> Void
     @State private var notif = false, requested = Set<String>(), busy = false
     func state(_ k: String) -> String {
@@ -121,25 +124,34 @@ private struct PermissionsPanel: View {
     func refresh() { UNUserNotificationCenter.current().getNotificationSettings { s in DispatchQueue.main.async { notif = s.authorizationStatus == .authorized } } }
     func ask(_ k: String) { let st = state(k); if st == "denied" || st == "limited" { openSettings() } else { request(k) } }
     func openSettings() { if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) } }
+    @ViewBuilder func permRow(_ info: PermInfo, _ states: [String: String]) -> some View {
+        let st = states[info.key] ?? "prompt"; let granted = st == "granted"
+        HStack(spacing: 12) {
+            LIcon(info.icon, size: 20, tint: granted ? pal.primary : nil).frame(width: 40, height: 40).indicator(granted)
+            VStack(alignment: .leading, spacing: 0) {
+                Txt(info.label, size: 14, weight: 600, lineHeight: 20)
+                Txt(st == "limited" ? "Most csak hozzávetőleges. Koppints a Pontosításra, és kapcsold be a „Pontos hely”-et." : info.hint, size: 12, color: pal.mutedForeground, lineHeight: 16)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            if granted { HStack(spacing: 6) { StatusDot(state: "on"); Txt("Kész", size: 11, color: pal.mutedForeground) } }
+            else { PPButton(variant: st == "denied" ? .outline : .primary, small: true, enabled: !busy, action: { ask(info.key) }) { BtnText(text: st == "limited" ? "Pontosítás" : st == "denied" ? "Beállítás" : "Engedélyezés", color: $0, small: true) }.fixedSize() }
+        }.padding(12).frame(maxWidth: .infinity).glassInset()
+    }
     var body: some View {
         let states = Dictionary(uniqueKeysWithValues: PERMS.map { ($0.key, state($0.key)) })
         let allGranted = states.values.allSatisfy { $0 == "granted" }
         VStack(spacing: 0) {
             PanelHeader(title: "Engedélyek", description: "Hogy a Private Place rendesen működjön, ezekhez kér hozzáférést. Semmi nem kerül központi helyre.")
-            ElasticScroll(maxHeight: 420) {
-                VStack(spacing: 10) {
-                    ForEach(PERMS, id: \.key) { info in
-                        let st = states[info.key] ?? "prompt"; let granted = st == "granted"
-                        HStack(spacing: 12) {
-                            LIcon(info.icon, size: 20, tint: granted ? pal.primary : nil).frame(width: 40, height: 40).indicator(granted)
-                            VStack(alignment: .leading, spacing: 0) {
-                                Txt(info.label, size: 14, weight: 600, lineHeight: 20)
-                                Txt(st == "limited" ? "Most csak hozzávetőleges. Koppints a Pontosításra, és kapcsold be a „Pontos hely”-et." : info.hint, size: 12, color: pal.mutedForeground, lineHeight: 16)
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                            if granted { HStack(spacing: 6) { StatusDot(state: "on"); Txt("Kész", size: 11, color: pal.mutedForeground) } }
-                            else { PPButton(variant: st == "denied" ? .outline : .primary, small: true, enabled: !busy, action: { ask(info.key) }) { BtnText(text: st == "limited" ? "Pontosítás" : st == "denied" ? "Beállítás" : "Engedélyezés", color: $0, small: true) }.fixedSize() }
-                        }.padding(12).glassInset()
-                    }
+            ElasticScroll(maxHeight: dlgMax(lay, 420, 150)) {
+                VStack(spacing: lay.landscape ? 8 : 10) {
+                    // Fekvő módban két oszlop (a webes .perm-list), az utolsó elem teljes szélességű
+                    if lay.landscape {
+                        ForEach(Array(stride(from: 0, to: PERMS.count, by: 2)), id: \.self) { i in
+                            HStack(alignment: .top, spacing: 8) {
+                                permRow(PERMS[i], states)
+                                if i + 1 < PERMS.count { permRow(PERMS[i + 1], states) } else { Spacer().frame(maxWidth: .infinity) }
+                            }
+                        }
+                    } else { ForEach(PERMS, id: \.key) { permRow($0, states) } }
                     VStack(alignment: .leading, spacing: 4) {
                         CheckRow(label: "Pontos cím lekérése (OpenStreetMap)", checked: app.prefs.addressConsent == "yes") { v in app.updatePrefs { $0.addressConsent = v ? "yes" : "no" } }
                         PPButton(variant: .ghost, small: true, height: 32, action: onAskAddressAgain) { BtnText(text: "Címkérdés újra megjelenítése", color: $0, small: true) }
@@ -161,6 +173,7 @@ private struct PermissionsPanel: View {
 private struct JoinPanel: View {
     @EnvironmentObject var app: AppModel
     @Environment(\.pal) private var pal
+    @Environment(\.layoutInfo) private var lay
     var initial: Invitation?; var onJoin: (String, String?, String?, String?) -> Void; var onReject: () -> Void
     @State private var value = "", scanning = false
     var body: some View {
@@ -168,22 +181,27 @@ private struct JoinPanel: View {
         VStack(spacing: 0) {
             PanelHeader(title: initial != nil ? "Meghívást kaptál" : "Csatlakozás szobához",
                         description: initial != nil ? "Csatlakozol a(z) „\(initial?.name ?? "meghívott")” szobához? Ott kölcsönösen láthatjátok egymást, ha bekapcsoljátok a megosztást." : "Olvasd be a QR-kódot, vagy írd be a kapott kódot, illetve linket.")
-            ElasticScroll(maxHeight: 480) {
-                VStack(spacing: 12) {
-                    if scanning { QrScanner { text in scanning = false; if parseRoomInput(text) != nil { value = text } else { app.toast("error", "Ez a QR-kód nem Private Place meghívó.") } }.transition(.opacity) }
+            ElasticScroll(maxHeight: dlgMax(lay, 480, 100)) {
+                let scanBtn = PPButton(variant: .outline, action: {
+                    if scanning { withAnimation(harmonika) { scanning = false } }
+                    else { AVCaptureDevice.requestAccess(for: .video) { ok in DispatchQueue.main.async { withAnimation(harmonika) { scanning = ok } } } }
+                }) { c in LIcon(scanning ? "scan-line" : "camera", size: 16, tint: c); Spacer().frame(width: 6); BtnText(text: scanning ? "Beolvasás leállítása" : "QR-kód beolvasása", color: c) }
+                let warn = parsed != nil && parsed!.ownerKey == nil && !(parsed!.token == initial?.token && initial?.ownerKey != nil)
+                let warnText = Txt("Gazdakulcs nélkül a szoba törlése és az eltávolítások nem érkeznek meg hozzád. Olvasd be a QR-kódot, vagy másold be a teljes megosztott kódot.", size: 12, color: pal.mutedForeground, align: .center, lineHeight: 16)
+                let joinBtn = PPButton(enabled: parsed != nil, action: {
+                    guard let p = parsed else { app.toast("error", "Ez nem érvényes szobakód vagy link."); return }
+                    onJoin(p.token, p.name ?? initial?.name, p.color ?? initial?.color, p.ownerKey ?? (p.token == initial?.token ? initial?.ownerKey : nil))
+                }) { BtnText(text: "Csatlakozás", color: $0) }
+                let rejectBtn = PPButton(variant: .ghost, action: onReject) { BtnText(text: "Elutasítás", color: $0) }
+                VStack(spacing: lay.landscape ? 8 : 12) {
+                    if scanning { QrScanner { text in scanning = false; if parseRoomInput(text) != nil { value = text } else { app.toast("error", "Ez a QR-kód nem Private Place meghívó.") } }.frame(maxWidth: lay.landscape ? 200 : .infinity).transition(.opacity) }
                     PillInput(placeholder: "ABCDE-FGHJK-…", text: $value, max: 400).textInputAutocapitalization(.characters).autocorrectionDisabled()
-                    PPButton(variant: .outline, action: {
-                        if scanning { withAnimation(harmonika) { scanning = false } }
-                        else { AVCaptureDevice.requestAccess(for: .video) { ok in DispatchQueue.main.async { withAnimation(harmonika) { scanning = ok } } } }
-                    }) { c in LIcon(scanning ? "scan-line" : "camera", size: 16, tint: c); Spacer().frame(width: 6); BtnText(text: scanning ? "Beolvasás leállítása" : "QR-kód beolvasása", color: c) }
-                    if let p = parsed, p.ownerKey == nil, !(p.token == initial?.token && initial?.ownerKey != nil) {
-                        Txt("Gazdakulcs nélkül a szoba törlése és az eltávolítások nem érkeznek meg hozzád. Olvasd be a QR-kódot, vagy másold be a teljes megosztott kódot.", size: 12, color: pal.mutedForeground, align: .center, lineHeight: 16)
-                    }
-                    PPButton(enabled: parsed != nil, action: {
-                        guard let p = parsed else { app.toast("error", "Ez nem érvényes szobakód vagy link."); return }
-                        onJoin(p.token, p.name ?? initial?.name, p.color ?? initial?.color, p.ownerKey ?? (p.token == initial?.token ? initial?.ownerKey : nil))
-                    }) { BtnText(text: "Csatlakozás", color: $0) }
-                    PPButton(variant: .ghost, action: onReject) { BtnText(text: "Elutasítás", color: $0) }
+                    if lay.landscape {
+                        // Fekvő mód: két oszlopos rács (a webes .join-form)
+                        HStack(spacing: 8) { scanBtn; Spacer().frame(maxWidth: .infinity) }
+                        if warn { warnText }
+                        HStack(spacing: 8) { joinBtn; rejectBtn }
+                    } else { scanBtn; if warn { warnText }; joinBtn; rejectBtn }
                 }.padding(.horizontal, 20).padding(.bottom, 20)
             }
         }.onAppear { if let i = initial { value = formatRoomToken(i.token) } }
@@ -194,21 +212,34 @@ private struct JoinPanel: View {
 private struct SharePanel: View {
     @EnvironmentObject var app: AppModel
     @Environment(\.pal) private var pal
+    @Environment(\.layoutInfo) private var lay
     var room: SavedRoom; var onDone: () -> Void
     var body: some View {
         let code = formatRoomToken(room.token), share = roomShareCode(room.token, room.ownerKey)
+        let land = lay.landscape
+        let bh: CGFloat = land ? 40 : 36
+        let qr = RoundedQr(value: roomQrValue(room.token, room.ownerKey), color: roomHex(room.color)).padding(6).background(Color.white, in: RoundedRectangle(cornerRadius: 24))
+            .background(RoundedRectangle(cornerRadius: 27).stroke(pal.tint.opacity(0.08), lineWidth: 6).padding(-3)).shadow(color: pal.glow, radius: 18)
+        let side = VStack(spacing: land ? 12 : 8) {
+            VStack(spacing: 0) { Txt("SZOBAKÓD", size: 9, color: pal.mutedForeground, tracking: 1.8, lineHeight: 12); Txt(code, size: land ? 16 : 14, weight: 700, display: true, tracking: 0.7) }.frame(maxWidth: .infinity).padding(.vertical, 6).glassInset()
+            HStack(spacing: 8) {
+                PPButton(variant: .outline, small: true, height: bh, action: { UIPasteboard.general.string = share; app.toast("success", "Kód másolva") }) { c in LIcon("copy", size: 16, tint: c); Spacer().frame(width: 6); BtnText(text: "Kód másolása", color: c, small: true) }
+                ShareLink(item: "Szobakód: \(share)", subject: Text("Private Place meghívó")) {
+                    HStack(spacing: 6) { LIcon("share-2", size: 16, tint: pal.primaryForeground); BtnText(text: "Küldés", color: pal.primaryForeground, small: true) }.frame(maxWidth: .infinity, minHeight: bh).background(pal.primary, in: Capsule()) }
+            }
+            Txt("Csak az látja a helyzetedet, akinek ezt elküldöd. Bármikor törölheted a szobát.", size: 10, color: pal.mutedForeground, align: .center, lineHeight: 12.5)
+        }
         VStack(spacing: 0) {
             BackHeader(title: room.name, onBack: onDone)
-            VStack(spacing: 8) {
-                RoundedQr(value: roomQrValue(room.token, room.ownerKey), color: roomHex(room.color)).padding(6).background(Color.white, in: RoundedRectangle(cornerRadius: 24)).shadow(color: pal.glow, radius: 18)
-                VStack(spacing: 0) { Txt("SZOBAKÓD", size: 9, color: pal.mutedForeground, tracking: 1.8, lineHeight: 12); Txt(code, size: 14, weight: 700, display: true, tracking: 0.7) }.frame(maxWidth: .infinity).padding(.vertical, 6).glassInset()
-                HStack(spacing: 8) {
-                    PPButton(variant: .outline, small: true, height: 36, action: { UIPasteboard.general.string = share; app.toast("success", "Kód másolva") }) { c in LIcon("copy", size: 16, tint: c); Spacer().frame(width: 6); BtnText(text: "Kód másolása", color: c, small: true) }
-                    ShareLink(item: "Szobakód: \(share)", subject: Text("Private Place meghívó")) {
-                        HStack(spacing: 6) { LIcon("share-2", size: 16, tint: pal.primaryForeground); BtnText(text: "Küldés", color: pal.primaryForeground, small: true) }.frame(maxWidth: .infinity, minHeight: 36).background(pal.primary, in: Capsule()) }
-                }
-                Txt("Csak az látja a helyzetedet, akinek ezt elküldöd. Bármikor törölheted a szobát.", size: 10, color: pal.mutedForeground, align: .center, lineHeight: 12.5)
-            }.padding(EdgeInsets(top: 8, leading: 16, bottom: 12, trailing: 16))
+            if land {
+                // Fekvő mód: balra a QR-kód, jobbra a szobakód és a gombok (a webes .share-body sor-elrendezése)
+                HStack(alignment: .center, spacing: 24) {
+                    qr.frame(width: min(704 * 0.46, lay.size.height - 120))
+                    side.frame(maxWidth: 320)
+                }.padding(EdgeInsets(top: 4, leading: 24, bottom: 16, trailing: 24)).frame(maxWidth: .infinity)
+            } else {
+                VStack(spacing: 8) { qr; side }.padding(EdgeInsets(top: 8, leading: 16, bottom: 12, trailing: 16))
+            }
         }
     }
 }
@@ -222,27 +253,42 @@ private func lastSeenText(_ at: Int64, _ now: Int64) -> String {
 private struct RoomsPanel: View {
     @EnvironmentObject var app: AppModel
     @Environment(\.pal) private var pal
+    @Environment(\.layoutInfo) private var lay
     var onShare: (String) -> Void; var onNew: () -> Void; var onJoin: () -> Void
+    private var list: some View {
+        ElasticScroll(maxHeight: dlgMax(lay, 520, 130)) {
+            VStack(spacing: 10) {
+                if app.rooms.isEmpty { Txt("Még nincs szobád. Hozz létre egyet, és küldd el a QR-kódot annak, akivel kölcsönösen látni szeretnétek egymást.", size: 14, color: pal.mutedForeground).padding(16).frame(maxWidth: .infinity, alignment: .leading).glassInset() }
+                ForEach(app.rooms, id: \.token) { room in
+                    let online = app.peers.roomMembers[room.token] ?? []
+                    let members: [Member] = (app.peers.roster[room.token] ?? []).map { e in
+                        Member(deviceId: e.deviceId, name: app.peers.people[e.deviceId]?.name ?? e.name, avatar: app.peers.avatars[e.deviceId] ?? app.peers.people[e.deviceId]?.avatar,
+                               color: app.personColors[e.deviceId] ?? colorForDevice(e.deviceId), custom: app.personColors[e.deviceId] != nil, online: online.contains(e.deviceId), lastSeen: e.lastSeen) }
+                        .sorted { $0.online != $1.online ? $0.online : $0.name.lowercased() < $1.name.lowercased() }
+                    RoomRow(room: room, peers: app.peers.roomPeers[room.token] ?? 0, members: members, onShare: { onShare(room.token) })
+                }
+            }.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 8)
+        }
+    }
     var body: some View {
-        VStack(spacing: 0) {
-            PanelHeader(title: "Szobák", description: "Csak az lát téged, akinek elküldöd a szobád kódját vagy QR-kódját.", compact: true)
-            ElasticScroll(maxHeight: 520) {
-                VStack(spacing: 10) {
-                    if app.rooms.isEmpty { Txt("Még nincs szobád. Hozz létre egyet, és küldd el a QR-kódot annak, akivel kölcsönösen látni szeretnétek egymást.", size: 14, color: pal.mutedForeground).padding(16).frame(maxWidth: .infinity, alignment: .leading).glassInset() }
-                    ForEach(app.rooms, id: \.token) { room in
-                        let online = app.peers.roomMembers[room.token] ?? []
-                        let members: [Member] = (app.peers.roster[room.token] ?? []).map { e in
-                            Member(deviceId: e.deviceId, name: app.peers.people[e.deviceId]?.name ?? e.name, avatar: app.peers.avatars[e.deviceId] ?? app.peers.people[e.deviceId]?.avatar,
-                                   color: app.personColors[e.deviceId] ?? colorForDevice(e.deviceId), custom: app.personColors[e.deviceId] != nil, online: online.contains(e.deviceId), lastSeen: e.lastSeen) }
-                            .sorted { $0.online != $1.online ? $0.online : $0.name.lowercased() < $1.name.lowercased() }
-                        RoomRow(room: room, peers: app.peers.roomPeers[room.token] ?? 0, members: members, onShare: { onShare(room.token) })
-                    }
-                }.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 8)
+        if lay.landscape {
+            // Fekvő mód: balra a lista, jobbra a két művelet egymás alatt (a webes data-panel="rooms" rács)
+            HStack(spacing: 0) {
+                VStack(spacing: 0) { PanelHeader(title: "Szobák", description: "Csak az lát téged, akinek elküldöd a szobád kódját vagy QR-kódját.", compact: true); list; Spacer(minLength: 0) }.frame(maxWidth: .infinity)
+                VStack(spacing: 12) {
+                    PPButton(small: true, height: 44, action: onNew) { c in LIcon("plus", size: 16, tint: c); Spacer().frame(width: 6); BtnText(text: "Új szoba", color: c, small: true) }
+                    PPButton(variant: .outline, small: true, height: 44, action: onJoin) { c in LIcon("door-open", size: 16, tint: c); Spacer().frame(width: 6); BtnText(text: "Csatlakozás", color: c, small: true) }
+                }.frame(width: 184).padding(EdgeInsets(top: 56, leading: 0, bottom: 16, trailing: 16)).frame(maxHeight: .infinity, alignment: .center)
             }
-            HStack(spacing: 8) {
-                PPButton(small: true, action: onNew) { c in LIcon("plus", size: 16, tint: c); Spacer().frame(width: 6); BtnText(text: "Új szoba", color: c, small: true) }
-                PPButton(variant: .outline, small: true, action: onJoin) { c in LIcon("door-open", size: 16, tint: c); Spacer().frame(width: 6); BtnText(text: "Csatlakozás", color: c, small: true) }
-            }.padding(EdgeInsets(top: 12, leading: 16, bottom: 16, trailing: 16))
+        } else {
+            VStack(spacing: 0) {
+                PanelHeader(title: "Szobák", description: "Csak az lát téged, akinek elküldöd a szobád kódját vagy QR-kódját.", compact: true)
+                list
+                HStack(spacing: 8) {
+                    PPButton(small: true, action: onNew) { c in LIcon("plus", size: 16, tint: c); Spacer().frame(width: 6); BtnText(text: "Új szoba", color: c, small: true) }
+                    PPButton(variant: .outline, small: true, action: onJoin) { c in LIcon("door-open", size: 16, tint: c); Spacer().frame(width: 6); BtnText(text: "Csatlakozás", color: c, small: true) }
+                }.padding(EdgeInsets(top: 12, leading: 16, bottom: 16, trailing: 16))
+            }
         }
     }
 }
@@ -325,13 +371,14 @@ private struct RoomRow: View {
 private struct SettingsMain: View {
     @EnvironmentObject var app: AppModel
     @Environment(\.pal) private var pal
+    @Environment(\.layoutInfo) private var lay
     var selfColor: String; var onTrails: () -> Void; var onPlaces: () -> Void; var onPermissions: () -> Void; var onResetHints: () -> Void
     var body: some View {
         let info = Bundle.main.infoDictionary
         VStack(spacing: 0) {
             PanelHeader(title: "Beállítások", compact: true)
-            ElasticScroll(maxHeight: 640) {
-                VStack(spacing: 10) {
+            ElasticScroll(maxHeight: dlgMax(lay, 640, 60)) {
+                let col1 = VStack(spacing: 10) {
                     ProfileForm(initial: app.profile, submitLabel: "Profil mentése", color: selfColor, compact: true) { p in app.saveProfile(p); app.toast("success", "Profil mentve") }.padding(12).glassInset()
                     nav("Útvonalak rajzolása a térképen", nil, onTrails)
                     nav("Saját helyek\(app.places.isEmpty ? "" : " (\(app.places.count))")", "map-pin", onPlaces)
@@ -339,10 +386,17 @@ private struct SettingsMain: View {
                         PPButton(variant: .outline, small: true, action: onPermissions) { c in LIcon("shield-check", size: 16, tint: c); Spacer().frame(width: 6); BtnText(text: "Engedélyek", color: c, small: true) }
                         PPButton(variant: .outline, small: true, action: onResetHints) { c in LIcon("circle-help", size: 16, tint: c); Spacer().frame(width: 6); BtnText(text: "Súgó", color: c, small: true) }
                     }
+                }
+                let col2 = VStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
                         Txt("Verzió", size: 14, weight: 600)
                         Txt("\(info?["CFBundleShortVersionString"] as? String ?? "dev") (#\(info?["CFBundleVersion"] as? String ?? "0")). iPhone-on az app nem frissíti önmagát: az új .ipa-t a GitHub kiadásai között találod; Sideloadly vagy AltStore telepíti a régi fölé.", size: 12, color: pal.mutedForeground, lineHeight: 16)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(12).glassInset()
+                }
+                // Fekvő módban két oszlop (a webes .settings-cols), a lap teljes magasságú és belül görget
+                Group {
+                    if lay.landscape { HStack(alignment: .top, spacing: 10) { col1.frame(maxWidth: .infinity); col2.frame(maxWidth: .infinity) } }
+                    else { VStack(spacing: 10) { col1; col2 } }
                 }.padding(.horizontal, 16).padding(.vertical, 16)
             }
         }

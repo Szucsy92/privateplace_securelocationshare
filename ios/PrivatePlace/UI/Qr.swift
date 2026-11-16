@@ -43,7 +43,16 @@ struct QrScanner: View {
     @Environment(\.pal) private var pal
     var onCode: (String) -> Void
     var body: some View {
-        ZStack { ScannerView(onCode: onCode); RoundedRectangle(cornerRadius: 20).stroke(pal.primary, lineWidth: 2).padding(.all, 0).scaleEffect(0.64) }
+        ZStack {
+            ScannerView(onCode: onCode)
+            // Sötétítés a keret körül (box-shadow: 0 0 0 999px shade 45%) + világító keret
+            GeometryReader { g in
+                let inset = g.size.width * 0.18
+                Path { p in p.addRect(CGRect(origin: .zero, size: g.size)); p.addRoundedRect(in: CGRect(x: inset, y: inset, width: g.size.width - 2 * inset, height: g.size.height - 2 * inset), cornerSize: CGSize(width: 20, height: 20)) }
+                    .fill(pal.shade.opacity(0.45), style: FillStyle(eoFill: true))
+            }.allowsHitTesting(false)
+            RoundedRectangle(cornerRadius: 20).stroke(pal.primary, lineWidth: 2).scaleEffect(0.64)
+        }
             .aspectRatio(1, contentMode: .fit).background(Color(hex: "#0C1018")).clipShape(RoundedRectangle(cornerRadius: 24)).overlay(RoundedRectangle(cornerRadius: 24).stroke(pal.glassEdge, lineWidth: 1))
     }
 }
