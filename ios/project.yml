@@ -54,7 +54,7 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: hu.privateplace.invite
             CFBundleURLSchemes: [privateplace]
-        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]   # a fekvő mód is támogatott
         TURN_URLS: "$(TURN_URLS)"
         TURN_USERNAME: "$(TURN_USERNAME)"
         TURN_CREDENTIAL: "$(TURN_CREDENTIAL)"
