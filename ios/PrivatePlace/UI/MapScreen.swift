@@ -372,7 +372,12 @@ struct PersonBubble: View {
             }
             Txt(stopLabel(since: person.stoppedSince, now: clock, moving: moving), size: 11, color: pal.mutedForeground)
         }.padding(.horizontal, 10).padding(.vertical, 8).frame(minWidth: 144, maxWidth: 320).glass(12)
-        .task(id: "\(allowed)|\(last?.lat ?? 0)|\(last?.lng ?? 0)") {
+        .onChange(of: person.id) { _ in
+            // A buborék nézetazonossága megmaradhat személyváltáskor. Ne mutassuk
+            // az előző marker címét, és ne örököljük annak 15 mp-es lekérdezési korlátját.
+            address = nil; done = false; err = nil; lastQ = nil; failed = false
+        }
+        .task(id: "\(person.id)|\(allowed)|\(last?.lat ?? 0)|\(last?.lng ?? 0)") {
             guard allowed, let l = last else { return }
             if let q = lastQ, (Date().timeIntervalSince(q.2) < 15 || (distanceMeters(LatLng(lat: q.0, lng: q.1), LatLng(lat: l.lat, lng: l.lng)) < 25 && !failed)) { return }
             lastQ = (l.lat, l.lng, Date())

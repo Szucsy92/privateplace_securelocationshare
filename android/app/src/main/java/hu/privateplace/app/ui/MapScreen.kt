@@ -401,12 +401,14 @@ fun PersonBubbleHost(person: MapPerson, self: MapPerson?, at: IntOffset, below: 
 @Composable
 fun PersonBubble(person: MapPerson, self: MapPerson?, addressAllowed: Boolean, onAllow: () -> Unit) {
     val clock by rememberClock()
-    var address by remember { mutableStateOf<hu.privateplace.app.data.AddressInfo?>(null) }
-    var done by remember { mutableStateOf(false) }; var err by remember { mutableStateOf<String?>(null) }
+    // A buborék ugyanaz a Compose-hely lehet két kijelölt személy között; a címállapot
+    // ezért személyazonossághoz kötött, különben egy közeli marker örökölheti az előző címét.
+    var address by remember(person.id) { mutableStateOf<hu.privateplace.app.data.AddressInfo?>(null) }
+    var done by remember(person.id) { mutableStateOf(false) }; var err by remember(person.id) { mutableStateOf<String?>(null) }
     val last = person.points.lastOrNull(); val own = self?.points?.lastOrNull()
-    var lastQuery by remember { mutableStateOf<Triple<Double, Double, Long>?>(null) }
-    var failed by remember { mutableStateOf(false) }
-    LaunchedEffect(addressAllowed, last?.lat, last?.lng, clock / 1000) {
+    var lastQuery by remember(person.id) { mutableStateOf<Triple<Double, Double, Long>?>(null) }
+    var failed by remember(person.id) { mutableStateOf(false) }
+    LaunchedEffect(person.id, addressAllowed, last?.lat, last?.lng, clock / 1000) {
         if (!addressAllowed || last == null) return@LaunchedEffect
         val prev = lastQuery
         if (prev != null && (System.currentTimeMillis() - prev.third < 15000 || (distanceMeters(LatLng(prev.first, prev.second), LatLng(last.lat, last.lng)) < 25 && !failed))) return@LaunchedEffect
