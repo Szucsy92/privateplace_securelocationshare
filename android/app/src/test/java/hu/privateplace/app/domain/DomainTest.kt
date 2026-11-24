@@ -61,6 +61,19 @@ class DomainTest {
         assertEquals("still", last!!.mode)
     }
 
+    @Test fun hardwareStepsRequireTwoEventsAndExpire() {
+        val changes = mutableListOf<Boolean>()
+        val detector = WalkingDetector { changes += it }
+        detector.onStep(1000L)
+        assertTrue(changes.isEmpty())
+        detector.onStep(1800L)
+        assertEquals(listOf(true), changes)
+        detector.expireSteps(4799L)
+        assertEquals(listOf(true), changes)
+        detector.expireSteps(4800L)
+        assertEquals(listOf(true, false), changes)
+    }
+
     @Test fun walkingFixesLeaveStill() {
         val f = DriftFilter(); var t = 1_700_000_000_000L; var lat = 47.5
         var last: FilteredFix? = null
