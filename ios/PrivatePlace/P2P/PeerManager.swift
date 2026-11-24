@@ -39,11 +39,13 @@ final class PeerManager: ObservableObject {
     private var rooms: [SavedRoom] = [], deviceId: String?, hello: HelloMessage?, lastLoc: LocationMessage?
     private var avatarOrder: [String] = []
     private var timers: [Timer] = []
+    // A tiltások ritkán változnak; a roster frissítése ne olvassa újra a teljes UserDefaults JSON-t.
+    private var controlsCache: [RoomControl]
     var onRoomClosed: ((String, String) -> Void)?
     var onShareRequest: ((String) -> Void)?
 
     init(store: Store, transport: PeerTransport) {
-        self.store = store; self.transport = transport
+        self.store = store; self.transport = transport; controlsCache = store.loadControls()
         roster = store.loadRosters(); avatars = store.loadAvatars(); avatarOrder = Array(avatars.keys)
         timers.append(Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in Task { @MainActor in self?.heartbeat() } })
         timers.append(Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in Task { @MainActor in self?.reconnectStalled(force: false) } })
@@ -52,7 +54,11 @@ final class PeerManager: ObservableObject {
         guard let l = lastLoc, freshLocation(l, now: nowMs()) != nil else { return }
         for j in joined.values where !j.peers.isEmpty { j.room.send("loc", locationJSON(l), to: nil) }
     }
-    private func isKicked(_ token: String, _ dev: String) -> Bool { store.loadControls().contains { $0.kind == "kick" && $0.token == token && $0.target == dev } }
+    private func isKicked(_ token: String, _ dev: String) -> Bool { controlsCache.contains { $0.kind == "kick" && $0.token == token && $0.target == dev } }
+    private func rememberControl(_ c: RoomControl) {
+        store.rememberControl(c)
+        controlsCache = store.loadControls()
+    }
     private func updateRoster(_ f: (Rosters) -> Rosters) {
         let next = f(roster); if next == roster { return }
         roster = next; store.saveRosters(next)
@@ -93,7 +99,7 @@ final class PeerManager: ObservableObject {
         j.peers.insert(id); tries[j.token] = nil; refreshCounts()
         if let h = hello { j.room.send("hello", helloJSON(h), to: [id]) }
         if case .send(let m) = announcement(lastLoc, now: nowMs()) { j.room.send("loc", locationJSON(m), to: [id]) }
-        for c in store.loadControls().filter({ $0.kind == "kick" && $0.token == j.token }).suffix(20) { j.room.send("ctrl", c.json, to: [id]) }
+        for c in controlsCache.filter({ $0.kind == "kick" && $0.token == j.token }).suffix(20) { j.room.send("ctrl", c.json, to: [id]) }
     }
     fileprivate func peerLeft(_ j: Joined, _ id: String) {
         if let dev = peerDevice[id] { updateRoster { touchMember($0, token: j.token, deviceId: dev, now: nowMs()) } }
@@ -130,8 +136,8 @@ final class PeerManager: ObservableObject {
         case "ctrl":
             guard let c = parseRoomControl(data), c.token == token, let saved = rooms.first(where: { $0.token == token }), let ok = saved.ownerKey, verifyRoomControl(c, ownerKey: ok) else { return }
             if c.kind == "close" { updateRoster { dropRoster($0, token: token) }; onRoomClosed?(token, "closed") }
-            else if c.target == deviceId { store.rememberControl(c); updateRoster { dropRoster($0, token: token) }; onRoomClosed?(token, "kicked") }
-            else if let t = c.target { store.rememberControl(c); dropDevice(token, t) }
+            else if c.target == deviceId { rememberControl(c); updateRoster { dropRoster($0, token: token) }; onRoomClosed?(token, "kicked") }
+            else if let t = c.target { rememberControl(c); dropDevice(token, t) }
         case "ask":
             if j.peers.contains(id), parseShareRequest(data), let d = peerDevice[id] { onShareRequest?(d) }
         default: break
@@ -207,7 +213,7 @@ final class PeerManager: ObservableObject {
     func sendControl(_ c: RoomControl) {
         if c.kind == "kick" && c.target == deviceId { return }
         if let j = joined[c.token], !j.peers.isEmpty { j.room.send("ctrl", c.json, to: nil) }
-        if c.kind == "kick", let t = c.target { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.store.rememberControl(c); self?.dropDevice(c.token, t) } }
+        if c.kind == "kick", let t = c.target { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.rememberControl(c); self?.dropDevice(c.token, t) } }
     }
     func forgetRoom(_ token: String) { updateRoster { dropRoster($0, token: token) } }
     func forgetMember(_ token: String, _ dev: String) { updateRoster { removeMember($0, token: token, deviceId: dev) } }

@@ -53,6 +53,8 @@ class PeerManager(
     private var lastLoc: LocationMessage? = null
     private var sharingOn = false
     private val nullTimers = mutableListOf<Runnable>()
+    // A tiltások listája ritkán változik; ne olvassuk és JSON-dekódoljuk újra minden roster-frissítésnél.
+    private var controlsCache = store.loadControls()
 
     private val heartbeat = object : Runnable {
         override fun run() {
@@ -65,7 +67,12 @@ class PeerManager(
     private val watchdog = object : Runnable { override fun run() { reconnectStalled(false); main.postDelayed(this, 15000) } }
     init { main.postDelayed(heartbeat, 5000); main.postDelayed(watchdog, 15000) }
 
-    private fun isKicked(token: String, dev: String) = store.loadControls().any { it.kind == "kick" && it.token == token && it.target == dev }
+    private fun isKicked(token: String, dev: String) = controlsCache.any { it.kind == "kick" && it.token == token && it.target == dev }
+
+    private fun rememberControl(c: RoomControl) {
+        store.rememberControl(c)
+        controlsCache = store.loadControls()
+    }
 
     private fun updateRoster(change: (Rosters) -> Rosters) {
         val cur = _state.value.roster; val next = change(cur)
@@ -128,7 +135,7 @@ class PeerManager(
         val a = announcement(lastLoc, System.currentTimeMillis())
         if (a is Announcement.Send) j.room.send("loc", a.msg.toJson(), listOf(peerId))
         // A gazda aláírt eltávolításait továbbadjuk: a lemaradt tagok (és az eltávolított) is értesülnek.
-        store.loadControls().filter { it.kind == "kick" && it.token == token }.takeLast(20).forEach { j.room.send("ctrl", it.toJson(), listOf(peerId)) }
+        controlsCache.filter { it.kind == "kick" && it.token == token }.takeLast(20).forEach { j.room.send("ctrl", it.toJson(), listOf(peerId)) }
     }
 
     private fun peerLeft(token: String, j: Joined, peerId: String) {
@@ -174,8 +181,8 @@ class PeerManager(
                 if (c.token != token || saved?.ownerKey == null) return
                 if (!verifyRoomControl(c, saved.ownerKey)) return
                 if (c.kind == "close") { updateRoster { dropRoster(it, token) }; onRoomClosed(token, "closed") }
-                else if (c.target == deviceId) { store.rememberControl(c); updateRoster { dropRoster(it, token) }; onRoomClosed(token, "kicked") }
-                else if (c.target != null) { store.rememberControl(c); dropDevice(token, c.target) }
+                else if (c.target == deviceId) { rememberControl(c); updateRoster { dropRoster(it, token) }; onRoomClosed(token, "kicked") }
+                else if (c.target != null) { rememberControl(c); dropDevice(token, c.target) }
             }
             "ask" -> {
                 if (peerId !in j.peers || !parseShareRequest(data)) return
@@ -282,7 +289,7 @@ class PeerManager(
         if (c.kind == "kick" && c.target == deviceId) return
         joined[c.token]?.takeIf { it.peers.isNotEmpty() }?.room?.send("ctrl", c.toJson())
         main.postDelayed({
-            if (c.kind == "kick" && c.target != null) { store.rememberControl(c); dropDevice(c.token, c.target) }
+            if (c.kind == "kick" && c.target != null) { rememberControl(c); dropDevice(c.token, c.target) }
         }, 400)
     }
 
