@@ -90,7 +90,10 @@ class NetworkMonitor(context: Context) {
     }
 
     private fun publish(capabilities: NetworkCapabilities?) {
-        val next = fromCapabilities(capabilities)
+        publish(fromCapabilities(capabilities))
+    }
+
+    private fun publish(next: NetworkState) {
         if (_state.value != next) _state.value = next
     }
 

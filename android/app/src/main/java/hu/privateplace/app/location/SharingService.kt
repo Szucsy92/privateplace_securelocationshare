@@ -9,6 +9,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import hu.privateplace.app.PrivatePlaceApp
+import hu.privateplace.app.domain.shouldHoldLocationWakeLock
 import hu.privateplace.app.R
 import hu.privateplace.app.ui.MainActivity
 
