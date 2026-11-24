@@ -38,12 +38,36 @@ class SharingService : Service() {
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .addAction(action("Leállítás", false)).addAction(action("Kilépés", true)).build()
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION) else startForeground(NOTIF_ID, n)
-        if (wake == null) wake = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PrivatePlace:sharing").apply { acquire() }
+        instance = this
+        updateWakeLock(graph.engine.state.value.gpsIntervalMs)
         graph.engine.setPermissionGranted(true)
         return START_STICKY
     }
 
-    override fun onDestroy() { wake?.takeIf { it.isHeld }?.release(); wake = null; super.onDestroy() }
+    private fun updateWakeLock(intervalMs: Long) {
+        if (shouldHoldLocationWakeLock(intervalMs)) {
+            if (wake == null) wake = (getSystemService(POWER_SERVICE) as PowerManager)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PrivatePlace:sharing").apply { setReferenceCounted(false) }
+            if (wake?.isHeld != true) wake?.acquire()
+        } else {
+            wake?.takeIf { it.isHeld }?.release()
+        }
+    }
 
-    companion object { const val CHANNEL = "sharing"; const val NOTIF_ID = 7; const val ACTION_STOP = "hu.privateplace.STOP"; const val EXTRA_EXIT = "exit" }
+    override fun onDestroy() {
+        if (instance === this) instance = null
+        wake?.takeIf { it.isHeld }?.release(); wake = null
+        super.onDestroy()
+    }
+
+    companion object {
+        const val CHANNEL = "sharing"; const val NOTIF_ID = 7
+        const val ACTION_STOP = "hu.privateplace.STOP"; const val EXTRA_EXIT = "exit"
+        @Volatile private var instance: SharingService? = null
+
+        /** A futó szolgáltatás WakeLock-ja az energiatakarékos GPS-ütemhez igazodik. */
+        fun setLocationInterval(intervalMs: Long) {
+            instance?.updateWakeLock(intervalMs)
+        }
+    }
 }

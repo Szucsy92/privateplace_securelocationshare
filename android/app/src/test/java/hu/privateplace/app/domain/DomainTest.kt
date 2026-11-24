@@ -39,6 +39,16 @@ class DomainTest {
         assertEquals(ParsedLoc.Invalid, parseLocation(JSONObject(ok.toString()).put("t", now + 10 * 60_000), now))
     }
 
+    @Test fun gpsPowerScheduleReleasesWakeLockForSparseUpdates() {
+        assertTrue(shouldHoldLocationWakeLock(ACTIVE_GPS_MS))
+        assertTrue(shouldHoldLocationWakeLock(STILL_GPS_MS))
+        assertFalse(shouldHoldLocationWakeLock(IDLE_GPS_MS))
+        assertEquals(ACTIVE_GPS_MS, desiredGpsIntervalMs(PowerContext(visible = true, sharing = false, viewers = false, calm = true)))
+        assertEquals(ACTIVE_GPS_MS, desiredGpsIntervalMs(PowerContext(visible = false, sharing = true, viewers = true, calm = false)))
+        assertEquals(STILL_GPS_MS, desiredGpsIntervalMs(PowerContext(visible = false, sharing = true, viewers = true, calm = true)))
+        assertEquals(IDLE_GPS_MS, desiredGpsIntervalMs(PowerContext(visible = false, sharing = true, viewers = false, calm = false)))
+    }
+
     @Test fun transportNeedsHold() {
         var s = TransportState(TransportMode.WALK, null, 0)
         s = updateTransport(s, 12.0, 1000); assertEquals(TransportMode.WALK, s.mode)

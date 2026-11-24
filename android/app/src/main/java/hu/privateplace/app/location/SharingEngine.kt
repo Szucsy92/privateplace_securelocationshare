@@ -78,6 +78,7 @@ class SharingEngine(private val ctx: Context, private val store: Store, private 
     private fun restartWithInterval(ms: Long) {
         if (ms == curInterval) return
         curInterval = ms; _state.update { it.copy(gpsIntervalMs = ms) }
+        SharingService.setLocationInterval(ms)
         job?.cancel(); job = null
         if (shouldTrack()) startTracking(ms)
     }

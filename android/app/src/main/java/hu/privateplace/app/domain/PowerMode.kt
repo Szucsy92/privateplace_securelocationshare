@@ -21,3 +21,7 @@ fun movementWake(lat: Double, lng: Double, speed: Double?, acc: Double?, anchor:
     val radius = (acc ?: 10.0).coerceIn(10.0, 40.0)
     return distanceMeters(anchor, LatLng(lat, lng)) > radius * 1.5
 }
+
+/** A wake lock csak a legfeljebb 3 mp-es követési ütemnél indokolt; ritkított GPS-nél a CPU alhat. */
+const val WAKE_LOCK_MAX_INTERVAL_MS = 3000L
+fun shouldHoldLocationWakeLock(intervalMs: Long): Boolean = intervalMs <= WAKE_LOCK_MAX_INTERVAL_MS
