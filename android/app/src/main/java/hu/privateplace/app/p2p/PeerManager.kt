@@ -45,6 +45,8 @@ class PeerManager(
     private val roomDevices = HashMap<String, MutableSet<String>>()
     private val wantHello = HashMap<String, Long>()
     private val tries = HashMap<String, Int>()
+    /** Utolsó csatlakozási kísérlet akkor is, ha a transport.join szinkron hibával tér vissza. */
+    private val lastJoinAttempt = HashMap<String, Long>()
     private var rooms: List<SavedRoom> = emptyList()
     private var deviceId: String? = null
     private var hello: HelloMessage? = null
@@ -97,12 +99,16 @@ class PeerManager(
         hello = if (profile != null && device != null) HelloMessage(device, profile.name, profile.avatar) else null
         if (hello == null) { for (t in joined.keys.toList()) leaveRoom(t, true); return }
         val wanted = newRooms.map { it.token }.toSet()
+        lastJoinAttempt.keys.retainAll(wanted)
+        tries.keys.retainAll(wanted)
         for (t in joined.keys.toList()) if (t !in wanted) leaveRoom(t, true)
         for (t in wanted) if (t !in joined) joinRoom(t)
         if (oldHello != null && oldHello != hello) for (j in joined.values) j.room.send("hello", hello!!.toJson())
     }
 
     private fun joinRoom(token: String) {
+        if (token in joined) return
+        lastJoinAttempt[token] = System.currentTimeMillis()
         val holder = arrayOfNulls<Joined>(1)
         val room = runCatching {
             transport.join(token, object : RoomListener {
@@ -226,10 +232,21 @@ class PeerManager(
     /** Elakadt szobák újracsatlakoztatása visszalépéssel (háttérbe kerülés, hálózatváltás után). */
     private fun reconnectStalled(force: Boolean) {
         val now = System.currentTimeMillis()
-        for ((token, j) in joined.entries.toList()) {
+        // A kívánt szobák között azokat is újrapróbáljuk, amelyeknél a join() hibával tért vissza,
+        // ezért nem jött létre Joined példány, amit a régi watchdog figyelhetett volna.
+        for (token in rooms.map { it.token }) {
+            val j = joined[token]
+            if (j == null) {
+                val t = tries[token] ?: 0
+                val wait = if (force) 8000L else minOf(30_000L * (1L shl t.coerceAtMost(3)), 180_000L)
+                if (now - (lastJoinAttempt[token] ?: 0L) < wait) continue
+                tries[token] = t + 1
+                joinRoom(token)
+                continue
+            }
             if (j.peers.isNotEmpty()) { tries.remove(token); continue }
             val t = tries[token] ?: 0
-            val wait = if (force) 8000L else minOf(30_000L * (1L shl t), 180_000L)
+            val wait = if (force) 8000L else minOf(30_000L * (1L shl t.coerceAtMost(3)), 180_000L)
             if (now - j.joinedAt < wait) continue
             tries[token] = t + 1
             leaveRoom(token, false); joinRoom(token)

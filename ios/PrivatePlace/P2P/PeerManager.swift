@@ -34,6 +34,8 @@ final class PeerManager: ObservableObject {
     private var joined: [String: Joined] = [:]
     private var peerDevice: [String: String] = [:], pendingLoc: [String: LocationMessage?] = [:], pendingSet = Set<String>()
     private var roomDevices: [String: Set<String>] = [:], wantHello: [String: Date] = [:], tries: [String: Int] = [:]
+    /// Utolsó csatlakozási kísérlet, beleértve a még peer nélküli / sikertelen próbákat.
+    private var lastJoinAttempt: [String: Date] = [:]
     private var rooms: [SavedRoom] = [], deviceId: String?, hello: HelloMessage?, lastLoc: LocationMessage?
     private var avatarOrder: [String] = []
     private var timers: [Timer] = []
@@ -74,11 +76,15 @@ final class PeerManager: ObservableObject {
         hello = (profile != nil && device != nil) ? HelloMessage(deviceId: device!, name: profile!.name, avatar: profile!.avatar) : nil
         guard let h = hello else { for t in Array(joined.keys) { leaveRoom(t, removePeople: true) }; return }
         let wanted = Set(newRooms.map { $0.token })
+        lastJoinAttempt = lastJoinAttempt.filter { wanted.contains($0.key) }
+        tries = tries.filter { wanted.contains($0.key) }
         for t in Array(joined.keys) where !wanted.contains(t) { leaveRoom(t, removePeople: true) }
         for t in wanted where joined[t] == nil { joinRoom(t) }
         if let o = old, o != h { for j in joined.values { j.room.send("hello", helloJSON(h), to: nil) } }
     }
     private func joinRoom(_ token: String) {
+        guard joined[token] == nil else { return }
+        lastJoinAttempt[token] = Date()
         let j = Joined(token: token, owner: self)
         j.room = transport.join(token: token, listener: j); joined[token] = j; refreshCounts()
     }
@@ -164,10 +170,20 @@ final class PeerManager: ObservableObject {
     }
     private func reconnectStalled(force: Bool) {
         let now = Date()
-        for (token, j) in joined {
+        // A kívánt, de jelenleg nem csatlakoztatott szobákat is újrapróbáljuk.
+        // Így egy korai transport-hiba után sem marad végleg offline a szoba.
+        for token in rooms.map(\.token) {
+            guard let j = joined[token] else {
+                let t = tries[token] ?? 0
+                let wait = force ? 8.0 : min(30.0 * Double(1 << min(t, 3)), 180)
+                if now.timeIntervalSince(lastJoinAttempt[token] ?? .distantPast) < wait { continue }
+                tries[token] = t + 1
+                joinRoom(token)
+                continue
+            }
             if !j.peers.isEmpty { tries[token] = nil; continue }
             let t = tries[token] ?? 0
-            let wait = force ? 8.0 : min(30.0 * Double(1 << t), 180)
+            let wait = force ? 8.0 : min(30.0 * Double(1 << min(t, 3)), 180)
             if now.timeIntervalSince(j.joinedAt) < wait { continue }
             tries[token] = t + 1; leaveRoom(token, removePeople: false); joinRoom(token)
         }
