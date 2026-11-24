@@ -18,6 +18,8 @@ import hu.privateplace.app.location.SharingService
 import hu.privateplace.app.p2p.PeerManager
 import hu.privateplace.app.p2p.TurnConfig
 import hu.privateplace.app.p2p.WebRtcTransport
+import hu.privateplace.app.network.NetworkMonitor
+import hu.privateplace.app.network.NetworkState
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
@@ -84,6 +86,9 @@ class AppGraph(val app: Application) {
     private val transport by lazy { WebRtcTransport(app, BuildConfig.NOSTR_RELAYS.split(","), turn) }
     val peers: PeerManager = PeerManager(store, transport, { t, r -> onRoomGone(t, r) }, { dev -> shareRequests.tryEmit(dev); notifyShareAsk(dev) })
     val engine = SharingEngine(app, store, LocationSource(app)) { peers }
+    /** Aktív Wi-Fi/mobiladat/VPN kapcsolat és internet-validáltság. */
+    val networkMonitor = NetworkMonitor(app)
+    val networkState: StateFlow<NetworkState> = networkMonitor.state
 
     init {
         peers.sync(rooms.value, deviceId, profile.value)
@@ -100,25 +105,22 @@ class AppGraph(val app: Application) {
             if (hu.privateplace.app.ui.Perms.anyLocation(app)) { engine.setPermissionGranted(true); engine.setSharing(true) }
             else updatePrefs { it.copy(sharing = false) }
         }
-        watchNetwork()
-    }
-
-    /** A webes `online` esemény megfelelője: hálózat-visszatérés / hálózatváltás után azonnal újracsatlakozunk és újraközlünk. */
-    private var lastNetWake = 0L
-    private fun watchNetwork() {
-        val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return
-        val main = android.os.Handler(android.os.Looper.getMainLooper())
-        runCatching {
-            cm.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: android.net.Network) {
-                    val now = System.currentTimeMillis()
-                    if (now - lastNetWake < 4000) return
-                    lastNetWake = now
-                    main.post { peers.wake() }
-                }
-            })
+        networkMonitor.start()
+        scope.launch {
+            var previous: NetworkState? = null
+            networkMonitor.state.collect { current ->
+                val old = previous
+                previous = current
+                // A sávszélesség/RSSI változása önmagában nem indíthat újracsatlakozást.
+                val connectivityChanged = old == null ||
+                    old.connected != current.connected ||
+                    old.validated != current.validated ||
+                    old.kind != current.kind
+                if (connectivityChanged && current.usableInternet) peers.wake()
+            }
         }
     }
+
 
     private fun resync() = peers.sync(rooms.value, deviceId, profile.value)
     private fun setRooms(r: List<SavedRoom>) { rooms.value = r; store.saveRooms(r); resync() }
