@@ -96,10 +96,11 @@ fun DialogHost(
         if (kind == DialogKind.WELCOME) onExitConfirm(true) else { onDialog(null); onPendingJoin(null); onInviteDone() }
     }, dismissable = kind != DialogKind.WELCOME, fullHeight = kind == DialogKind.SETTINGS || kind == DialogKind.ROOMS,
         compact = kind == DialogKind.SETTINGS || kind == DialogKind.ROOMS || kind == DialogKind.SHARE) {
-        ViewSwitch(listOf(kind, if (kind == DialogKind.SETTINGS) settingsView else "", exitConfirm).joinToString("|")) { key ->
+        // A nézet adatait a kulcsból olvassuk: a kilépő (régi) tartalom így a saját állapotát rajzolja, nem ugrik azonnal az új nézetre (ez volt a villanás)
+        ViewSwitch(DlgView(kind, if (kind == DialogKind.SETTINGS) settingsView else "", exitConfirm, shareToken)) { v ->
             Column {
                 when {
-                    exitConfirm && kind == DialogKind.WELCOME -> {
+                    v.exit && v.v.kind == DialogKind.WELCOME -> {
                         PanelHeader("Kilépsz az alkalmazásból?", "A helymegosztás leáll. A térkép használatához meg kell adnod a nevedet.")
                         Row(Modifier.fillMaxWidth().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                             TextBtn("Mégsem", { onExitConfirm(false) }, variant = Variant.Outline)
@@ -110,12 +111,12 @@ fun DialogHost(
                         description = "Nincs regisztráció és nincs jelszó. A neved és a képed csak ezen a telefonon tárolódik, és csak a szobatársaid látják.") { p ->
                         g.saveProfile(p); onDialog(if (g.store.permissionsAsked) (if (pendingJoin != null) DialogKind.JOIN else null) else DialogKind.PERMISSIONS)
                     }
-                    kind == DialogKind.PERMISSIONS -> PermissionsPanel(actions, permTick, onAskAddressAgain = { g.updatePrefs { it.copy(addressConsent = "ask") }; onDialog(null) }, onDone = {
+                    v.kind == DialogKind.PERMISSIONS -> PermissionsPanel(actions, permTick, onAskAddressAgain = { g.updatePrefs { it.copy(addressConsent = "ask") }; onDialog(null) }, onDone = {
                         g.store.permissionsAsked = true; g.engine.setPermissionGranted(Perms.anyLocation(ctx)); g.engine.evaluate(); onDialog(if (pendingJoin != null) DialogKind.JOIN else null) })
-                    kind == DialogKind.JOIN -> JoinPanel(pendingJoin, actions, onJoin = { t, n, c, k -> g.joinRoom(t, n, c, k); onPendingJoin(null); onDialog(null) }, onReject = { onPendingJoin(null); onDialog(null) })
-                    kind == DialogKind.SHARE && shareToken != null -> SharePanel(g.rooms.collectAsState().value.firstOrNull { it.token == shareToken }) { onDialog(DialogKind.ROOMS) }
-                    kind == DialogKind.ROOMS -> RoomsPanel(onShare = { onShareToken(it); onDialog(DialogKind.SHARE) }, onNew = { val r = g.createRoom(); onShareToken(r.token); onDialog(DialogKind.SHARE) }, onJoin = { onDialog(DialogKind.JOIN) })
-                    kind == DialogKind.SETTINGS && profile != null -> when (settingsView) {
+                    v.kind == DialogKind.JOIN -> JoinPanel(pendingJoin, actions, onJoin = { t, n, c, k -> g.joinRoom(t, n, c, k); onPendingJoin(null); onDialog(null) }, onReject = { onPendingJoin(null); onDialog(null) })
+                    v.kind == DialogKind.SHARE && v.token != null -> SharePanel(g.rooms.collectAsState().value.firstOrNull { it.token == v.token }) { onDialog(DialogKind.ROOMS) }
+                    v.kind == DialogKind.ROOMS -> RoomsPanel(onShare = { onShareToken(it); onDialog(DialogKind.SHARE) }, onNew = { val r = g.createRoom(); onShareToken(r.token); onDialog(DialogKind.SHARE) }, onJoin = { onDialog(DialogKind.JOIN) })
+                    v.kind == DialogKind.SETTINGS && profile != null -> when (v.view) {
                         "places" -> PlacesPanel(onBack = { onSettingsView("main") }, onPick = onPick)
                         "trails" -> TrailsPanel(onBack = { onSettingsView("main") }, selfTrackClear)
                         else -> SettingsMain(selfColor, onTrails = { onSettingsView("trails") }, onPlaces = { onSettingsView("places") }, onPermissions = { onDialog(DialogKind.PERMISSIONS) }, onResetHints = onResetHints)
@@ -258,6 +259,7 @@ private fun JoinPanel(initial: Invitation?, actions: PermissionActions, onJoin: 
 }
 
 // ───────── Megosztás (QR) ─────────
+private data class DlgView(val kind: DialogKind, val view: String, val exit: Boolean, val token: String?)
 @Composable
 private fun SharePanel(room: SavedRoom?, onDone: () -> Unit) {
     val ctx = LocalContext.current; val g = (ctx.applicationContext as PrivatePlaceApp).graph

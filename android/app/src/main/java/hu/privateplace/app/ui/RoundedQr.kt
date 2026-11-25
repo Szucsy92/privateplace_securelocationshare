@@ -1,6 +1,8 @@
 package hu.privateplace.app.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -24,18 +26,18 @@ fun RoundedQr(value: String, color: Color, modifier: Modifier = Modifier) {
         Array(m.height) { y -> BooleanArray(m.width) { x -> m.get(x, y).toInt() == 1 } }
     }
     val n = cells.size
-    Canvas(modifier.aspectRatio(1f)) {
+    // Egyetlen, méretenként egyszer felépített útvonal: az első rajzolás (a nézetváltás animációjának kezdete) nem akad, nincs kihagyott képkocka
+    Box(modifier.aspectRatio(1f).drawWithCache {
         val u = size.width / n
         fun inFinder(x: Int, y: Int) = (x < 7 && y < 7) || (x >= n - 7 && y < 7) || (x < 7 && y >= n - 7)
-        for (y in 0 until n) for (x in 0 until n) if (cells[y][x] && !inFinder(x, y)) {
-            val p = Path().apply { addRoundRect(RoundRect((x + 0.04f) * u, (y + 0.04f) * u, (x + 0.96f) * u, (y + 0.96f) * u, CornerRadius(0.32f * u))) }
-            drawPath(p, color)
-        }
+        val modules = Path()
+        for (y in 0 until n) for (x in 0 until n) if (cells[y][x] && !inFinder(x, y))
+            modules.addRoundRect(RoundRect((x + 0.04f) * u, (y + 0.04f) * u, (x + 0.96f) * u, (y + 0.96f) * u, CornerRadius(0.32f * u)))
         val finders = Path().apply { fillType = PathFillType.EvenOdd }
         for ((fx, fy) in listOf(0 to 0, n - 7 to 0, 0 to n - 7)) {
             fun rr(x: Float, y: Float, w: Float, h: Float, r: Float) = finders.addRoundRect(RoundRect(x * u, y * u, (x + w) * u, (y + h) * u, CornerRadius(r * u)))
             rr(fx.toFloat(), fy.toFloat(), 7f, 7f, 2f); rr(fx + 1f, fy + 1f, 5f, 5f, 1.2f); rr(fx + 2f, fy + 2f, 3f, 3f, 0.9f)
         }
-        drawPath(finders, color)
-    }
+        onDrawBehind { drawPath(modules, color); drawPath(finders, color) }
+    })
 }

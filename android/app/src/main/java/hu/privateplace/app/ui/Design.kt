@@ -292,10 +292,12 @@ fun Expansion(open: Boolean, content: @Composable ColumnScope.() -> Unit) =
     AnimatedVisibility(open, enter = expandVertically(harmonika()) + fadeIn(tween(ANIM_MS)), exit = shrinkVertically(harmonika()) + fadeOut(tween(160))) { Column(content = content) }
 
 /** Fülváltás / nézetváltás: az új nézet átúszik, a magasság lágyan igazodik. */
+// A régi nézet gyorsan elhalványul, utána úszik be az új (nincs átfedés, nincs „szellemkép”). A magasságot egyedül a GlassDialog
+// `animateContentSize`-a animálja (harmónika); itt ugrik a célméretre, különben két animáció dolgozna egymás ellen.
 @Composable
 fun <T> ViewSwitch(state: T, content: @Composable (T) -> Unit) =
     AnimatedContent(state, transitionSpec = {
-        (fadeIn(tween(ANIM_MS, delayMillis = 60)) togetherWith fadeOut(tween(120))).using(SizeTransform(clip = false) { _, _ -> harmonika() })
+        (fadeIn(tween(ANIM_MS - 40, delayMillis = 90, easing = LinearOutSlowInEasing)) togetherWith fadeOut(tween(90))).using(SizeTransform(clip = false) { _, _ -> snap() })
     }, label = "view") { content(it) }
 
 @Composable
