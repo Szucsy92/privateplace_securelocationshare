@@ -210,7 +210,12 @@ fun LiveMap(
 
     LaunchedEffect(Unit) {
         view.getMapAsync { m ->
-            m.uiSettings.apply { isRotateGesturesEnabled = false; isTiltGesturesEnabled = false; isCompassEnabled = false; isLogoEnabled = false; isAttributionEnabled = true }
+            m.uiSettings.apply { isRotateGesturesEnabled = false; isTiltGesturesEnabled = false; isCompassEnabled = false; isLogoEnabled = false; isAttributionEnabled = true
+                // (i) gomb: a térképkártya jobb alsó sarkában, a jobb és az alsó széltől egyenlő belső margóval
+                val edge = (16 * ctx.resources.displayMetrics.density).toInt()
+                attributionGravity = android.view.Gravity.BOTTOM or android.view.Gravity.END
+                setAttributionMargins(0, 0, edge, edge)
+            }
             m.setMinZoomPreference(2.0)
             m.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder().target(MLatLng(47.4979, 19.0402)).zoom(12.0).build()))
             m.addOnCameraMoveStartedListener { reason ->
