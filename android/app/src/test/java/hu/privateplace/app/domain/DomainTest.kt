@@ -61,6 +61,38 @@ class DomainTest {
         assertEquals("still", last!!.mode)
     }
 
+    @Test fun isolatedIndoorDopplerSpikeDoesNotMoveStationaryAnchor() {
+        val f = DriftFilter(); var t = 1_700_000_000_000L
+        var last: FilteredFix? = null
+        repeat(40) {
+            t += 1000
+            last = f.filter(RawFix(47.5, 19.0, 8.0, 0.0, 0.2, null, t, "gps"))
+        }
+        // Egy beltéri multipath-sebességtüske nem mozdíthatja el a horgonyt.
+        t += 1000
+        last = f.filter(RawFix(47.5, 19.0, 8.0, 3.2, 0.2, null, t, "gps"))
+        assertEquals("still", last!!.mode)
+        repeat(5) {
+            t += 1000
+            last = f.filter(RawFix(47.5, 19.0, 8.0, 0.0, 0.2, null, t, "gps"))
+            assertEquals("still", last!!.mode)
+        }
+    }
+
+    @Test fun repeatedFastDopplerWithoutPositionChangeDoesNotMoveAnchor() {
+        val f = DriftFilter(); var t = 1_700_000_000_000L
+        var last: FilteredFix? = null
+        repeat(40) {
+            t += 1000
+            last = f.filter(RawFix(47.5, 19.0, 8.0, 0.0, 0.2, null, t, "gps"))
+        }
+        repeat(4) {
+            t += 1000
+            last = f.filter(RawFix(47.5, 19.0, 8.0, 3.2, 0.2, null, t, "gps"))
+            assertEquals("still", last!!.mode)
+        }
+    }
+
     @Test fun walkingFixesLeaveStill() {
         val f = DriftFilter(); var t = 1_700_000_000_000L; var lat = 47.5
         var last: FilteredFix? = null

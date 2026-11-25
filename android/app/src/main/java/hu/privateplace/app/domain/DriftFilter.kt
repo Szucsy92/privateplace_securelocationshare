@@ -120,6 +120,8 @@ class DriftFilter {
     private var rms2 = 36.0
     private var stillSince: Long? = null
     private var fastHist = ArrayList<Boolean>()
+    // Egyetlen nagy Doppler-tüske beltérben nem elég a mozgás megállapításához.
+    private var fastDopplerHist = ArrayList<Boolean>()
     private var far = ArrayList<Far>()
     private var pendingFar = ArrayList<PFar>()
     private var recent = ArrayList<Rec>()
@@ -225,13 +227,13 @@ class DriftFilter {
     private fun toMoving(pos: Vec, posVar: Double) {
         mode = Mode.MOVING; stillSince = null
         kx = Axis(pos.x, 0.0, posVar, 0.0, 4.0); ky = Axis(pos.y, 0.0, posVar, 0.0, 4.0)
-        fastHist = ArrayList(); far = ArrayList(); pendingFar = ArrayList(); recent = ArrayList(); acq = ArrayList(); acqStepHits = 0; resetCand()
+        fastHist = ArrayList(); fastDopplerHist = ArrayList(); far = ArrayList(); pendingFar = ArrayList(); recent = ArrayList(); acq = ArrayList(); acqStepHits = 0; resetCand()
     }
     private fun toStill(pos: Vec, spread2: Double, since: Long) {
         mode = Mode.STILL; stillSince = since
         anchor = pos; shown = pos
         rms2 = max(spread2, 9.0)
-        fastHist = ArrayList(); far = ArrayList(); pendingFar = ArrayList(); acq = ArrayList(); acqStepHits = 0; resetCand()
+        fastHist = ArrayList(); fastDopplerHist = ArrayList(); far = ArrayList(); pendingFar = ArrayList(); acq = ArrayList(); acqStepHits = 0; resetCand()
     }
 
     fun filter(fix: RawFix): FilteredFix {
@@ -333,6 +335,8 @@ class DriftFilter {
                 }
             }
             val stepping = fix.stepping == true
+            fastDopplerHist.add(dopplerOk && sp!! >= FAST_SPEED && (fix.acc ?: 999.0) <= 25.0)
+            if (fastDopplerHist.size > 3) fastDopplerHist.removeAt(0)
             val movedRecently = recent.size >= 2 && (
                 // Sebességadat nélküli kétfixes lépésjelzés: nincs Doppler, ezért a horgonyhoz viszonyított elmozdulás is elfogadható.
                 (stepping && !dopplerOk && d >= 0.75 && stepDistance >= 0.65) ||
@@ -354,11 +358,15 @@ class DriftFilter {
             // ~10 m-es körön belül (10–18 m között csak testmozgás-jelzéssel) van (a hibás GPS-jel és a helyben rázkódó telefon így nem látszik mozgásnak, a jelölő nem csúszkál).
             val deadZone = max(STILL_DEADZONE_M, min(DEADZONE_MAX_M, DEADZONE_ACC_K * (fix.acc ?: 10.0)))
             val outsideZone = d >= deadZone && (d >= UNCONFIRMED_ZONE_M || stepping)
-            var leave = (outsideZone && ((fastHist.count { it } >= GO_FIXES && movedRecently) || bothSensors)) || (dopplerOk && sp!! >= FAST_SPEED)
+            // Gyors Doppler csak két egymást követő, megfelelő pontosságú fix és
+            // a horgonytól mért tényleges pozíciós elmozdulás mellett oldhatja fel az álló horgonyt.
+            // Ez kiszűri az ablak melletti multipath okozta sebességtüskéket.
+            val confirmedFastMove = fastDopplerHist.takeLast(2).let { it.size == 2 && it.all { hit -> hit } } && outsideZone && movedRecently
+            var leave = (outsideZone && ((fastHist.count { it } >= GO_FIXES && movedRecently) || bothSensors)) || confirmedFastMove
             val walkLeave = leave && !(dopplerOk && sp!! >= FAST_SPEED)
             var relocate: Vec? = null
             var why = if (leave) {
-                if (dopplerOk && sp!! >= FAST_SPEED) "gyors Doppler (${f1(sp * 3.6)} km/h)"
+                if (confirmedFastMove) "megerősített gyors Doppler és pozíciós elmozdulás (${f1(sp!! * 3.6)} km/h)"
                 else if (bothSensors) "Doppler és járás-jelzés együtt"
                 else "Doppler/járás-jelzés az utolsó 3 fixből ${fastHist.count { it }}-on"
             } else ""
