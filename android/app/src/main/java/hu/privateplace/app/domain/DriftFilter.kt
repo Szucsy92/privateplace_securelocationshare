@@ -24,7 +24,9 @@ data class FilteredFix(
 
 private const val SAT_ACC = 20.0
 private const val ROUGH_ACC = 30.0
-private const val SAT_FRESH_MS = 22000L
+// Durva (hálózati / pontatlan) fixet ennyi ideig a legutóbbi jó műholdas fix után sem fogadunk el: háttérből visszatérve az első fix gyakran
+// ilyen, és hamis helyre ugrasztaná a követést; a műholdas fix megérkezéséig a régi pozíció marad.
+private const val SAT_FRESH_MS = 60000L
 private const val INIT_ROUGH_MS = 8000L
 private const val ACC_FLOOR = 6.0
 private const val ACC_TRUST = 1.3
