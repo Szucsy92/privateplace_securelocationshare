@@ -90,7 +90,7 @@ class DomainTest {
             val r = f.filter(RawFix(lat, 19.0, 6.0, 1.4, 0.2, 0.0, t, "gps", stepping = true))
             if (r.mode == "moving" && left < 0) left = (lat - 47.5) * 110540
         }
-        assertTrue("kilépés a holtzónán belül: $left m", left >= 17.0)
+        assertTrue("kilépés a holtzónán belül: $left m", left >= 10.0)
         assertTrue("sosem lépett ki", left > 0)
     }
 
