@@ -43,7 +43,10 @@ private const val FAR_STILL_MS = 45000L
 private const val WALK_EXIT_METERS = 8.0
 /** Holtzóna az állásból való kilépéshez (járás-jelzés / séta-sebesség / egyirányú elmozdulás): a horgonytól legalább ennyire kell lennie a pozíciónak.
  *  Rossz GPS-jelnél (nagy `acc`) a zóna nő, de legfeljebb [DEADZONE_MAX_M]. Gyors Doppler (autó, bicikli) nem várja meg. */
-private const val STILL_DEADZONE_M = 18.0
+private const val STILL_DEADZONE_M = 10.0
+/** A 10–18 m-es sávban (a régi holtzóna) csak független testmozgás-jelzéssel (gyorsulásmérő járásminta / lépésérzékelő) lépünk ki:
+ *  a GPS-sodródás nem hoz létre lépéseket, így a kisebb zóna mellett sem kapaszkodik bele a hamis jelekbe. */
+private const val UNCONFIRMED_ZONE_M = 18.0
 private const val DEADZONE_ACC_K = 1.5
 private const val DEADZONE_MAX_M = 30.0
 private const val NOISE_K = 2.0
@@ -346,9 +349,9 @@ class DriftFilter {
             // Két független, jó minőségű érzékelő (Doppler + lépés) egyetlen fixből indíthat.
             val bothSensors = dopGo && stepping && (fix.acc ?: 999.0) <= GO_FIX_ACC && sp!! >= 1.3
             // Holtzóna: a járás-jelzés / séta-sebesség / kis elmozdulás önmagában nem visz ki az állásból, amíg a pozíció a horgony körüli
-            // ~18 m-es körön belül van (a hibás GPS-jel és a helyben rázkódó telefon így nem látszik mozgásnak, a jelölő nem csúszkál).
+            // ~10 m-es körön belül (10–18 m között csak testmozgás-jelzéssel) van (a hibás GPS-jel és a helyben rázkódó telefon így nem látszik mozgásnak, a jelölő nem csúszkál).
             val deadZone = max(STILL_DEADZONE_M, min(DEADZONE_MAX_M, DEADZONE_ACC_K * (fix.acc ?: 10.0)))
-            val outsideZone = d >= deadZone
+            val outsideZone = d >= deadZone && (d >= UNCONFIRMED_ZONE_M || stepping)
             var leave = (outsideZone && ((fastHist.count { it } >= GO_FIXES && movedRecently) || bothSensors)) || (dopplerOk && sp!! >= FAST_SPEED)
             val walkLeave = leave && !(dopplerOk && sp!! >= FAST_SPEED)
             var relocate: Vec? = null

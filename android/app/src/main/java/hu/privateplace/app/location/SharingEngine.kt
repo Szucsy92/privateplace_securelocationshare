@@ -42,7 +42,7 @@ class SharingEngine(private val ctx: Context, private val store: Store, private 
     private var physicallyStill = false; private var envWakeUntil = 0L
     private var stepsAllowed = false
     private val sensors = DeviceSensors(ctx, object : SensorListenerOut {
-        override fun onHeading(trueHeading: Double) { compass = trueHeading }
+        override fun onHeading(trueHeading: Double) { compass = trueHeading; updateLiveHeading(trueHeading) }
         override fun onWalking(walking: Boolean) { stepping = walking }
         override fun onPhysicallyStill(still: Boolean) { physicallyStill = still; _state.update { it.copy(physicallyStill = still) } }
         override fun onSignificantMotion() { motionWake() }
@@ -59,6 +59,17 @@ class SharingEngine(private val ctx: Context, private val store: Store, private 
         if (curInterval > ACTIVE_GPS_MS && shouldTrack()) restartWithInterval(ACTIVE_GPS_MS)
     }
     private var lastMagneticFix: LatLng? = null
+
+    /** Saját irány a térképnek: lassú mozgásnál/állva az iránytű mintaütemében (~30 Hz) simítva, nem csak fixenként (1 mp) frissül,
+     *  így a követő kamera forgatása folyamatos. Gyors mozgásnál a GPS-irány (onFix). */
+    @Volatile var liveHeading: Double? = null; private set
+    private var liveHeadingAt = 0L
+    private fun updateLiveHeading(raw: Double) {
+        if (headingState.source == HeadingSource.GPS && headingState.angle != null) return
+        val t = android.os.SystemClock.elapsedRealtime(); val dt = (t - liveHeadingAt).coerceIn(1L, 200L); liveHeadingAt = t
+        val prev = liveHeading
+        liveHeading = if (prev == null) raw else ((smoothAngle(prev, raw, 1 - Math.exp(-dt / 150.0)) % 360) + 360) % 360
+    }
 
     /** Lépésérzékelő (ACTIVITY_RECOGNITION) engedély állapota; változáskor az érzékelők újraindulnak. */
     fun setStepsAllowed(a: Boolean) { if (a == stepsAllowed) return; stepsAllowed = a; if (_state.value.tracking) { sensors.stop(); sensors.start(a); _state.update { it.copy(hasStepSensor = sensors.hasStepDetector) } } }
@@ -125,6 +136,7 @@ class SharingEngine(private val ctx: Context, private val store: Store, private 
             sensors.declination = android.hardware.GeomagneticField(f.lat.toFloat(), f.lng.toFloat(), 0f, now).declination.toDouble()
         }
         headingState = hybridHeading(headingState, f.speed, f.bearing, compass)
+        if (headingState.source == HeadingSource.GPS && headingState.angle != null) liveHeading = headingState.angle
         transportState = updateTransport(transportState, f.speed, now, _state.value.manualTransport)
         anchorForWake = f.anchor
         val s = _state.value

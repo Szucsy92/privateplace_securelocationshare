@@ -19,7 +19,8 @@ fun lerpPoint(a: LatLng, b: LatLng, k: Double): LatLng {
 }
 
 fun animationDurationMs(prevT: Long?, nextT: Long): Long =
-    if (prevT == null) 800 else (nextT - prevT).coerceIn(400, 2000)
+    // 25%-kal hosszabb a mérések közti időnél: a következő fix még az animáció közben érkezik, így a jelölő nem áll meg és nem lép
+    if (prevT == null) 800 else ((nextT - prevT) * 5 / 4).coerceIn(500, 2500)
 
 /** Távolság méterben (haversine). */
 fun distanceMeters(a: LatLng, b: LatLng): Double {

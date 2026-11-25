@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import hu.privateplace.app.PrivatePlaceApp
 import hu.privateplace.app.domain.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -173,6 +174,8 @@ fun LiveMap(
     var didCenter by remember { mutableStateOf(false) }
     val peopleNow by rememberUpdatedState(people); val followNow by rememberUpdatedState(follow); val orientNow by rememberUpdatedState(orientation)
     val selectedNow by rememberUpdatedState(selected)
+    val engine = remember { (ctx.applicationContext as PrivatePlaceApp).graph.engine }
+    fun headingOf(id: String, self: Boolean): Double? = if (self) engine.liveHeading ?: headings[id] else headings[id]
 
     LaunchedEffect(Unit) {
         view.getMapAsync { m ->
@@ -245,7 +248,7 @@ fun LiveMap(
     // Animáció- és követési ciklus (a webes step())
     LaunchedEffect(map, ready) {
         val m = map ?: return@LaunchedEffect; if (!ready) return@LaunchedEffect
-        var lastStep = 0L
+        var lastStep = 0L; var lastFrame = 0L
         while (true) withFrameMillis { nowMs ->
             val style = m.style ?: return@withFrameMillis
             var animating = false
@@ -253,6 +256,7 @@ fun LiveMap(
             val idle = !animating && !camMoving && followNow == null && !flying && !(orientNow == "north" && abs(m.cameraPosition.bearing) > 0.05)
             if (idle && selectedNow == null && nowMs - lastStep < 66) return@withFrameMillis
             lastStep = nowMs
+            val dt = if (lastFrame == 0L) 16.0 else (nowMs - lastFrame).coerceIn(1L, 100L).toDouble(); lastFrame = nowMs
             val tNow = System.nanoTime() / 1_000_000
             for (s in markers.values) {
                 val to = s.animTo ?: continue; val from = s.animFrom ?: continue
@@ -267,7 +271,7 @@ fun LiveMap(
                 val s = markers[p.id] ?: continue
                 val pt = m.projection.toScreenLocation(MLatLng(s.lat, s.lng))
                 s.sx = pt.x; s.sy = pt.y
-                val h = headings[p.id]
+                val h = headingOf(p.id, p.isSelf)
                 s.rot = if (orientNow == "heading" && h != null) (h - bearing).toFloat() else Float.NaN
             }
             // Buborék helye
@@ -279,19 +283,20 @@ fun LiveMap(
             val f = followNow; val o = orientNow
             if (f != null) {
                 val s = markers[f.id] ?: return@withFrameMillis
-                val target = if (o == "heading") (headings[f.id] ?: bearing) else 0.0
+                val target = if (o == "heading") (headingOf(f.id, peopleNow.any { it.id == f.id && it.isSelf }) ?: bearing) else 0.0
                 if (holdUntil != 0L) {
                     if (System.currentTimeMillis() < holdUntil) return@withFrameMillis
                     holdUntil = 0; flying = true
                     m.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(m.cameraPosition).target(MLatLng(s.lat, s.lng)).bearing(target).build()), 900)
                     return@withFrameMillis
                 }
-                val nb = if (abs(target - bearing) < 0.05) target else smoothAngle(bearing, target, 0.07)
+                // Időalapú (képkocka-függetlenül egyenletes) simítás + 0,4°-os holttartomány: nincs lépcsőzés és remegés
+                val nb = if (abs(angleDelta(bearing, target)) < 0.4) bearing else smoothAngle(bearing, target, 1 - Math.exp(-dt / 220.0))
                 val c = m.cameraPosition.target!!
                 if (abs(c.latitude - s.lat) > 1e-8 || abs(c.longitude - s.lng) > 1e-8 || nb != bearing)
                     m.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(m.cameraPosition).target(MLatLng(s.lat, s.lng)).bearing(nb).build()))
             } else if (o == "north" && abs(bearing) > 0.05)
-                m.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(m.cameraPosition).bearing(smoothAngle(bearing, 0.0, 0.12)).build()))
+                m.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(m.cameraPosition).bearing(smoothAngle(bearing, 0.0, 1 - Math.exp(-dt / 150.0))).build()))
         }
     }
     // Új követési kérés: lágy kameramozgással odacsúszik (a webes flyTo, 1,4 mp); a hold törlődik.

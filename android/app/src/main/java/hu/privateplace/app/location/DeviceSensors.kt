@@ -62,7 +62,7 @@ class DeviceSensors(private val ctx: Context, private val out: SensorListenerOut
             val now = System.currentTimeMillis()
             when (e.sensor.type) {
                 Sensor.TYPE_ROTATION_VECTOR -> {
-                    if (e.accuracy == SensorManager.SENSOR_STATUS_UNRELIABLE || now - lastHeadingAt < 100) return
+                    if (e.accuracy == SensorManager.SENSOR_STATUS_UNRELIABLE || now - lastHeadingAt < 33) return   // ~30 Hz
                     lastHeadingAt = now
                     SensorManager.getRotationMatrixFromVector(rot, e.values); emitHeading(rot)
                 }
@@ -97,7 +97,7 @@ class DeviceSensors(private val ctx: Context, private val out: SensorListenerOut
         if (running) return; running = true
         val rv = sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
         hasRotationVector = rv != null
-        if (rv != null) sm.registerListener(listener, rv, SensorManager.SENSOR_DELAY_UI)
+        if (rv != null) sm.registerListener(listener, rv, SensorManager.SENSOR_DELAY_GAME)
         else {
             sm.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)?.let { sm.registerListener(listener, it, SensorManager.SENSOR_DELAY_UI) }
         }
