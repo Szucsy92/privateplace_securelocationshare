@@ -107,7 +107,7 @@ fun DialogHost(
                             TextBtn("Kilépés", onExit, variant = Variant.Destructive, icon = "log-out")
                         }
                     }
-                    kind == DialogKind.WELCOME -> ProfileForm(null, "Kezdés", title = "Üdv a Private Place-ben",
+                    v.kind == DialogKind.WELCOME -> ProfileForm(null, "Kezdés", title = "Üdv a Private Place-ben",
                         description = "Nincs regisztráció és nincs jelszó. A neved és a képed csak ezen a telefonon tárolódik, és csak a szobatársaid látják.") { p ->
                         g.saveProfile(p); onDialog(if (g.store.permissionsAsked) (if (pendingJoin != null) DialogKind.JOIN else null) else DialogKind.PERMISSIONS)
                     }

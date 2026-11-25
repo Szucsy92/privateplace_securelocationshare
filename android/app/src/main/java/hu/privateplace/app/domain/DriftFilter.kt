@@ -24,9 +24,10 @@ data class FilteredFix(
 
 private const val SAT_ACC = 20.0
 private const val ROUGH_ACC = 30.0
-// Durva (hálózati / pontatlan) fixet ennyi ideig a legutóbbi jó műholdas fix után sem fogadunk el: háttérből visszatérve az első fix gyakran
-// ilyen, és hamis helyre ugrasztaná a követést; a műholdas fix megérkezéséig a régi pozíció marad.
-private const val SAT_FRESH_MS = 60000L
+private const val SAT_FRESH_MS = 22000L
+// Hosszú szünet (pl. háttérből visszatérés) után a durva (hálózati / pontatlan) fix nem indíthatja újra a követést: a műholdas fixre várunk;
+// ha ennyi ideig csak durva fix jön (pl. beltér), akkor elfogadjuk.
+private const val ROUGH_RESEED_MS = 25000L
 private const val INIT_ROUGH_MS = 8000L
 private const val ACC_FLOOR = 6.0
 private const val ACC_TRUST = 1.3
@@ -114,6 +115,7 @@ class DriftFilter {
     private var mode = Mode.INIT
     private var kx: Axis? = null; private var ky: Axis? = null
     private var lastAt: Long? = null; private var lastSatAt: Long? = null; private var initRoughAt: Long? = null
+    private var roughGapAt: Long? = null
     private var last: FilteredFix? = null
     private var lastBearing: Double? = null
     private var anchor = Vec(0.0, 0.0); private var shown = Vec(0.0, 0.0)
@@ -239,13 +241,17 @@ class DriftFilter {
     fun filter(fix: RawFix): FilteredFix {
         val at = fix.at ?: System.currentTimeMillis()
         val prevLast = last
-        if (lastAt != null && at <= lastAt!! && prevLast != null) return prevLast.copy()
-
+        // Azonos / régebbi időbélyegű fixet az engine eldobja (különben az állapot ideje visszalépne, és elfogyasztaná a küldési időkeretet)
+        if (lastAt != null && at <= lastAt!! && prevLast != null) return prevLast.copy(dropped = true)
         // 1) Pontosság-hierarchia
         val satQuality = fix.src != "network" && fix.acc != null && fix.acc < SAT_ACC
         val rough = fix.src == "network" || fix.acc == null || fix.acc > ROUGH_ACC
         val satFresh = lastSatAt != null && at - lastSatAt!! < SAT_FRESH_MS
         if (rough && satFresh && prevLast != null) return prevLast.copy(at = at, note = null, dropped = true)
+        if (lastAt != null && at - lastAt!! > GAP_RESET_MS && rough && prevLast != null) {
+            if (roughGapAt == null) roughGapAt = at
+            if (at - roughGapAt!! < ROUGH_RESEED_MS) return prevLast.copy(at = at, note = null, dropped = true)
+        } else roughGapAt = null
         if (satQuality) lastSatAt = max(lastSatAt ?: at, at)
 
         if (!haveOrigin) { lat0 = fix.lat; lng0 = fix.lng; haveOrigin = true }
@@ -370,8 +376,8 @@ class DriftFilter {
                 else if (bothSensors) "Doppler és járás-jelzés együtt"
                 else "Doppler/járás-jelzés az utolsó 3 fixből ${fastHist.count { it }}-on"
             } else ""
-
-            val farThr = max(FAR_M, 3 * min(25.0, max(fix.acc ?: 15.0, rms)))
+            // Durva fix (pl. mobilcella, acc ≥ 100 m) csak akkor „távoli”, ha a horgonytól mért távolsága meghaladja a saját bizonytalanságát is
+            val farThr = max(max(FAR_M, 3 * min(25.0, max(fix.acc ?: 15.0, rms))), fix.acc ?: 0.0)
             if (!leave) {
                 if (d > farThr) {
                     if (far.isNotEmpty()) { val fc = mean(far.map { it.p }); if (hypot(z.x - fc.x, z.y - fc.y) > FAR_AGREE_M) far = ArrayList() }
@@ -476,7 +482,7 @@ class DriftFilter {
             val v0 = if (sp != null && fix.bearing != null && sp >= GO_SPEED)
                 Vec(sp * sin(Math.toRadians(fix.bearing)), sp * cos(Math.toRadians(fix.bearing))) else Vec(0.0, 0.0)
             // Holtzónán túli járásnál az aktuális pozícióról indul a követés (nem a ~18 m-re lévő horgonyról), így nincs visszacsúszás
-            var start: Vec = relocate ?: if (walkLeave) z else anchor
+            var start: Vec = relocate ?: if (walkLeave || confirmedFastMove) z else anchor   // megerősített gyors mozgásnál a horgony már ≥ holtzóna-távolságra van
             var startVar = if (relocate != null) sigma * sigma else max(rms2, 9.0)
             if (relocate == null && cand.size >= CAND_START_FIXES && at - cand.last().at <= 15000) {
                 val cc = candCenter(); val cr = rmsAround(cand.map { it.p }, cc)
