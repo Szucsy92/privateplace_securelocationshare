@@ -27,6 +27,8 @@ class MainActivity : ComponentActivity() {
     private val locLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { refreshPerms() }
     private val bgLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { refreshPerms() }
     private val notifLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { refreshPerms() }
+    private val motionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { refreshPerms() }
+    private val nearbyLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { refreshPerms() }
     private val camLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) afterCamera?.invoke(); afterCamera = null }
 
     private val appVisible = object : DefaultLifecycleObserver {
@@ -34,7 +36,7 @@ class MainActivity : ComponentActivity() {
         override fun onStop(owner: LifecycleOwner) { graph.engine.setVisible(false) }
     }
 
-    private fun refreshPerms() { graph.engine.setPermissionGranted(Perms.anyLocation(this)); permTick.intValue++ }
+    private fun refreshPerms() { graph.engine.setPermissionGranted(Perms.anyLocation(this)); graph.engine.setStepsAllowed(Perms.motion(this)); permTick.intValue++ }
 
     private val actions by lazy {
         PermissionActions(
@@ -42,6 +44,8 @@ class MainActivity : ComponentActivity() {
             // Android 11+: a háttérhelyzetet külön, a helyengedély után kell kérni (a rendszer a beállításokra irányíthat)
             requestBackground = { if (Build.VERSION.SDK_INT >= 29) { if (!Perms.fine(this)) locLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) else bgLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) } },
             requestNotifications = { if (Build.VERSION.SDK_INT >= 33) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) else Perms.openSettings(this) },
+            requestMotion = { if (Build.VERSION.SDK_INT >= 29) motionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION) },
+            requestNearby = { if (Build.VERSION.SDK_INT >= 31) nearbyLauncher.launch(Manifest.permission.BLUETOOTH_SCAN) else locLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) },
             requestCamera = { then -> if (Perms.camera(this)) then() else { afterCamera = then; camLauncher.launch(Manifest.permission.CAMERA) } },
         )
     }

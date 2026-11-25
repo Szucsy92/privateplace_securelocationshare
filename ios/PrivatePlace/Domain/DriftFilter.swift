@@ -39,7 +39,7 @@ private final class Axis { var p: Double, v: Double, Ppp: Double, Ppv: Double, P
 private struct WP { var p: Vec; var w: Double }
 private struct Rec { var p: Vec; var w: Double; var at: Int64; var speed: Double? }
 private struct Acq { var p: Vec; var w: Double; var at: Int64; var speed: Double?; var acc: Double }
-private struct Far { var p: Vec; var at: Int64; var dopStill: Bool; var afterGap: Bool }
+private struct Far { var p: Vec; var at: Int64; var dopStill: Bool; var dopplerKnown: Bool; var afterGap: Bool }
 private struct PFar { var p: Vec; var at: Int64; var acc: Double? }
 private struct Cand { var p: Vec; var at: Int64; var acc: Double }
 private struct Cluster { var c: Vec; var inl: [Acq]; var rms: Double }
@@ -235,14 +235,46 @@ final class DriftFilter {
             recent.append(Rec(p: z, w: w, at: at, speed: sp)); if recent.count > 8 { recent.removeFirst() }
             let dopStill = dopplerOk && sp! < STILL_SPEED
             if dopStill || (dopplerOk && sp! >= FAST_SPEED) { dopDistrust = false }
+            let previous: Rec? = recent.count >= 2 ? recent[recent.count - 2] : nil
+            let stepDistance = previous.map { dist(z, $0.p) } ?? 0
             let back = recent[max(0, recent.count - 6)]
-            let movedRecently = recent.count >= 4 && dist(z, back.p) >= max(STEP_MOVE_MIN_M, STEP_MOVE_ACC_K * (fix.acc ?? 6))
-            let dopGo = dopplerOk && sp! >= GO_SPEED && !(dopDistrust && sp! < FAST_SPEED) && (sp! >= FAST_SPEED || movedRecently || fix.stepping == true)
-            let stepEv = fix.stepping == true && !dopStill && (!dopplerOk || movedRecently)
+            let stepping = fix.stepping == true
+            // Lépésjelzés + köztes Doppler esetén legalább 4 egymást követő pozícióból való, egyirányú előrehaladás kell.
+            let walkWindow = Array(recent.suffix(4))
+            var progressiveWalk = false
+            if walkWindow.count == 4 {
+                let first = walkWindow[0].p, last = walkWindow[3].p
+                let vx = last.x - first.x, vy = last.y - first.y
+                let length = hyp(vx, vy)
+                if length >= max(1.2, 0.2 * (fix.acc ?? 6)) {
+                    let ux = vx / length, uy = vy / length
+                    let projections = walkWindow.map { ($0.p.x - first.x) * ux + ($0.p.y - first.y) * uy }
+                    var forwardSteps = 0
+                    for i in 1..<projections.count where projections[i] - projections[i - 1] >= 0.2 { forwardSteps += 1 }
+                    var monotone = true
+                    for i in 1..<projections.count where projections[i] < projections[i - 1] - 0.2 { monotone = false }
+                    let lateralSum = walkWindow.reduce(0.0) { sum, r in
+                        let cross = -(r.p.x - first.x) * uy + (r.p.y - first.y) * ux
+                        return sum + cross * cross
+                    }
+                    let lateral = (lateralSum / Double(walkWindow.count)).squareRoot()
+                    progressiveWalk = forwardSteps >= 3 && monotone && lateral <= 0.6 * length
+                }
+            }
+            let movedRecently = recent.count >= 2 && (
+                (stepping && !dopplerOk && dist(z, anchor) >= 0.75 && stepDistance >= 0.65) ||
+                (!stepping && dist(z, anchor) >= max(1.5, 0.25 * (fix.acc ?? 6)) && stepDistance >= 0.65) ||
+                ((stepping && dopplerOk) ? progressiveWalk
+                    : (recent.count >= 4 && dist(z, back.p) >= max(STEP_MOVE_MIN_M, STEP_MOVE_ACC_K * (fix.acc ?? 6))))
+            )
+            // Az 1,4 m/s körüli, helyben is gyakori hamis Doppler csak pozíciós megerősítéssel számít.
+            let dopGo = dopplerOk && sp! >= GO_SPEED && !(dopDistrust && sp! < FAST_SPEED) && (sp! < 1.4 || movedRecently || stepping)
+            let stepEv = stepping && !dopStill && (!dopplerOk || movedRecently)
             fastHist.append(dopGo || stepEv); if fastHist.count > 3 { fastHist.removeFirst() }
-            let bothSensors = dopGo && fix.stepping == true && (fix.acc ?? 999) <= GO_FIX_ACC
+            // Két független, jó minőségű érzékelő (Doppler + lépés) egyetlen fixből indíthat.
+            let bothSensors = dopGo && stepping && (fix.acc ?? 999) <= GO_FIX_ACC && sp! >= 1.3
             let hits = fastHist.filter { $0 }.count
-            var leave = hits >= GO_FIXES || (dopplerOk && sp! >= FAST_SPEED) || bothSensors
+            var leave = (hits >= GO_FIXES && movedRecently) || (dopplerOk && sp! >= FAST_SPEED) || bothSensors
             var relocate: Vec?
             var why = ""
             if leave {
@@ -254,10 +286,14 @@ final class DriftFilter {
             if !leave {
                 if d > farThr {
                     if !far.isEmpty { let fc = mean(far.map { $0.p }); if dist(z, fc) > FAR_AGREE_M { far = [] } }
-                    far.append(Far(p: z, at: at, dopStill: dopStill, afterGap: prevAt != nil && at - prevAt! > 20000))
+                    far.append(Far(p: z, at: at, dopStill: dopStill, dopplerKnown: dopplerOk, afterGap: prevAt != nil && at - prevAt! > 20000))
                     let allStill = far.allSatisfy { $0.dopStill }
+                    let allNoDoppler = far.allSatisfy { !$0.dopplerKnown }
+                    let afterGapPair = allNoDoppler && far[0].afterGap && far.count >= 2
+                    let noSpeedCluster = allNoDoppler && (afterGapPair || far.count >= 3)
                     let stillCount = min(15, Int((Double(FAR_STILL_MS) / 1000 / dtS).rounded(.up)))
-                    if allStill && far.count >= stillCount && at - far[0].at >= FAR_STILL_MS {
+                    // Doppler-állásnál 45 s védelem kell a multipath ellen; sebességadat nélkül három egyező távoli fix elég.
+                    if (allStill && far.count >= stillCount && at - far[0].at >= FAR_STILL_MS) || noSpeedCluster {
                         relocate = mean(far.map { $0.p }); leave = true
                         why = "a pozíció tartósan \(f1(dist(relocate!, anchor))) m-re van a horgonytól (\(far.count) egyező fix)"
                     }
@@ -336,7 +372,7 @@ final class DriftFilter {
                 return emit(fix, toLL(shown), at, hasSpeed: true, speed: 0, hasBearing: true, bearing: lastBearing)
             }
             say("Kilépés az állásból: \(why)")
-            if let rl = relocate, !far.isEmpty, far.allSatisfy({ $0.dopStill }) {
+            if let rl = relocate, !far.isEmpty, far.allSatisfy({ $0.dopStill || !$0.dopplerKnown }) {
                 say("Áthelyeződés \(f1(dist(rl, anchor))) m-rel (a Doppler végig állást mondott)")
                 toStill(rl, rms2, far[0].at)
                 lastAt = at

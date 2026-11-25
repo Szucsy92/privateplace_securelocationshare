@@ -15,6 +15,9 @@ data class SelfState(
     val sharing: Boolean = false, val sharingSince: Long? = null, val battery: Int? = null,
     val tracking: Boolean = false, val error: String? = null, val gpsIntervalMs: Long = ACTIVE_GPS_MS,
     val placeShiftM: Double = 0.0,
+    /** Érzékelők: fizikailag mozdulatlan-e a telefon, és milyen hálózaton van (Wi-Fi / mobiladat). */
+    val physicallyStill: Boolean = false, val net: NetKind = NetKind.NONE, val metered: Boolean = false,
+    val hasStepSensor: Boolean = false,
 )
 
 /**
@@ -36,7 +39,29 @@ class SharingEngine(private val ctx: Context, private val store: Store, private 
     private var lastSent = 0L; private var curInterval = ACTIVE_GPS_MS
     private var places: List<Place> = store.loadPlaces()
     private var anchorForWake: LatLng? = null
-    private val sensors = DeviceSensors(ctx, { compass = it }, { stepping = it }, { b -> _state.update { it.copy(battery = b) } })
+    private var physicallyStill = false; private var envWakeUntil = 0L
+    private var stepsAllowed = false
+    private val sensors = DeviceSensors(ctx, object : SensorListenerOut {
+        override fun onHeading(trueHeading: Double) { compass = trueHeading }
+        override fun onWalking(walking: Boolean) { stepping = walking }
+        override fun onPhysicallyStill(still: Boolean) { physicallyStill = still; _state.update { it.copy(physicallyStill = still) } }
+        override fun onSignificantMotion() { motionWake() }
+        override fun onBattery(percent: Int?) { _state.update { it.copy(battery = percent) } }
+    })
+    private val env = EnvironmentSignals(ctx, { kind, metered, regained ->
+        _state.update { it.copy(net = kind, metered = metered) }
+        if (regained) peers().wake()          // Wi-Fi ↔ mobiladat váltás: újracsatlakozás + újraközlés
+    }, { motionWake() })
+
+    /** Mozgásra utaló, GPS-től független jel (jelentős mozgás, Wi-Fi/cella/Bluetooth-környezet változás): ritkított mérésből azonnal 1 mp. */
+    private fun motionWake() {
+        envWakeUntil = System.currentTimeMillis() + 60_000
+        if (curInterval > ACTIVE_GPS_MS && shouldTrack()) restartWithInterval(ACTIVE_GPS_MS)
+    }
+    private var lastMagneticFix: LatLng? = null
+
+    /** Lépésérzékelő (ACTIVITY_RECOGNITION) engedély állapota; változáskor az érzékelők újraindulnak. */
+    fun setStepsAllowed(a: Boolean) { if (a == stepsAllowed) return; stepsAllowed = a; if (_state.value.tracking) { sensors.stop(); sensors.start(a); _state.update { it.copy(hasStepSensor = sensors.hasStepDetector) } } }
 
     fun setPlaces(p: List<Place>) { places = p }
     fun setPermissionGranted(g: Boolean) { granted = g; evaluate() }
@@ -61,16 +86,16 @@ class SharingEngine(private val ctx: Context, private val store: Store, private 
 
     private fun startTracking(interval: Long) {
         if (job?.isActive == true) return
-        sensors.start()
-        _state.update { it.copy(tracking = true, error = null) }
+        sensors.start(stepsAllowed); env.start()
+        _state.update { it.copy(tracking = true, error = null, hasStepSensor = sensors.hasStepDetector) }
         job = scope.launch {
-            location.fixes(interval).catch { e -> _state.update { s -> s.copy(error = if (e is SecurityException) "denied" else "error") } }
+            location.fixes(interval) { visible }.catch { e -> _state.update { s -> s.copy(error = if (e is SecurityException) "denied" else "error") } }
                 .collect { onFix(it) }
         }
     }
 
     private fun stopTracking() {
-        job?.cancel(); job = null; sensors.stop()
+        job?.cancel(); job = null; sensors.stop(); env.stop(); physicallyStill = false
         filter = DriftFilter(); anchorForWake = null; recentFixes.clear()
         _state.update { it.copy(tracking = false) }
     }
@@ -86,12 +111,19 @@ class SharingEngine(private val ctx: Context, private val store: Store, private 
         val now = System.currentTimeMillis()
         val at = raw.at ?: now
         if (now - at > 30_000 || at > now + 60_000 || !raw.lat.isFinite() || !raw.lng.isFinite()) return
-        val f = filter.filter(raw.copy(stepping = stepping))
+        // Járás-jelzés: gyorsulásmérős járásminta VAGY friss lépésesemény (a lépésérzékelő független, alacsony fogyasztású bizonyíték)
+        val stepEvidence = stepping || sensors.steps.active(now)
+        val f = filter.filter(raw.copy(stepping = stepEvidence))
         if (f.dropped) return
         val still = f.mode == "still"
         if (still) recentFixes.addLast(FixLite(raw.lat, raw.lng, raw.acc)) else recentFixes.clear()
         while (recentFixes.size > 40) recentFixes.removeFirst()
         val applied = applyPlaces(places, LatLng(f.lat, f.lng))
+        // Mágneses elhajlás: az iránytű a valódi északhoz igazítva (a pozíció ismeretében, ritkán frissítve)
+        if (lastMagneticFix == null || distanceMeters(lastMagneticFix!!, LatLng(f.lat, f.lng)) > 20_000) {
+            lastMagneticFix = LatLng(f.lat, f.lng)
+            sensors.declination = android.hardware.GeomagneticField(f.lat.toFloat(), f.lng.toFloat(), 0f, now).declination.toDouble()
+        }
         headingState = hybridHeading(headingState, f.speed, f.bearing, compass)
         transportState = updateTransport(transportState, f.speed, now, _state.value.manualTransport)
         anchorForWake = f.anchor
@@ -107,9 +139,10 @@ class SharingEngine(private val ctx: Context, private val store: Store, private 
                 next.sharingSince, f.stoppedSince, transportState.mode))   // eredeti mérési idő: elavult mérést nem álcázunk frissnek
         }
         // Energia: látható képernyőnél 1 mp; háttérben néző nélkül 5 mp; tartósan állva néző mellett 3 mp.
-        val calm = still && f.stoppedSince != null && now - f.stoppedSince >= CALM_AFTER_MS
+        // Csak akkor ritkítunk, ha a telefon fizikailag sem mozog (testmozgás-érzékelő), és nem jött friss mozgásjel.
+        val calm = still && f.stoppedSince != null && now - f.stoppedSince >= CALM_AFTER_MS && !stepEvidence && now > envWakeUntil
         var want = desiredGpsIntervalMs(PowerContext(visible, next.sharing, pm.hasViewers(), calm))
-        if (want > ACTIVE_GPS_MS && movementWake(f.lat, f.lng, raw.speed, raw.acc, f.anchor)) want = ACTIVE_GPS_MS
+        if (want > ACTIVE_GPS_MS && (stepEvidence || now <= envWakeUntil || movementWake(f.lat, f.lng, raw.speed, raw.acc, f.anchor))) want = ACTIVE_GPS_MS
         restartWithInterval(want)
     }
 

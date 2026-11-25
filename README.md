@@ -9,7 +9,7 @@ ios/       XcodeGen projekt (project.yml) – `cd ios && xcodegen generate`
 
 ## ⚠️ Állapot – olvasd el először
 
-Ezt a kódbázist **nem fordítottam le és nem futtattam** (nem volt Android SDK / Xcode a környezetben). Amit ténylegesen ellenőriztem:
+Ezt a kódbázist **nem fordítottam le és nem futtattam** (a legutóbbi módosítások sem: nem volt Kotlin-fordító/Android SDK) (nem volt Android SDK / Xcode a környezetben). Amit ténylegesen ellenőriztem:
 - a BIP‑340 Schnorr-implementáció referencia-algoritmussal azonos kimenetet ad a hivatalos 0. tesztvektorra;
 - a zárójelek/blokkok párosak.
 
@@ -44,6 +44,25 @@ Mindenkinek át kell állnia az új appra. A szobakódok/QR-formátum (`TOKEN` v
 | Cím lekérés (beleegyezéssel) | ✅ | ✅ |
 | Térkép | MapLibre Native | MapLibre Native |
 | Privát kulcs tárolása | alkalmazás-privát tároló (PKCS#8) | Keychain |
+
+
+## Érzékelők és hálózat (Android) – a webes változatnál többet használ
+
+| Forrás | Mire használjuk | Engedély |
+|---|---|---|
+| **Iránytű** (forgatásvektor) | A kijelző-forgatáshoz igazítva (fekvő módban is jó), **mágneses elhajlással valódi északra korrigálva**; ha nincs forgatásvektor, gyorsulásmérő + mágnesesmező tartalék | – |
+| **Gyorsulásmérő** | Járásminta (RMS + lépésütem) → `stepping` a drift-szűrőnek; **fizikai mozdulatlanság** (nem mozog a telefon → nem ritkítunk tévesen, a GPS-zaj nem mozgás) | – |
+| **Lépésérzékelő** | Független, kis fogyasztású lépésbizonyíték (2,5 mp-es ablak) a gyorsulásmérős járás mellé | ACTIVITY_RECOGNITION |
+| **Jelentős mozgás** (hardveres trigger) | Ritkított (3–5 mp) GPS-ből azonnal vissza 1 mp-re | – |
+| **Wi-Fi ↔ mobiladat** | Hálózatváltásnál / visszatérésnél azonnali P2P újracsatlakozás és újraközlés (`peers.wake()`) | ACCESS_NETWORK_STATE |
+| **Wi-Fi hozzáférési pontok, mobilcellák, közeli Bluetooth LE eszközök** | Környezeti ujjlenyomat: ha legalább két csatorna érdemben megváltozik → mozgásjel (csak az energia-ütemezést gyorsítja, a megjelenített pozíciót nem módosítja). Az azonosítók eszközön belüli, sózott, rövid életű hash-ek; nem tárolódnak és nem hagyják el a telefont | helyengedély, BLUETOOTH_SCAN (Android 12+) |
+| **Helyszolgáltató** | Fused (GPS + Wi-Fi + cella); **Google Play szolgáltatások nélkül** a platform GPS/hálózati szolgáltatójára vált; szimulált fixek eldobása; Doppler nélküli 0 sebesség = ismeretlen; forrásonkénti időbélyeg; 10 mp-es fix-hiánynál újrapróbálkozás | helyengedély |
+
+A drift-szűrő (`DriftFilter.kt` / `DriftFilter.swift`) a `stationary.ts` **2026-11-16-i** változatával van szinkronban (haladó járás-ablak, Doppler nélküli távoli klaszter, 1,4 m/s hamis Doppler elleni védelem). Egységtesztek: `MotionTest.kt`.
+
+Az új engedélyek az Engedélyek panelen külön sorként jelennek meg („Mozgásérzékelés”, „Közeli eszközök”); egyik sem kötelező, hiányukban az app a korábbi módon működik.
+
+**iOS:** ebben a körben csak a drift-szűrő szinkron készült el; a CoreMotion (lépésszámláló/aktivitás) és `NWPathMonitor` bekötése még hátravan.
 
 ## Ami nincs portolva
 

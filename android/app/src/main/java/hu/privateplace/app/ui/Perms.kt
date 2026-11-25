@@ -17,9 +17,14 @@ object Perms {
     fun background(c: Context) = Build.VERSION.SDK_INT < 29 || has(c, Manifest.permission.ACCESS_BACKGROUND_LOCATION)
     fun notifications(c: Context) = (Build.VERSION.SDK_INT < 33 || has(c, Manifest.permission.POST_NOTIFICATIONS)) && NotificationManagerCompat.from(c).areNotificationsEnabled()
     fun camera(c: Context) = has(c, Manifest.permission.CAMERA)
+    /** Lépésérzékelő: Android 10+ futásidejű engedély; régebbin nincs rá szükség. */
+    fun motion(c: Context) = Build.VERSION.SDK_INT < 29 || has(c, Manifest.permission.ACTIVITY_RECOGNITION)
+    /** Közeli eszközök (Bluetooth LE): Android 12+: BLUETOOTH_SCAN; régebbin a helyengedély elég. */
+    fun nearby(c: Context) = if (Build.VERSION.SDK_INT >= 31) has(c, Manifest.permission.BLUETOOTH_SCAN) else anyLocation(c)
     fun openSettings(c: Context) = c.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${c.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     fun openBatterySettings(c: Context) = c.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
 
 /** Az Activity által adott engedélykérő műveletek. */
-class PermissionActions(val requestLocation: () -> Unit, val requestBackground: () -> Unit, val requestNotifications: () -> Unit, val requestCamera: (() -> Unit) -> Unit)
+class PermissionActions(val requestLocation: () -> Unit, val requestBackground: () -> Unit, val requestNotifications: () -> Unit, val requestCamera: (() -> Unit) -> Unit,
+    val requestMotion: () -> Unit = {}, val requestNearby: () -> Unit = {})

@@ -132,6 +132,8 @@ private val PERMS = listOf(
     PermInfo("backgroundLocation", "Helyzet lezárt képernyőnél", "A megnyíló beállításokban: Engedélyek → Hely → Mindig engedélyezés.", "lock-keyhole"),
     PermInfo("notifications", "Értesítések", "Jelzi, ha a megosztás a háttérben is fut.", "bell"),
     PermInfo("camera", "Kamera", "A szobák QR-kódjának beolvasásához.", "camera"),
+    PermInfo("motion", "Mozgásérzékelés", "A lépésérzékelővel pontosabban megkülönböztetjük, ha sétálsz, és nem téveszt meg a GPS-zaj. Nem hagyja el a telefont.", "footprints"),
+    PermInfo("nearby", "Közeli eszközök", "Wi-Fi, mobilcella és Bluetooth-környezet változásából gyorsabban észleljük az indulást. Az azonosítók csak a telefonon, hash-ként élnek.", "radar"),
     PermInfo("battery", "Akkumulátor-kímélés kikapcsolása", "Hogy a telefon ne állítsa le a megosztást, amíg zsebben van.", "battery-charging"),
 )
 
@@ -146,13 +148,15 @@ private fun PermissionsPanel(actions: PermissionActions, tick: Int, onAskAddress
         "backgroundLocation" -> if (Perms.background(ctx)) "granted" else if (!Perms.anyLocation(ctx)) "prompt" else if (k in requested) "denied" else "prompt"
         "notifications" -> if (Perms.notifications(ctx)) "granted" else if (k in requested) "denied" else "prompt"
         "camera" -> if (Perms.camera(ctx)) "granted" else if (k in requested) "denied" else "prompt"
+        "motion" -> if (Perms.motion(ctx)) "granted" else if (k in requested) "denied" else "prompt"
+        "nearby" -> if (Perms.nearby(ctx)) "granted" else if (k in requested) "denied" else "prompt"
         else -> if ((ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(ctx.packageName)) "granted" else "manual"
     }
     fun request(k: String) {
         requested = requested + k
         when (k) {
             "location" -> actions.requestLocation(); "backgroundLocation" -> actions.requestBackground(); "notifications" -> actions.requestNotifications()
-            "camera" -> actions.requestCamera {}; else -> Perms.openBatterySettings(ctx)
+            "camera" -> actions.requestCamera {}; "motion" -> actions.requestMotion(); "nearby" -> actions.requestNearby(); else -> Perms.openBatterySettings(ctx)
         }
     }
     fun askOne(k: String) { if (state(k) == "denied") Perms.openSettings(ctx) else if (state(k) == "limited") Perms.openSettings(ctx) else request(k) }

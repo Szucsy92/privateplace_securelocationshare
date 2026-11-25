@@ -90,7 +90,7 @@ private class Axis(var p: Double, var v: Double, var Ppp: Double, var Ppv: Doubl
 private data class WP(val p: Vec, val w: Double)
 private data class Rec(val p: Vec, val w: Double, val at: Long, val speed: Double?)
 private data class Acq(val p: Vec, val w: Double, val at: Long, val speed: Double?, val acc: Double)
-private data class Far(val p: Vec, val at: Long, val dopStill: Boolean, val afterGap: Boolean)
+private data class Far(val p: Vec, val at: Long, val dopStill: Boolean, val dopplerKnown: Boolean, val afterGap: Boolean)
 private data class PFar(val p: Vec, val at: Long, val acc: Double?)
 private data class Cand(val p: Vec, val at: Long, val acc: Double)
 private class Cluster(val c: Vec, val inl: List<Acq>, val rms: Double)
@@ -298,14 +298,49 @@ class DriftFilter {
             val dopStill = dopplerOk && sp!! < STILL_SPEED
             if (dopStill || (dopplerOk && sp!! >= FAST_SPEED)) dopDistrust = false
 
+            val previous = if (recent.size >= 2) recent[recent.size - 2] else null
+            val stepDistance = if (previous != null) hypot(z.x - previous.p.x, z.y - previous.p.y) else 0.0
             val back = recent[max(0, recent.size - 6)]
-            val movedRecently = recent.size >= 4 && hypot(z.x - back.p.x, z.y - back.p.y) >= max(STEP_MOVE_MIN_M, STEP_MOVE_ACC_K * (fix.acc ?: 6.0))
+            // Rövid (1–2 fixből álló) valódi gyalogos elmozdulást is észlelünk, de a helyben ingadozó GPS-zaj nem elég:
+            // kell legalább 1,5 m horgonytól való távolság és mérhető fix-közi haladás, vagy hosszabb, összegzett elmozdulás.
+            // Lépésjelzés + köztes Doppler esetén legalább 4 egymást követő pozícióból való, egyirányú előrehaladást kérünk.
+            val walkWindow = recent.takeLast(4)
+            var progressiveWalk = false
+            if (walkWindow.size == 4) {
+                val first = walkWindow[0].p; val last = walkWindow[3].p
+                val vx = last.x - first.x; val vy = last.y - first.y
+                val length = hypot(vx, vy)
+                if (length >= max(1.2, 0.2 * (fix.acc ?: 6.0))) {
+                    val ux = vx / length; val uy = vy / length
+                    val projections = walkWindow.map { (it.p.x - first.x) * ux + (it.p.y - first.y) * uy }
+                    val forwardSteps = projections.drop(1).filterIndexed { i, v -> v - projections[i] >= 0.2 }.size
+                    val lateral = sqrt(walkWindow.sumOf { r ->
+                        val cross = -(r.p.x - first.x) * uy + (r.p.y - first.y) * ux
+                        cross * cross
+                    } / walkWindow.size)
+                    progressiveWalk = forwardSteps >= 3 &&
+                        projections.withIndex().all { (i, v) -> i == 0 || v >= projections[i - 1] - 0.2 } && lateral <= 0.6 * length
+                }
+            }
+            val stepping = fix.stepping == true
+            val movedRecently = recent.size >= 2 && (
+                // Sebességadat nélküli kétfixes lépésjelzés: nincs Doppler, ezért a horgonyhoz viszonyított elmozdulás is elfogadható.
+                (stepping && !dopplerOk && d >= 0.75 && stepDistance >= 0.65) ||
+                // A nem lépésjelzéses Doppler/pozíciós ág marad, a lépéses köztes tartományban a többfixes, iránytartó bizonyíték dönt.
+                (!stepping && d >= max(1.5, 0.25 * (fix.acc ?: 6.0)) && stepDistance >= 0.65) ||
+                (if (stepping && dopplerOk) progressiveWalk
+                 else (recent.size >= 4 && hypot(z.x - back.p.x, z.y - back.p.y) >= max(STEP_MOVE_MIN_M, STEP_MOVE_ACC_K * (fix.acc ?: 6.0))))
+            )
+            // A Doppler önmagában csak megerősítésre váró jelölt: az 1,4 m/s körüli, helyben is gyakori hamis Doppler
+            // csak pozíciós megerősítéssel számít; a 1,3 m/s-os gyalogos küszöbteszt megmarad.
             val dopGo = dopplerOk && sp!! >= GO_SPEED && !(dopDistrust && sp < FAST_SPEED) &&
-                (sp >= FAST_SPEED || movedRecently || fix.stepping == true)
-            val stepEv = fix.stepping == true && !dopStill && (!dopplerOk || movedRecently)
+                (sp < 1.4 || movedRecently || stepping)
+            // Sebességadat nélkül két lépésjelzés elég, ha a második fix már tényleges elmozdulást mutat.
+            val stepEv = stepping && !dopStill && (!dopplerOk || movedRecently)
             fastHist.add(dopGo || stepEv); if (fastHist.size > 3) fastHist.removeAt(0)
-            val bothSensors = dopGo && fix.stepping == true && (fix.acc ?: 999.0) <= GO_FIX_ACC
-            var leave = fastHist.count { it } >= GO_FIXES || (dopplerOk && sp!! >= FAST_SPEED) || bothSensors
+            // Két független, jó minőségű érzékelő (Doppler + lépés) egyetlen fixből indíthat.
+            val bothSensors = dopGo && stepping && (fix.acc ?: 999.0) <= GO_FIX_ACC && sp!! >= 1.3
+            var leave = (fastHist.count { it } >= GO_FIXES && movedRecently) || (dopplerOk && sp!! >= FAST_SPEED) || bothSensors
             var relocate: Vec? = null
             var why = if (leave) {
                 if (dopplerOk && sp!! >= FAST_SPEED) "gyors Doppler (${f1(sp * 3.6)} km/h)"
@@ -317,10 +352,15 @@ class DriftFilter {
             if (!leave) {
                 if (d > farThr) {
                     if (far.isNotEmpty()) { val fc = mean(far.map { it.p }); if (hypot(z.x - fc.x, z.y - fc.y) > FAR_AGREE_M) far = ArrayList() }
-                    far.add(Far(z, at, dopStill, prevAt != null && at - prevAt > 20000))
+                    far.add(Far(z, at, dopStill, dopplerOk, prevAt != null && at - prevAt > 20000))
                     val allStill = far.all { it.dopStill }
+                    val allNoDoppler = far.all { !it.dopplerKnown }
+                    val afterGapPair = allNoDoppler && far[0].afterGap && far.size >= 2
+                    val noSpeedCluster = allNoDoppler && (afterGapPair || far.size >= 3)
                     val stillCount = min(15, ceil(FAR_STILL_MS / 1000.0 / dtS).toInt())
-                    if (allStill && far.size >= stillCount && at - far[0].at >= FAR_STILL_MS) {
+                    // Doppler-állásnál továbbra is 45 s védelem kell a tartós multipath ellen. Sebességadat hiányában három egyező
+                    // távoli fix elég; hosszú GPS-kiesés után két egyező fix is elég a követés helyreállításához.
+                    if ((allStill && far.size >= stillCount && at - far[0].at >= FAR_STILL_MS) || noSpeedCluster) {
                         relocate = mean(far.map { it.p })
                         leave = true
                         why = "a pozíció tartósan ${f1(hypot(relocate.x - anchor.x, relocate.y - anchor.y))} m-re van a horgonytól (${far.size} egyező fix)"
@@ -404,7 +444,7 @@ class DriftFilter {
 
             // Kilépés
             say("Kilépés az állásból: $why")
-            if (relocate != null && far.isNotEmpty() && far.all { it.dopStill }) {
+            if (relocate != null && far.isNotEmpty() && far.all { it.dopStill || !it.dopplerKnown }) {
                 say("Áthelyeződés ${f1(hypot(relocate.x - anchor.x, relocate.y - anchor.y))} m-rel (a Doppler végig állást mondott)")
                 toStill(relocate, rms2, far[0].at)
                 lastAt = at
