@@ -41,6 +41,11 @@ private const val FAR_M = 30.0
 private const val FAR_AGREE_M = 25.0
 private const val FAR_STILL_MS = 45000L
 private const val WALK_EXIT_METERS = 8.0
+/** Holtzóna az állásból való kilépéshez (járás-jelzés / séta-sebesség / egyirányú elmozdulás): a horgonytól legalább ennyire kell lennie a pozíciónak.
+ *  Rossz GPS-jelnél (nagy `acc`) a zóna nő, de legfeljebb [DEADZONE_MAX_M]. Gyors Doppler (autó, bicikli) nem várja meg. */
+private const val STILL_DEADZONE_M = 18.0
+private const val DEADZONE_ACC_K = 1.5
+private const val DEADZONE_MAX_M = 30.0
 private const val NOISE_K = 2.0
 private const val WALK_MAX_ACC = 25.0
 private const val SPEED_NOISE_FLOOR = 1.2
@@ -273,8 +278,8 @@ class DriftFilter {
                 if (sp == null && fix.stepping == true) acqStepHits++
             }
             val est = if (acq.isNotEmpty()) geoMedian(acq.map { WP(it.p, it.w) }) else z
-            if (acqStepHits >= ACQ_STEP_FIXES) {
-                say("Indításkor járás-jelzés: mozgásnak veszi"); toMoving(est, sigma * sigma); return emit(fix, toLL(est), at)
+            if (acqStepHits >= ACQ_STEP_FIXES && hypot(z.x - acq[0].p.x, z.y - acq[0].p.y) >= STILL_DEADZONE_M) {
+                say("Indításkor járás-jelzés és ${f1(STILL_DEADZONE_M)} m-nél nagyobb elmozdulás: mozgásnak veszi"); toMoving(est, sigma * sigma); return emit(fix, toLL(est), at)
             }
             val cl = acqCluster(acq, if (sparse) ACQ_MIN_FIXES_SPARSE else ACQ_MIN_FIXES)
             if (cl != null && at - acq[0].at >= ACQ_MIN_MS) {
@@ -340,7 +345,12 @@ class DriftFilter {
             fastHist.add(dopGo || stepEv); if (fastHist.size > 3) fastHist.removeAt(0)
             // Két független, jó minőségű érzékelő (Doppler + lépés) egyetlen fixből indíthat.
             val bothSensors = dopGo && stepping && (fix.acc ?: 999.0) <= GO_FIX_ACC && sp!! >= 1.3
-            var leave = (fastHist.count { it } >= GO_FIXES && movedRecently) || (dopplerOk && sp!! >= FAST_SPEED) || bothSensors
+            // Holtzóna: a járás-jelzés / séta-sebesség / kis elmozdulás önmagában nem visz ki az állásból, amíg a pozíció a horgony körüli
+            // ~18 m-es körön belül van (a hibás GPS-jel és a helyben rázkódó telefon így nem látszik mozgásnak, a jelölő nem csúszkál).
+            val deadZone = max(STILL_DEADZONE_M, min(DEADZONE_MAX_M, DEADZONE_ACC_K * (fix.acc ?: 10.0)))
+            val outsideZone = d >= deadZone
+            var leave = (outsideZone && ((fastHist.count { it } >= GO_FIXES && movedRecently) || bothSensors)) || (dopplerOk && sp!! >= FAST_SPEED)
+            val walkLeave = leave && !(dopplerOk && sp!! >= FAST_SPEED)
             var relocate: Vec? = null
             var why = if (leave) {
                 if (dopplerOk && sp!! >= FAST_SPEED) "gyors Doppler (${f1(sp * 3.6)} km/h)"
@@ -374,7 +384,7 @@ class DriftFilter {
                     val c = wmean(r4.map { WP(it.p, it.w) })
                     val dir = Vec(c.x - anchor.x, c.y - anchor.y)
                     val dl = hypot(dir.x, dir.y)
-                    val thr = max(WALK_EXIT_METERS, NOISE_K * rms)
+                    val thr = max(max(WALK_EXIT_METERS, deadZone), NOISE_K * rms)
                     if (dl >= thr) {
                         val u = Vec(dir.x / dl, dir.y / dl)
                         val proj = r4.map { (it.p.x - anchor.x) * u.x + (it.p.y - anchor.y) * u.y }
@@ -452,7 +462,8 @@ class DriftFilter {
             }
             val v0 = if (sp != null && fix.bearing != null && sp >= GO_SPEED)
                 Vec(sp * sin(Math.toRadians(fix.bearing)), sp * cos(Math.toRadians(fix.bearing))) else Vec(0.0, 0.0)
-            var start: Vec = relocate ?: anchor
+            // Holtzónán túli járásnál az aktuális pozícióról indul a követés (nem a ~18 m-re lévő horgonyról), így nincs visszacsúszás
+            var start: Vec = relocate ?: if (walkLeave) z else anchor
             var startVar = if (relocate != null) sigma * sigma else max(rms2, 9.0)
             if (relocate == null && cand.size >= CAND_START_FIXES && at - cand.last().at <= 15000) {
                 val cc = candCenter(); val cr = rmsAround(cand.map { it.p }, cc)

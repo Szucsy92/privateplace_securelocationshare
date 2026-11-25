@@ -69,6 +69,31 @@ class DomainTest {
         assertEquals("moving", last!!.mode)
     }
 
+    @Test fun steppingWithNoisyGpsStaysStill() {
+        val f = DriftFilter(); val rnd = java.util.Random(11)
+        var t = 1_700_000_000_000L; var last: FilteredFix? = null
+        for (i in 0 until 40) { t += 1000; last = f.filter(RawFix(47.5, 19.0, 6.0, 0.0, 0.2, null, t, "gps")) }
+        // helyben rázkódó telefon: lépésjelzés végig, sebességadat nélkül, ±5 m-es GPS-zaj
+        for (i in 0 until 90) {
+            t += 1000
+            last = f.filter(RawFix(47.5 + (rnd.nextGaussian() * 5) / 110540, 19.0 + (rnd.nextGaussian() * 5) / 75000, 10.0, null, null, null, t, "gps", stepping = true))
+            assertEquals("still", last!!.mode)
+        }
+    }
+
+    @Test fun steppingLeavesStillOnlyBeyondDeadZone() {
+        val f = DriftFilter(); var t = 1_700_000_000_000L; var lat = 47.5
+        for (i in 0 until 40) { t += 1000; f.filter(RawFix(47.5, 19.0, 6.0, 0.0, 0.2, null, t, "gps")) }
+        var left = -1.0
+        for (i in 0 until 40) {
+            t += 1000; lat += 1.4 / 110540
+            val r = f.filter(RawFix(lat, 19.0, 6.0, 1.4, 0.2, 0.0, t, "gps", stepping = true))
+            if (r.mode == "moving" && left < 0) left = (lat - 47.5) * 110540
+        }
+        assertTrue("kilépés a holtzónán belül: $left m", left >= 17.0)
+        assertTrue("sosem lépett ki", left > 0)
+    }
+
     @Test fun schnorrBip340Vector0() {
         val sk = ByteArray(32).also { it[31] = 3 }
         val pk = Schnorr.publicKey(sk).joinToString("") { "%02X".format(it) }
