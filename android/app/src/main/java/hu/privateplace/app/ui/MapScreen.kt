@@ -389,13 +389,23 @@ fun BoxScope.PickOverlay(onCancel: () -> Unit, onConfirm: () -> Unit) {
 @Composable
 fun PersonBubbleHost(person: MapPerson, self: MapPerson?, at: IntOffset, below: Boolean, addressAllowed: Boolean, onAllow: () -> Unit) {
     val d = LocalDensity.current
+    // Megjelenés: a webes bubble-open (160 ms: fade + 8 px csúszás + 90% → 100% méret)
+    var shown by remember(person.id) { mutableStateOf(false) }
+    LaunchedEffect(person.id) { shown = true }
+    val k by animateFloatAsState(if (shown) 1f else 0f, tween(160, easing = LinearOutSlowInEasing), label = "bubble")
     Box(Modifier.layout { m, c ->
         val p = m.measure(c.copy(minWidth = 0, minHeight = 0, maxWidth = minOf(c.maxWidth - 16.dp.roundToPx(), 320.dp.roundToPx())))
         val minX = 8.dp.roundToPx(); val maxX = c.maxWidth - 8.dp.roundToPx() - p.width
         val x = (at.x - p.width / 2).coerceIn(minX, maxOf(minX, maxX))
         val y = if (below) at.y + 32.dp.roundToPx() else at.y - 32.dp.roundToPx() - p.height
         layout(c.maxWidth, c.maxHeight) { p.place(x, y) }
-    }) { PersonBubble(person, self, addressAllowed, onAllow) }
+    }) {
+        Box(Modifier.graphicsLayer {
+            alpha = k; val sc = .9f + .1f * k; scaleX = sc; scaleY = sc
+            translationY = (1f - k) * 8.dp.toPx() * (if (below) -1f else 1f)
+            transformOrigin = TransformOrigin(.5f, if (below) 0f else 1f)
+        }) { PersonBubble(person, self, addressAllowed, onAllow) }
+    }
 }
 
 @Composable

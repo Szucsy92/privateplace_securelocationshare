@@ -13,6 +13,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -79,30 +80,42 @@ fun DialogHost(
     val avail by g.availableUpdate.collectAsState(); val updDismissed by g.updateDismissed.collectAsState()
     val updStatus by g.updateStatus.collectAsState(); val updPct by g.updatePercent.collectAsState()
 
-    if (dialog != null) GlassDialog(onDismiss = {
-        if (dialog == DialogKind.WELCOME) onExitConfirm(true) else { onDialog(null); onPendingJoin(null); onInviteDone() }
-    }, dismissable = dialog != DialogKind.WELCOME, fullHeight = dialog == DialogKind.SETTINGS || dialog == DialogKind.ROOMS,
-        compact = dialog == DialogKind.SETTINGS || dialog == DialogKind.ROOMS || dialog == DialogKind.SHARE) {
-        ViewSwitch(listOf(dialog, if (dialog == DialogKind.SETTINGS) settingsView else "", exitConfirm).joinToString("|")) { key ->
+    val upd = avail
+    val updShown = upd != null && !updDismissed && dialog != DialogKind.WELCOME && dialog != DialogKind.PERMISSIONS
+    // Sötétítés: a főablakban (az activity edge-to-edge, ezért az állapot- és navigációs sávot is befedi), lágyan be- és kifut
+    val scrimOn = dialog != null || updShown
+    val scrim by animateFloatAsState(if (scrimOn) 1f else 0f, tween(if (scrimOn) 200 else 150), label = "scrim")
+    if (scrim > 0.001f) Box(Modifier.fillMaxSize().background(pal.dialogBackdrop.copy(alpha = pal.dialogBackdrop.alpha * scrim)))
+
+    // A bezárt ablak a kilépő animáció végéig a legutóbbi tartalmával látszik
+    var held by remember { mutableStateOf(dialog) }
+    SideEffect { if (dialog != null && held != dialog) held = dialog }
+    val kind = dialog ?: held
+
+    if (kind != null) GlassDialog(visible = dialog != null, onGone = { held = null }, onDismiss = {
+        if (kind == DialogKind.WELCOME) onExitConfirm(true) else { onDialog(null); onPendingJoin(null); onInviteDone() }
+    }, dismissable = kind != DialogKind.WELCOME, fullHeight = kind == DialogKind.SETTINGS || kind == DialogKind.ROOMS,
+        compact = kind == DialogKind.SETTINGS || kind == DialogKind.ROOMS || kind == DialogKind.SHARE) {
+        ViewSwitch(listOf(kind, if (kind == DialogKind.SETTINGS) settingsView else "", exitConfirm).joinToString("|")) { key ->
             Column {
                 when {
-                    exitConfirm && dialog == DialogKind.WELCOME -> {
+                    exitConfirm && kind == DialogKind.WELCOME -> {
                         PanelHeader("Kilépsz az alkalmazásból?", "A helymegosztás leáll. A térkép használatához meg kell adnod a nevedet.")
                         Row(Modifier.fillMaxWidth().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                             TextBtn("Mégsem", { onExitConfirm(false) }, variant = Variant.Outline)
                             TextBtn("Kilépés", onExit, variant = Variant.Destructive, icon = "log-out")
                         }
                     }
-                    dialog == DialogKind.WELCOME -> ProfileForm(null, "Kezdés", title = "Üdv a Private Place-ben",
+                    kind == DialogKind.WELCOME -> ProfileForm(null, "Kezdés", title = "Üdv a Private Place-ben",
                         description = "Nincs regisztráció és nincs jelszó. A neved és a képed csak ezen a telefonon tárolódik, és csak a szobatársaid látják.") { p ->
                         g.saveProfile(p); onDialog(if (g.store.permissionsAsked) (if (pendingJoin != null) DialogKind.JOIN else null) else DialogKind.PERMISSIONS)
                     }
-                    dialog == DialogKind.PERMISSIONS -> PermissionsPanel(actions, permTick, onAskAddressAgain = { g.updatePrefs { it.copy(addressConsent = "ask") }; onDialog(null) }, onDone = {
+                    kind == DialogKind.PERMISSIONS -> PermissionsPanel(actions, permTick, onAskAddressAgain = { g.updatePrefs { it.copy(addressConsent = "ask") }; onDialog(null) }, onDone = {
                         g.store.permissionsAsked = true; g.engine.setPermissionGranted(Perms.anyLocation(ctx)); g.engine.evaluate(); onDialog(if (pendingJoin != null) DialogKind.JOIN else null) })
-                    dialog == DialogKind.JOIN -> JoinPanel(pendingJoin, actions, onJoin = { t, n, c, k -> g.joinRoom(t, n, c, k); onPendingJoin(null); onDialog(null) }, onReject = { onPendingJoin(null); onDialog(null) })
-                    dialog == DialogKind.SHARE && shareToken != null -> SharePanel(g.rooms.collectAsState().value.firstOrNull { it.token == shareToken }) { onDialog(DialogKind.ROOMS) }
-                    dialog == DialogKind.ROOMS -> RoomsPanel(onShare = { onShareToken(it); onDialog(DialogKind.SHARE) }, onNew = { val r = g.createRoom(); onShareToken(r.token); onDialog(DialogKind.SHARE) }, onJoin = { onDialog(DialogKind.JOIN) })
-                    dialog == DialogKind.SETTINGS && profile != null -> when (settingsView) {
+                    kind == DialogKind.JOIN -> JoinPanel(pendingJoin, actions, onJoin = { t, n, c, k -> g.joinRoom(t, n, c, k); onPendingJoin(null); onDialog(null) }, onReject = { onPendingJoin(null); onDialog(null) })
+                    kind == DialogKind.SHARE && shareToken != null -> SharePanel(g.rooms.collectAsState().value.firstOrNull { it.token == shareToken }) { onDialog(DialogKind.ROOMS) }
+                    kind == DialogKind.ROOMS -> RoomsPanel(onShare = { onShareToken(it); onDialog(DialogKind.SHARE) }, onNew = { val r = g.createRoom(); onShareToken(r.token); onDialog(DialogKind.SHARE) }, onJoin = { onDialog(DialogKind.JOIN) })
+                    kind == DialogKind.SETTINGS && profile != null -> when (settingsView) {
                         "places" -> PlacesPanel(onBack = { onSettingsView("main") }, onPick = onPick)
                         "trails" -> TrailsPanel(onBack = { onSettingsView("main") }, selfTrackClear)
                         else -> SettingsMain(selfColor, onTrails = { onSettingsView("trails") }, onPlaces = { onSettingsView("places") }, onPermissions = { onDialog(DialogKind.PERMISSIONS) }, onResetHints = onResetHints)
@@ -114,8 +127,7 @@ fun DialogHost(
     }
 
     // Új frissítés (OTA)
-    val upd = avail
-    if (upd != null && !updDismissed && dialog != DialogKind.WELCOME && dialog != DialogKind.PERMISSIONS) GlassDialog(onDismiss = { g.dismissUpdate() }, dismissable = updStatus != "downloading", maxWidth = 340.dp) {
+    if (updShown) GlassDialog(onDismiss = { g.dismissUpdate() }, dismissable = updStatus != "downloading", maxWidth = 340.dp) {
         PanelHeader("Új frissítés elérhető", when (updStatus) { "downloading" -> "Letöltés…${updPct?.let { " $it%" } ?: ""}"
             "permission" -> "Engedélyezd a telepítést a Private Place számára, majd koppints újra a Letöltésre."; else -> null })
         Row(Modifier.fillMaxWidth().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {

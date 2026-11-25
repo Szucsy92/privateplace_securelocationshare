@@ -237,20 +237,24 @@ private fun Modifier.drawWithMask(): Modifier = this.drawWithContent {
 
 // ───────── Ablak (Dialog): matt üveg, középen, a tartalom magasságához lágyan igazodik ─────────
 @Composable
-fun GlassDialog(onDismiss: () -> Unit, dismissable: Boolean = true, maxWidth: Dp = 390.dp, fullHeight: Boolean = false, compact: Boolean = true, content: @Composable ColumnScope.() -> Unit) {
+fun GlassDialog(onDismiss: () -> Unit, dismissable: Boolean = true, maxWidth: Dp = 390.dp, fullHeight: Boolean = false, compact: Boolean = true,
+                visible: Boolean = true, onGone: () -> Unit = {}, content: @Composable ColumnScope.() -> Unit) {
     Dialog(onDismissRequest = { if (dismissable) onDismiss() }, properties = DialogProperties(dismissOnClickOutside = false, dismissOnBackPress = dismissable, usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         (LocalView.current.parent as? DialogWindowProvider)?.window?.setDimAmount(0f)
-        var shown by remember { mutableStateOf(false) }
-        LaunchedEffect(Unit) { shown = true }
+        // Belépő és kilépő animáció (a webes fade + zoom 95%): a bezárás után az ablak az animáció végén távozik (onGone)
+        val vis = remember { MutableTransitionState(false) }
+        vis.targetState = visible
+        LaunchedEffect(visible, vis.isIdle, vis.currentState) { if (!visible && vis.isIdle) onGone() }
         val land = isLandscapeLayout()
         val cfg = LocalConfiguration.current
         val shape = RoundedCornerShape(if (land) 24.dp else 28.dp)
         // Fekvő mód: a webes `[role=dialog].land-wide` – min(44rem, 100vw - 2rem), magasság: 100dvh - 1rem
         val w = if (land) minOf(704f, cfg.screenWidthDp - 32f).dp else maxWidth
         val maxH = if (land) (cfg.screenHeightDp - 16f).dp else (cfg.screenHeightDp * 0.94f).dp
-        Box(Modifier.fillMaxSize().background(pal.dialogBackdrop).pointerInput(dismissable) { detectTapGestures { if (dismissable) onDismiss() } }.safeDrawingPadding().imePadding(),
+        // A sötétítést a főablakban rajzoljuk (DialogHost scrim): a Dialog-ablak nem fed be rendszersávokat, ezért itt csak a koppintás-elkapás marad
+        Box(Modifier.fillMaxSize().pointerInput(dismissable && visible) { detectTapGestures { if (dismissable && visible) onDismiss() } }.safeDrawingPadding().imePadding(),
             contentAlignment = Alignment.Center) {
-            AnimatedVisibility(shown, enter = fadeIn(tween(200)) + scaleIn(tween(200), 0.95f), exit = fadeOut(tween(150))) {
+            AnimatedVisibility(vis, enter = fadeIn(tween(200)) + scaleIn(tween(200), 0.95f), exit = fadeOut(tween(150)) + scaleOut(tween(150), 0.95f)) {
                 Box(Modifier.padding(horizontal = if (land) 0.dp else 12.dp).then(if (land) Modifier.width(w) else Modifier.widthIn(max = w).fillMaxWidth()).pointerInput(Unit) { detectTapGestures { } }) {
                     val flat = land && !compact
                     Column(Modifier.fillMaxWidth().animateContentSize(harmonika()).shadow(28.dp, shape, ambientColor = pal.shade.copy(.9f), spotColor = pal.shade.copy(.9f)).clip(shape).background(pal.glassStrong, shape).topHighlight(.10f).border(1.dp, pal.glassEdge, shape)

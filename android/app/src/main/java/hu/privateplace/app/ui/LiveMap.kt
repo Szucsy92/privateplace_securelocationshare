@@ -123,6 +123,8 @@ fun rememberMapView(): MapView {
     return view
 }
 
+private data class CamState(val lat: Double, val lng: Double, val zoom: Double, val bearing: Double)
+
 /** A térképablakon kívül látható elmosott háttér: ugyanaz a térkép, a térképablak kameráját követi (a webes „veil” + tükör-canvas megfelelője). */
 @Composable
 fun BlurredBackdrop(cam: SharedCamera, dark: Boolean, window: IntArray?, modifier: Modifier = Modifier) {
@@ -131,60 +133,24 @@ fun BlurredBackdrop(cam: SharedCamera, dark: Boolean, window: IntArray?, modifie
     LaunchedEffect(Unit) { view.getMapAsync { m -> m.uiSettings.setAllGesturesEnabled(false); m.uiSettings.isAttributionEnabled = false; map = m } }
     LaunchedEffect(map, dark) { map?.setStyle(Style.Builder().fromUri(MAP_STYLE_URL)) { applyMapContrast(it, dark) } }
     LaunchedEffect(map, window) { val w = window; if (map != null && w != null) map!!.setPadding(w[0], w[1], w[2], w[3]) }
-    LaunchedEffect(map, cam.lat, cam.lng, cam.zoom, cam.bearing) {
-        map?.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder().target(MLatLng(cam.lat, cam.lng)).zoom(cam.zoom).bearing(cam.bearing).build()))
+    // A kamera állapotát snapshotFlow-n át olvassuk: így a háttér nem rekomponálódik és a korutin nem indul újra minden képkockán,
+    // a mozgás pedig ugyanabban a ritmusban követi a térképablakot (zoomnál nincs kései, "ugráló" háttér).
+    LaunchedEffect(map) {
+        val m = map ?: return@LaunchedEffect
+        snapshotFlow { CamState(cam.lat, cam.lng, cam.zoom, cam.bearing) }.collect { c ->
+            m.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder().target(MLatLng(c.lat, c.lng)).zoom(c.zoom).bearing(c.bearing).build()))
+        }
     }
     AndroidView({ view }, modifier)
 }
 
-// ───────── Jelölők (map-avatar) ─────────
-private fun decodeAvatar(url: String?): Bitmap? = runCatching {
-    val b = android.util.Base64.decode(url!!.substringAfter("base64,"), android.util.Base64.DEFAULT); BitmapFactory.decodeByteArray(b, 0, b.size)
-}.getOrNull()
-
-private fun markerBitmap(ctx: Context, p: MapPerson, pal: Palette, fonts: Fonts): Bitmap {
-    val d = ctx.resources.displayMetrics.density
-    // 48 dp-s jelölő + 12 dp-s margó a lágy árnyéknak (0 6px 18px shade 60%) és a 1 px-es külső gyűrűnek
-    val size = (72 * d).roundToInt()
-    val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888); bmp.density = ctx.resources.displayMetrics.densityDpi
-    val cv = Canvas(bmp); val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    val c = size / 2f; val r = 24 * d
-    paint.style = Paint.Style.FILL; paint.color = pal.glassStrong.copy(alpha = 1f).toArgb()
-    paint.setShadowLayer(9 * d, 0f, 6 * d, pal.shade.copy(alpha = .6f).toArgb())
-    cv.drawCircle(c, c, r, paint); paint.clearShadowLayer()
-    paint.style = Paint.Style.STROKE; paint.strokeWidth = 1 * d; paint.color = pal.tint.copy(alpha = .12f).toArgb()
-    cv.drawCircle(c, c, r + .5f * d, paint)
-    val inner = r - 6 * d      // 3 px keret + 3 px belső kitöltés
-    val av = decodeAvatar(p.avatar)
-    paint.style = Paint.Style.FILL
-    if (av != null) {
-        val path = Path().apply { addCircle(c, c, inner, Path.Direction.CW) }
-        cv.save(); cv.clipPath(path)
-        val s = minOf(av.width, av.height)
-        cv.drawBitmap(av, Rect((av.width - s) / 2, (av.height - s) / 2, (av.width + s) / 2, (av.height + s) / 2), RectF(c - inner, c - inner, c + inner, c + inner), paint)
-        cv.restore()
-    } else {
-        paint.color = pal.foreground.toArgb(); paint.textSize = 18.4f * d; paint.textAlign = Paint.Align.CENTER
-        val tf = runCatching { Typeface.createFromAsset(ctx.assets, "fonts/DMSans.ttf") }.getOrNull()
-        paint.typeface = if (tf != null && Build.VERSION.SDK_INT >= 28) Typeface.create(tf, 600, false) else (tf ?: Typeface.DEFAULT_BOLD)
-        cv.drawText((p.name.ifBlank { "?" }).take(1).uppercase(), c, c - (paint.descent() + paint.ascent()) / 2, paint)
-    }
-    paint.style = Paint.Style.STROKE; paint.strokeWidth = 3 * d; paint.color = Color.parseColor(p.color)
-    cv.drawCircle(c, c, r - 1.5f * d, paint)
-    return bmp
+/** Egy jelölő állapota. A képernyő-koordináta és a forgatás Compose-állapot, de csak a layout/rajzolási fázisban olvassuk, ezért nem rekomponál. */
+internal class MState(var lat: Double, var lng: Double, var key: String, var animFrom: MLatLng? = null, var animTo: MLatLng? = null, var animStart: Long = 0, var animDur: Long = 0) {
+    var sx by mutableFloatStateOf(HIDDEN)
+    var sy by mutableFloatStateOf(HIDDEN)
+    var rot by mutableFloatStateOf(Float.NaN)
 }
-
-private fun arrowBitmap(ctx: Context, color: String): Bitmap {
-    val d = ctx.resources.displayMetrics.density
-    val size = (74 * d).roundToInt()
-    val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888); bmp.density = ctx.resources.displayMetrics.densityDpi
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = Color.parseColor(color) }
-    val path = Path().apply { moveTo(size / 2f, 0f); lineTo(size / 2f + 5 * d, 9 * d); lineTo(size / 2f - 5 * d, 9 * d); close() }
-    Canvas(bmp).drawPath(path, paint)
-    return bmp
-}
-
-private class MState(var lat: Double, var lng: Double, var key: String, var animFrom: MLatLng? = null, var animTo: MLatLng? = null, var animStart: Long = 0, var animDur: Long = 0)
+internal const val HIDDEN = -10000f
 
 @Composable
 fun LiveMap(
@@ -199,10 +165,10 @@ fun LiveMap(
     var selected by remember { mutableStateOf<String?>(null) }
     var bubblePos by remember { mutableStateOf<IntOffset?>(null) }
     var bubbleBelow by remember { mutableStateOf(false) }
-    val markers = remember { HashMap<String, MState>() }
+    val markers = remember { mutableStateMapOf<String, MState>() }
     val headings = remember { HashMap<String, Double>() }
-    val images = remember { HashSet<String>() }
     var flying by remember { mutableStateOf(false) }
+    var camMoving by remember { mutableStateOf(false) }
     var holdUntil by remember { mutableLongStateOf(0L) }
     var didCenter by remember { mutableStateOf(false) }
     val peopleNow by rememberUpdatedState(people); val followNow by rememberUpdatedState(follow); val orientNow by rememberUpdatedState(orientation)
@@ -219,34 +185,27 @@ fun LiveMap(
             m.setMinZoomPreference(2.0)
             m.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder().target(MLatLng(47.4979, 19.0402)).zoom(12.0).build()))
             m.addOnCameraMoveStartedListener { reason ->
+                camMoving = true
                 if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) holdUntil = Long.MAX_VALUE
             }
             m.addOnCameraMoveListener {
                 val c = m.cameraPosition; cam.lat = c.target!!.latitude; cam.lng = c.target!!.longitude; cam.zoom = c.zoom; cam.bearing = c.bearing; onCompass((-c.bearing).toFloat())
             }
-            m.addOnCameraIdleListener { flying = false; if (holdUntil == Long.MAX_VALUE) holdUntil = System.currentTimeMillis() + FOLLOW_RESUME_MS }
-            m.addOnMapClickListener { pt ->
-                val f = m.queryRenderedFeatures(m.projection.toScreenLocation(pt), "people-icons").firstOrNull()
-                val id = f?.getStringProperty("id")
-                selected = if (id == null || id == selected) null else id; true
-            }
+            m.addOnCameraIdleListener { camMoving = false; flying = false; if (holdUntil == Long.MAX_VALUE) holdUntil = System.currentTimeMillis() + FOLLOW_RESUME_MS }
+            // a jelölők Compose-rétegben ülnek a térkép fölött, a rájuk koppintást ők maguk kezelik
+            m.addOnMapClickListener { selected = null; true }
             centerRef?.value = { m.cameraPosition.target }
             map = m
         }
     }
     LaunchedEffect(map, dark) {
         val m = map ?: return@LaunchedEffect
-        ready = false; images.clear()
+        ready = false
         m.setStyle(Style.Builder().fromUri(MAP_STYLE_URL)) { style ->
             applyMapContrast(style, dark)
             style.addSource(GeoJsonSource("trails"))
             style.addLayer(LineLayer("trails-glow", "trails").withProperties(lineColor(get("color")), lineWidth(13f), lineOpacity(0.28f), lineBlur(5f), lineCap("round"), lineJoin("round")))
             style.addLayer(LineLayer("trails", "trails").withProperties(lineColor(get("color")), lineWidth(4f), lineOpacity(0.96f), lineBlur(0.15f), lineCap("round"), lineJoin("round")))
-            style.addSource(GeoJsonSource("self-pulse")); style.addSource(GeoJsonSource("people"))
-            style.addLayer(CircleLayer("self-pulse", "self-pulse").withProperties(circleColor("#14B8A6"), circleRadius(24f), circleOpacity(0f), circlePitchAlignment("map")))
-            style.addLayer(SymbolLayer("people-arrows", "people").withProperties(iconImage(get("arrow")), iconRotate(get("rot")), iconRotationAlignment("map"),
-                iconAllowOverlap(true), iconIgnorePlacement(true), visibility("visible")))
-            style.addLayer(SymbolLayer("people-icons", "people").withProperties(iconImage(get("img")), iconAllowOverlap(true), iconIgnorePlacement(true)))
             ready = true
         }
     }
@@ -261,8 +220,6 @@ fun LiveMap(
             val last = p.points.lastOrNull() ?: continue
             val key = "${p.avatar?.hashCode() ?: 0}|${p.name}|${p.color}|$dark"
             (p.heading ?: headingFromTrack(p.points))?.let { headings[p.id] = it }
-            if ("p:$key" !in images) { style.addImage("p:$key", markerBitmap(ctx, p, palette, fonts)); images.add("p:$key") }
-            if ("a:${p.color}" !in images) { style.addImage("a:${p.color}", arrowBitmap(ctx, p.color)); images.add("a:${p.color}") }
             val s = markers[p.id]
             if (s == null) markers[p.id] = MState(last.lat, last.lng, key)
             else {
@@ -293,7 +250,7 @@ fun LiveMap(
             val style = m.style ?: return@withFrameMillis
             var animating = false
             for (s in markers.values) if (s.animTo != null) { animating = true; break }
-            val idle = !animating && followNow == null && !flying && !(orientNow == "north" && abs(m.cameraPosition.bearing) > 0.05)
+            val idle = !animating && !camMoving && followNow == null && !flying && !(orientNow == "north" && abs(m.cameraPosition.bearing) > 0.05)
             if (idle && selectedNow == null && nowMs - lastStep < 66) return@withFrameMillis
             lastStep = nowMs
             val tNow = System.nanoTime() / 1_000_000
@@ -305,21 +262,13 @@ fun LiveMap(
                 if (k >= 1.0) { s.animTo = null; s.animFrom = null }
             }
             val bearing = m.cameraPosition.bearing
-            val features = JSONArray(); var selfPos: MState? = null
+            // Jelölők: ugyanabban a képkockában vetítjük a képernyőre, mint ahogy a kamera áll, így nem késnek és nem vibrálnak
             for (p in peopleNow) {
                 val s = markers[p.id] ?: continue
-                if (p.isSelf) selfPos = s
+                val pt = m.projection.toScreenLocation(MLatLng(s.lat, s.lng))
+                s.sx = pt.x; s.sy = pt.y
                 val h = headings[p.id]
-                features.put(JSONObject().put("type", "Feature").put("geometry", JSONObject().put("type", "Point").put("coordinates", JSONArray(listOf(s.lng, s.lat))))
-                    .put("properties", JSONObject().put("id", p.id).put("img", "p:${s.key}").put("arrow", "a:${p.color}").put("rot", if (orientNow == "heading" && h != null) h - bearing else -1000.0)))
-            }
-            (style.getSource("people") as? GeoJsonSource)?.setGeoJson(JSONObject().put("type", "FeatureCollection").put("features", features).toString())
-            // Saját jelölő pulzáló gyűrűje (avatar-pulse, 2,2 mp)
-            val pulse = (style.getLayer("self-pulse") as? CircleLayer)
-            if (selfPos != null && pulse != null) {
-                val k = ((nowMs % 2200) / 2200f)
-                (style.getSource("self-pulse") as? GeoJsonSource)?.setGeoJson(JSONObject().put("type", "Feature").put("geometry", JSONObject().put("type", "Point").put("coordinates", JSONArray(listOf(selfPos.lng, selfPos.lat)))).toString())
-                pulse.setProperties(circleRadius(24f + 14f * k), circleOpacity(0.5f * (1f - k)))
+                s.rot = if (orientNow == "heading" && h != null) (h - bearing).toFloat() else Float.NaN
             }
             // Buborék helye
             val sel = selectedNow?.let { markers[it] }
@@ -345,11 +294,26 @@ fun LiveMap(
                 m.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(m.cameraPosition).bearing(smoothAngle(bearing, 0.0, 0.12)).build()))
         }
     }
-    // Új követési kérés: azonnal ráugrik (a hold törlődik)
-    LaunchedEffect(follow?.request, follow?.id) { if (follow != null) { holdUntil = 0; flying = false } }
+    // Új követési kérés: lágy kameramozgással odacsúszik (a webes flyTo, 1,4 mp); a hold törlődik.
+    // Zoom: 14,5 és 18 között megmarad, különben FOCUS_ZOOM.
+    LaunchedEffect(follow?.request, follow?.id) {
+        holdUntil = 0
+        val f = followNow ?: run { flying = false; return@LaunchedEffect }
+        val m = map; val s = markers[f.id]
+        if (m == null || !ready || s == null) { flying = false; return@LaunchedEffect }
+        val z = m.cameraPosition.zoom
+        val target = if (orientNow == "heading") (headings[f.id] ?: m.cameraPosition.bearing) else 0.0
+        flying = true
+        m.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder().target(MLatLng(s.lat, s.lng))
+            .zoom(if (z < 14.5 || z > 18.0) FOCUS_ZOOM else z).bearing(target).build()), 1400)
+    }
 
     Box(modifier) {
         AndroidView({ view }, Modifier.fillMaxSize())
+        // Jelölők (profilkép, saját pulzáló gyűrű, irányjelző nyíl) a térkép fölött
+        for (p in people) key(p.id) {
+            markers[p.id]?.let { st -> MapMarker(p, st) { selected = if (selected == p.id) null else p.id } }
+        }
         val bp = bubblePos; val sel = selected
         val person = people.firstOrNull { it.id == sel }
         if (bp != null && person != null) PersonBubbleHost(person, people.firstOrNull { it.isSelf }, bp, bubbleBelow, addressAllowed, onAllowAddress)

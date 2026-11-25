@@ -7,6 +7,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.*
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -52,7 +53,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // Átlátszó állapot- és navigációs sáv, rendszer-scrim nélkül (különben a 3 gombos navigációnál világosabb csík marad)
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+        )
+        if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
         handleIntent(intent)
         ProcessLifecycleOwner.get().lifecycle.addObserver(appVisible)
         lifecycleScope.launch { graph.exitRequests.collect { finishAndRemoveTask() } }
