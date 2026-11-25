@@ -47,6 +47,13 @@ class SharedCamera { var lat by mutableDoubleStateOf(47.4979); var lng by mutabl
 const val MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/dark"   // ugyanaz a stílus, mint a webes verzióban; a színeket a téma szerint átszínezzük
 private const val FOCUS_ZOOM = 15.6
 private const val FOLLOW_RESUME_MS = 4000L
+private const val TRAIL_GAP_MS = 30_000L   // ennél hosszabb mérés nélküli szakaszt nem kötünk össze egyenes vonallal
+private fun trailSegments(pts: List<TrackPoint>): List<List<TrackPoint>> {
+    val out = ArrayList<List<TrackPoint>>(); var cur = ArrayList<TrackPoint>()
+    for (p in pts) { if (cur.isNotEmpty() && p.t - cur.last().t > TRAIL_GAP_MS) { if (cur.size > 1) out.add(cur); cur = ArrayList() }; cur.add(p) }
+    if (cur.size > 1) out.add(cur)
+    return out
+}
 private const val LABEL_SCALE = 1.25f
 private const val LABEL_HALO_WIDTH = 2f
 
@@ -247,7 +254,7 @@ fun LiveMap(
         }
         val trailFeatures = if (showTrails || trailIds.isNotEmpty()) people.filter { (showTrails || it.id in trailIds) && it.points.size > 1 }.map { p ->
             JSONObject().put("type", "Feature").put("properties", JSONObject().put("color", p.color))
-                .put("geometry", JSONObject().put("type", "LineString").put("coordinates", JSONArray(p.points.map { JSONArray(listOf(it.lng, it.lat)) }))) } else emptyList()
+                .put("geometry", JSONObject().put("type", "MultiLineString").put("coordinates", JSONArray(trailSegments(p.points).map { seg -> JSONArray(seg.map { JSONArray(listOf(it.lng, it.lat)) }) }))) } else emptyList()
         (style.getSource("trails") as? GeoJsonSource)?.setGeoJson(JSONObject().put("type", "FeatureCollection").put("features", JSONArray(trailFeatures)).toString())
         if (!didCenter) people.firstOrNull { it.isSelf && it.points.isNotEmpty() }?.points?.last()?.let {
             didCenter = true; flying = true
