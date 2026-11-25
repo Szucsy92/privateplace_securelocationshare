@@ -100,7 +100,7 @@ fun DialogHost(
         ViewSwitch(DlgView(kind, if (kind == DialogKind.SETTINGS) settingsView else "", exitConfirm, shareToken)) { v ->
             Column {
                 when {
-                    v.exit && v.v.kind == DialogKind.WELCOME -> {
+                    v.exit && v.kind == DialogKind.WELCOME -> {
                         PanelHeader("Kilépsz az alkalmazásból?", "A helymegosztás leáll. A térkép használatához meg kell adnod a nevedet.")
                         Row(Modifier.fillMaxWidth().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                             TextBtn("Mégsem", { onExitConfirm(false) }, variant = Variant.Outline)
