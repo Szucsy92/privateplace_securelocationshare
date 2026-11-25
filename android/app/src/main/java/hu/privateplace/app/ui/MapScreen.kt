@@ -89,7 +89,7 @@ fun MapScreen(actions: PermissionActions, invite: Invitation?, onInviteDone: () 
     var follow by remember { mutableStateOf<FollowReq?>(null) }
     var exitConfirm by remember { mutableStateOf(false) }
     var addressAskHidden by remember { mutableStateOf(false) }
-    var selfTrack by remember { mutableStateOf(listOf<TrackPoint>()) }
+    val selfTrack by g.engine.track.collectAsState()
     var compassRot by remember { mutableFloatStateOf(0f) }
     val cam = remember { SharedCamera() }
     var window by remember { mutableStateOf<IntArray?>(null) }
@@ -103,10 +103,6 @@ fun MapScreen(actions: PermissionActions, invite: Invitation?, onInviteDone: () 
     // Meghívó nyitása közben (új intent) a csatlakozás ablak jelenik meg
     LaunchedEffect(invite) { if (invite != null) { pendingJoin = invite; if (profile != null) dialog = DialogKind.JOIN } }
     LaunchedEffect(permTick) { g.checkForUpdate(false) }
-    LaunchedEffect(self.at) {
-        val p = self.point; val at = self.at
-        if (p != null && at != null) selfTrack = appendTrackPoint(selfTrack, TrackPoint(p.lat, p.lng, at), System.currentTimeMillis())
-    }
     LaunchedEffect(Unit) { g.toasts.collect { toasts.add(it) } }
     LaunchedEffect(Unit) { g.shareRequests.collect { dev ->
         val who = g.peers.state.value.people[dev]?.name ?: "Egy szobatársad"
@@ -282,7 +278,7 @@ fun MapScreen(actions: PermissionActions, invite: Invitation?, onInviteDone: () 
         // ── Ablakok ──
         DialogHost(dialog, settingsView, { settingsView = it }, shareToken, { shareToken = it }, pendingJoin, { pendingJoin = it }, exitConfirm, { exitConfirm = it }, actions, permTick,
             onDialog = { dialog = it }, onPick = { t -> pickTarget = t; dialog = null }, onResetHints = { g.updatePrefs { it.copy(hint = 0) }; dialog = null }, onInviteDone = onInviteDone, onExit = onExit, selfColor = selfColor,
-            selfTrackClear = { selfTrack = clearTrackHistory(selfTrack) })
+            selfTrackClear = { g.engine.clearTrack() })
     }
 }
 

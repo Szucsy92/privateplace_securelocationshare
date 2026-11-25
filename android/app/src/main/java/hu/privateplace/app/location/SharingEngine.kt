@@ -28,6 +28,10 @@ class SharingEngine(private val ctx: Context, private val store: Store, private 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _state = MutableStateFlow(SelfState())
     val state: StateFlow<SelfState> = _state.asStateFlow()
+    /** A saját nyomvonal az engine-ben épül (nem a UI-ban): a UI háttérben nem rekomponálódik, így ott a pontok kimaradtak és visszatéréskor egyenes vonal húzódott. */
+    private val _track = MutableStateFlow<List<TrackPoint>>(emptyList())
+    val track: StateFlow<List<TrackPoint>> = _track.asStateFlow()
+    fun clearTrack() { _track.value = clearTrackHistory(_track.value) }
     val recentFixes = ArrayDeque<FixLite>()
 
     private var filter = DriftFilter()
@@ -142,6 +146,7 @@ class SharingEngine(private val ctx: Context, private val store: Store, private 
         val s = _state.value
         val next = s.copy(point = applied.point, rawPoint = LatLng(f.lat, f.lng), acc = f.acc, speed = f.speed, heading = headingState.angle,
             at = at, still = still, stoppedSince = f.stoppedSince, transport = transportState.mode, placeShiftM = applied.shiftM, error = null)
+        _track.value = appendTrackPoint(_track.value, TrackPoint(applied.point.lat, applied.point.lng, at), now)
         _state.value = next
 
         val pm = peers()
