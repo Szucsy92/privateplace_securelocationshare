@@ -30,6 +30,8 @@ class PrivatePlaceApp : Application() {
 class AppGraph(val app: Application) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val store = Store(app)
+    /** Offline térkép: a körzet előre letöltve, elavulás/költözés esetén háttérfrissítés (csak Wi-Fin). */
+    val offlineMap = hu.privateplace.app.data.OfflineMap(app)
     val deviceId: String = store.deviceId()
     val exitRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val closedRooms = MutableSharedFlow<Pair<String, String>>(extraBufferCapacity = 8)
@@ -101,6 +103,8 @@ class AppGraph(val app: Application) {
             else updatePrefs { it.copy(sharing = false) }
         }
         watchNetwork()
+        offlineMap.ensureLast()
+        scope.launch { engine.state.map { it.point }.filterNotNull().first().let { offlineMap.ensure(it.lat, it.lng) } }
     }
 
     /** A webes `online` esemény megfelelője: hálózat-visszatérés / hálózatváltás után azonnal újracsatlakozunk és újraközlünk. */
@@ -114,7 +118,7 @@ class AppGraph(val app: Application) {
                     val now = System.currentTimeMillis()
                     if (now - lastNetWake < 4000) return
                     lastNetWake = now
-                    main.post { peers.wake() }
+                    main.post { peers.wake(); offlineMap.ensureLast() }
                 }
             })
         }
