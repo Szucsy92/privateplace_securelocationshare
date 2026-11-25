@@ -3,6 +3,7 @@ package hu.privateplace.app.ui
 import android.content.Context
 import android.graphics.*
 import android.os.Build
+import android.view.MotionEvent
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -178,6 +179,15 @@ fun LiveMap(
     fun headingOf(id: String, self: Boolean): Double? = if (self) engine.liveHeading ?: headings[id] else headings[id]
 
     LaunchedEffect(Unit) {
+        // Követés közben az érintés azonnal leállítja a kamera-követést (különben a képkockánkénti moveCamera visszaugrasztja a térképet az ujj alól,
+        // és a görgetés / nagyítás nem megy); az ujj felemelése után FOLLOW_RESUME_MS múlva folytatódik a követés. Az eseményt nem nyeljük el.
+        view.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> holdUntil = Long.MAX_VALUE
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> holdUntil = System.currentTimeMillis() + FOLLOW_RESUME_MS
+            }
+            false
+        }
         view.getMapAsync { m ->
             m.uiSettings.apply { isRotateGesturesEnabled = false; isTiltGesturesEnabled = false; isCompassEnabled = false; isLogoEnabled = false; isAttributionEnabled = true
                 // (i) gomb: a térképkártya jobb alsó sarkában, a jobb és az alsó széltől egyenlő belső margóval
